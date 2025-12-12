@@ -1,0 +1,394 @@
+//! Data operations for Willow
+
+use crate::client::WillowClient;
+use crate::errors::{WillowError, Result};
+#[cfg(not(feature = "no-light-client"))]
+use crate::proof::QueryResponseExt;
+use crate::types::ApiResponse;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::HashMap;
+
+/// Response from a query operation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueryResponse {
+    pub documents: Vec<Value>,
+    pub total: Option<usize>,
+    pub offset: Option<usize>,
+    pub limit: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proof: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verified_root_hash: Option<String>,
+}
+
+/// Data operations
+pub struct DataOperations {
+    client: WillowClient,
+}
+
+impl DataOperations {
+    pub(crate) fn new(client: WillowClient) -> Self {
+        Self { client }
+    }
+
+    /// Store data in a subgrove
+    pub async fn store(
+        &self,
+        app_id: &str,
+        subgrove_id: &str,
+        data: HashMap<String, Value>,
+    ) -> Result<()> {
+        self.ensure_authenticated()?;
+
+        let _response: ApiResponse<Value> = self
+            .client
+            .request(
+                "POST",
+                &format!("/data/{}/{}", app_id, subgrove_id),
+                Some(&data),
+                true,
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    /// Store a single item
+    pub async fn store_item(
+        &self,
+        app_id: &str,
+        subgrove_id: &str,
+        key: &str,
+        value: Value,
+    ) -> Result<()> {
+        let mut data = HashMap::new();
+        data.insert(key.to_string(), value);
+        self.store(app_id, subgrove_id, data).await
+    }
+
+    /// Get a single item from a subgrove with automatic proof verification
+    pub async fn get(&self, app_id: &str, subgrove_id: &str, key: &str) -> Result<Value> {
+        self.ensure_authenticated()?;
+
+        // First get the data
+        let data_response: ApiResponse<Value> = self
+            .client
+            .request(
+                "GET",
+                &format!("/data/{}/{}/{}", app_id, subgrove_id, key),
+                None::<&()>,
+                true,
+            )
+            .await?;
+
+        let data = data_response
+            .data
+            .ok_or_else(|| WillowError::NotFound(format!("Key not found: {}", key)))?;
+
+        // Verify proof using light client if available (default behavior)
+        #[cfg(not(feature = "no-light-client"))]
+        {
+            // Get proof for this specific item
+            let proof_response: ApiResponse<Value> = self
+                .client
+                .request(
+                    "GET",
+                    &format!("/proof/{}/{}/{}", app_id, subgrove_id, key),
+                    None::<&()>,
+                    true,
+                )
+                .await?;
+
+            if let Some(proof_data) = proof_response.data {
+                if let Some(proof_hex) = proof_data.get("proof").and_then(|p| p.as_str()) {
+                    if let Some(light_client) = self.client.light_client() {
+                        // Use light client for trustless verification
+                        let data_bytes =
+                            serde_json::to_vec(&data).map_err(|e| WillowError::Serialization(e))?;
+                        let query_result = vec![data_bytes];
+
+                        let is_valid = light_client
+                            .verify_proof_hex(proof_hex, &query_result, None)
+                            .await?;
+
+                        if !is_valid {
+                            return Err(WillowError::ProofVerificationFailed(
+                                "Light client proof verification failed for item".to_string(),
+                            ));
+                        }
+                    }
+                }
+            } else {
+                log::warn!("No proof available for key: {}", key);
+            }
+        }
+
+        // When no-light-client feature is enabled, skip proof verification entirely
+        // (user has explicitly opted out of trustless verification)
+
+        Ok(data)
+    }
+
+    /// Get a single item without proof verification
+    pub async fn get_unverified(
+        &self,
+        app_id: &str,
+        subgrove_id: &str,
+        key: &str,
+    ) -> Result<Value> {
+        self.ensure_authenticated()?;
+
+        let response: ApiResponse<Value> = self
+            .client
+            .request(
+                "GET",
+                &format!("/data/{}/{}/{}", app_id, subgrove_id, key),
+                None::<&()>,
+                true,
+            )
+            .await?;
+
+        response
+            .data
+            .ok_or_else(|| WillowError::NotFound(format!("Key not found: {}", key)))
+    }
+
+    /// Update an item in a subgrove
+    pub async fn update(
+        &self,
+        app_id: &str,
+        subgrove_id: &str,
+        key: &str,
+        value: Value,
+    ) -> Result<()> {
+        self.ensure_authenticated()?;
+
+        let _response: ApiResponse<Value> = self
+            .client
+            .request(
+                "PUT",
+                &format!("/data/{}/{}/{}", app_id, subgrove_id, key),
+                Some(&value),
+                true,
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    /// Delete an item from a subgrove
+    pub async fn delete(&self, app_id: &str, subgrove_id: &str, key: &str) -> Result<()> {
+        self.ensure_authenticated()?;
+
+        let _response: ApiResponse<Value> = self
+            .client
+            .request(
+                "DELETE",
+                &format!("/data/{}/{}/{}", app_id, subgrove_id, key),
+                None::<&()>,
+                true,
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    /// Batch store multiple items
+    pub async fn batch_store(
+        &self,
+        app_id: &str,
+        subgrove_id: &str,
+        items: Vec<(String, Value)>,
+    ) -> Result<()> {
+        let mut data = HashMap::new();
+        for (key, value) in items {
+            data.insert(key, value);
+        }
+        self.store(app_id, subgrove_id, data).await
+    }
+
+    /// Query items using the indexing query API with automatic proof verification
+    ///
+    /// This method automatically requests proof and verifies it against the consensus root hash.
+    /// If verification fails, the query will return an error.
+    ///
+    /// When `no-light-client` feature is enabled, this behaves the same as `query_unverified`.
+    pub async fn query(
+        &self,
+        app_id: &str,
+        subgrove_id: &str,
+        mut query: Value,
+    ) -> Result<QueryResponse> {
+        self.ensure_authenticated()?;
+
+        // Only request proof if verification is enabled
+        #[cfg(not(feature = "no-light-client"))]
+        if let Some(obj) = query.as_object_mut() {
+            obj.insert("include_proof".to_string(), Value::Bool(true));
+        }
+
+        let response: ApiResponse<QueryResponse> = self
+            .client
+            .request(
+                "POST",
+                &format!("/query/{}/{}", app_id, subgrove_id),
+                Some(&query),
+                true,
+            )
+            .await?;
+
+        let mut query_response = response
+            .data
+            .ok_or_else(|| WillowError::Custom("No data in query response".to_string()))?;
+
+        // Verify proof if present and light client is available
+        #[cfg(not(feature = "no-light-client"))]
+        if query_response.proof.is_some() {
+            match self.verify_and_compare_root(&query_response).await {
+                Ok(verified_root) => {
+                    query_response.verified_root_hash = Some(verified_root);
+                }
+                Err(e) => {
+                    return Err(WillowError::ProofVerificationFailed(format!(
+                        "Query proof verification failed: {}",
+                        e
+                    )));
+                }
+            }
+        }
+
+        Ok(query_response)
+    }
+
+    /// Query items without proof verification for performance-critical cases
+    ///
+    /// Use this method when you need maximum performance and are willing to trust
+    /// the node without cryptographic verification.
+    pub async fn query_unverified(
+        &self,
+        app_id: &str,
+        subgrove_id: &str,
+        mut query: Value,
+    ) -> Result<QueryResponse> {
+        self.ensure_authenticated()?;
+
+        // Explicitly disable proof for performance
+        if let Some(obj) = query.as_object_mut() {
+            obj.insert("include_proof".to_string(), Value::Bool(false));
+        }
+
+        let response: ApiResponse<QueryResponse> = self
+            .client
+            .request(
+                "POST",
+                &format!("/query/{}/{}", app_id, subgrove_id),
+                Some(&query),
+                true,
+            )
+            .await?;
+
+        response
+            .data
+            .ok_or_else(|| WillowError::Custom("No data in query response".to_string()))
+    }
+
+    fn ensure_authenticated(&self) -> Result<()> {
+        if !self.client.is_authenticated() {
+            Err(WillowError::NotAuthenticated)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Verify proof and compare with consensus root hash.
+    ///
+    /// Only available when light client verification is enabled.
+    #[cfg(not(feature = "no-light-client"))]
+    async fn verify_and_compare_root(&self, query_response: &QueryResponse) -> Result<String> {
+        // Use light client for trustless verification if available
+        if let Some(light_client) = self.client.light_client() {
+            if let Some(proof_hex) = &query_response.proof {
+                // Convert documents to bytes for verification
+                let query_result: Vec<Vec<u8>> = query_response
+                    .documents
+                    .iter()
+                    .map(|doc| serde_json::to_vec(doc).unwrap_or_default())
+                    .collect();
+
+                // Verify using light client
+                let is_valid = light_client
+                    .verify_proof_hex(proof_hex, &query_result, None)
+                    .await?;
+
+                if !is_valid {
+                    return Err(WillowError::ProofVerificationFailed(
+                        "Light client proof verification failed".to_string(),
+                    ));
+                }
+
+                // If light client verification passed, we can trust the proof
+                // Still compute the root for informational purposes
+                let computed_root = query_response.verify_proof()?;
+                return Ok(computed_root);
+            }
+        }
+
+        // Fall back to endpoint verification if no light client configured
+        // This still provides value but requires trusting the endpoint
+        let computed_root = query_response.verify_proof()?;
+
+        // Get consensus root hash from endpoint
+        let consensus_root = self.get_verified_root_hash().await?;
+
+        // Compare roots
+        if computed_root != consensus_root {
+            return Err(WillowError::ProofVerificationFailed(format!(
+                "Root hash mismatch: computed {} vs consensus {}",
+                computed_root, consensus_root
+            )));
+        }
+
+        Ok(computed_root)
+    }
+
+    /// Get the verified root hash from CometBFT consensus.
+    ///
+    /// Only available when light client verification is enabled.
+    #[cfg(not(feature = "no-light-client"))]
+    async fn get_verified_root_hash(&self) -> Result<String> {
+        let response: ApiResponse<Value> = self
+            .client
+            .request(
+                "GET",
+                "/state/root-hash/verified",
+                None::<&()>,
+                false, // No auth needed for public endpoint
+            )
+            .await?;
+
+        let data = response
+            .data
+            .ok_or_else(|| WillowError::Custom("No data in root hash response".to_string()))?;
+
+        data.get("root_hash")
+            .and_then(|h| h.as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| WillowError::Custom("Invalid root hash response format".to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_ensure_authenticated() {
+        let client = WillowClient::new("http://localhost:3031").await.unwrap();
+        let data_ops = client.data();
+
+        // Should fail when not authenticated
+        let result = data_ops.get("app", "subgrove", "key").await;
+        assert!(matches!(result, Err(WillowError::NotAuthenticated)));
+    }
+}

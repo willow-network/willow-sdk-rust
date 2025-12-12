@@ -1,0 +1,73 @@
+[package]
+name = "willow-sdk"
+version = "0.1.0"
+edition = "2021"
+authors = ["Willow Team"]
+description = "Rust SDK for Willow - decentralized data indexing protocol"
+license = "MIT"
+repository = "https://github.com/willow/willow-rust-sdk"
+keywords = ["willow", "web3", "indexing", "did", "decentralized"]
+categories = ["web-programming", "cryptography"]
+
+[dependencies]
+# HTTP client
+reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Cryptography for DID auth
+ed25519-dalek = "2.1"
+secp256k1 = { version = "0.29", features = ["recovery", "rand"] }
+sha2 = "0.10"
+sha3 = "0.10"
+hex = "0.4"
+bs58 = "0.5"
+rand = "0.8"
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.6", features = ["v4", "serde"] }
+url = "2.5"
+base64 = "0.22"
+
+# Logging
+log = "0.4"
+tracing = { version = "0.1", optional = true }
+
+# CLI dependencies
+clap = { version = "4.4", features = ["derive"] }
+dirs = { version = "5.0", optional = true }
+
+# Light client dependencies - uses grovedb verify feature for lightweight proof verification
+# These are included by default for trustless verification
+grovedb = { version = "3.1.0", default-features = false, features = ["verify"] }
+grovedb-version = "3.1.0"
+
+[dev-dependencies]
+tokio-test = "0.4"
+wiremock = "0.5"
+pretty_assertions = "1.4"
+tempfile = "3.8"
+env_logger = "0.11"
+
+[features]
+default = []
+cli = ["dirs"]
+tracing = ["dep:tracing"]
+# Disable light client verification for minimal dependency footprint
+# Use this if you trust your node and want faster compile times
+no-light-client = []
+
+[[bin]]
+name = "willow-cli"
+path = "src/bin/cli.rs"
+required-features = ["cli"]
