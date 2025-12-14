@@ -49,7 +49,7 @@
 //! let is_valid = client.verify_proof(&proof_bytes, &query_result, None).await?;
 //! ```
 
-use crate::errors::{WillowError, Result};
+use crate::errors::{Result, WillowError};
 use chrono::{DateTime, Utc};
 use ed25519_dalek::{Signature as Ed25519Signature, Verifier as Ed25519Verifier, VerifyingKey};
 use secp256k1::{ecdsa::Signature as Secp256k1Signature, Message, Secp256k1};
@@ -457,7 +457,8 @@ impl LightClient {
     pub async fn initialize_with_trust_on_first_use(&self) -> Result<()> {
         if self.config.validator_endpoints.is_empty() {
             return Err(WillowError::LightClient(
-                "No validator endpoints configured for trust-on-first-use initialization".to_string(),
+                "No validator endpoints configured for trust-on-first-use initialization"
+                    .to_string(),
             ));
         }
 
@@ -471,8 +472,10 @@ impl LightClient {
         let mut headers = self.headers.write().await;
         headers.insert(latest.header.height, latest);
 
-        log::info!("Light client initialized with trust-on-first-use at height {}",
-            headers.keys().last().unwrap_or(&0));
+        log::info!(
+            "Light client initialized with trust-on-first-use at height {}",
+            headers.keys().last().unwrap_or(&0)
+        );
 
         Ok(())
     }
@@ -492,7 +495,7 @@ impl LightClient {
             let headers = self.headers.read().await;
             if headers.is_empty() {
                 drop(headers); // Release read lock before acquiring write
-                // Auto-initialize with trust-on-first-use
+                               // Auto-initialize with trust-on-first-use
                 self.initialize_with_trust_on_first_use().await?;
             }
         }
@@ -1112,9 +1115,6 @@ fn parse_validator_set(json: &serde_json::Value) -> ValidatorSet {
         total_voting_power,
     }
 }
-
-// Re-export for backwards compatibility
-pub use LightClientConfigBuilder as ConfigBuilder;
 
 #[cfg(test)]
 mod tests {
