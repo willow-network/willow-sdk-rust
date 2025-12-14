@@ -104,6 +104,56 @@ pub use validators::ValidatorOperations;
 // Version info
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Pre-funded test account for local devnet development.
+///
+/// This account is pre-registered and funded in the devnet genesis.
+/// Use it for SDK testing and development - DO NOT use in production!
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use willow_sdk::{WillowClient, DEVNET_TEST_ACCOUNT};
+///
+/// #[tokio::main]
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     let client = WillowClient::new("http://localhost:3031").await?;
+///
+///     // Authenticate with the pre-funded test account
+///     client.authenticate(
+///         DEVNET_TEST_ACCOUNT.did,
+///         DEVNET_TEST_ACCOUNT.private_key,
+///         DEVNET_TEST_ACCOUNT.public_key_id
+///     ).await?;
+///
+///     Ok(())
+/// }
+/// ```
+pub mod devnet {
+    /// Pre-funded devnet test account credentials
+    pub struct TestAccount {
+        /// DID of the test account
+        pub did: &'static str,
+        /// Private key (hex) - DO NOT USE IN PRODUCTION
+        pub private_key: &'static str,
+        /// Public key (hex)
+        pub public_key: &'static str,
+        /// Key ID for authentication
+        pub public_key_id: &'static str,
+    }
+
+    /// Pre-funded test account for local devnet development
+    pub const TEST_ACCOUNT: TestAccount = TestAccount {
+        did: "did:willow:devnet-test",
+        private_key: "b5ecc03536f5e039e3c5bc46ad178d7faf80cee5f063016a4f4084e163409b3c",
+        public_key: "c153874d3d284a11e3cb12b524e1a9cc32fef966d56b903c79688a95d5193c8f",
+        public_key_id: "did:willow:devnet-test#key-1",
+    };
+}
+
+/// Pre-funded test account for local devnet development.
+/// See [`devnet::TEST_ACCOUNT`] for usage details.
+pub use devnet::TEST_ACCOUNT as DEVNET_TEST_ACCOUNT;
+
 #[cfg(test)]
 mod tests {
     use super::*;

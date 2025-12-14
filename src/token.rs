@@ -1,6 +1,6 @@
 //! Token and balance operations.
 //!
-//! This module provides access to CAN token information, balances,
+//! This module provides access to WILL token information, balances,
 //! and fee schedules.
 //!
 //! # Example
@@ -36,7 +36,7 @@ impl TokenOperations {
         Self { client }
     }
 
-    /// Gets information about the CAN token.
+    /// Gets information about the WILL token.
     pub async fn get_info(&self) -> Result<TokenInfo> {
         let response: ApiResponse<TokenInfo> = self
             .client

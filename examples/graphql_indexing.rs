@@ -140,7 +140,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("   Found {} indexers:", indexers.len());
                 for indexer in &indexers {
                     println!("   - {}", indexer.indexer_did);
-                    println!("     Stake: {} CAN", indexer.stake_amount);
+                    println!("     Stake: {} WILL", indexer.stake_amount);
                     println!("     Status: {:?}", indexer.status);
                     println!("     Performance: {:.1}", indexer.performance_score);
                     println!("     Subgraphs: {:?}", indexer.subgraphs);
@@ -167,8 +167,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 7. Comparison with The Graph
     println!("\n7. Willow vs The Graph...");
     println!("   Willow advantages:");
-    println!("   + 50-100x faster query performance");
     println!("   + Cryptographic proofs for every query");
+    println!("   + Trustless verification of indexed data");
     println!("   + No fisherman disputes needed");
     println!("   + Instant finality on results");
     println!("   + Native proof verification in SDK");

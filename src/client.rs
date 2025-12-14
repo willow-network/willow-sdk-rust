@@ -19,6 +19,8 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+#[cfg(not(feature = "no-light-client"))]
+use tokio::sync::OnceCell;
 use url::Url;
 
 /// Main client for interacting with Willow
@@ -30,6 +32,9 @@ pub struct WillowClient {
     retry_config: RetryConfig,
     #[cfg(not(feature = "no-light-client"))]
     light_client: Option<Arc<LightClient>>,
+    /// Lazily initialized light client for auto-initialization with trust-on-first-use
+    #[cfg(not(feature = "no-light-client"))]
+    light_client_once: Arc<OnceCell<Arc<LightClient>>>,
 }
 
 impl WillowClient {
@@ -146,6 +151,51 @@ impl WillowClient {
     #[cfg(not(feature = "no-light-client"))]
     pub fn light_client(&self) -> Option<Arc<LightClient>> {
         self.light_client.clone()
+    }
+
+    /// Get or create a light client with trust-on-first-use initialization.
+    ///
+    /// This method returns an existing light client if configured, or automatically
+    /// creates and initializes one using trust-on-first-use. The initialization
+    /// is thread-safe and happens only once.
+    ///
+    /// Important: TODO: When mainnet/testnet launches, replace trust-on-first-use
+    /// with hardcoded checkpoint headers for true trustless initialization.
+    /// Trust-on-first-use is secure for subsequent operations but trusts the
+    /// initial block from the connected validators.
+    ///
+    /// Returns `None` if `no-light-client` feature is enabled.
+    #[cfg(not(feature = "no-light-client"))]
+    pub async fn get_or_create_light_client(&self) -> Result<Arc<LightClient>> {
+        // Return existing explicitly configured light client if available
+        if let Some(lc) = &self.light_client {
+            return Ok(lc.clone());
+        }
+
+        // Use OnceCell to ensure only one initialization happens
+        let lc = self.light_client_once.get_or_try_init(|| async {
+            // TODO: When mainnet/testnet launches, use hardcoded checkpoint headers
+            // instead of trust-on-first-use for true trustless initialization from genesis.
+
+            // Derive CometBFT RPC endpoint from API URL (typically :3031 -> :26657)
+            let rpc_endpoint = self.base_url.to_string().replace(":3031", ":26657");
+
+            let config = LightClientConfig::builder("willow-chain")
+                .validator_endpoints(vec![rpc_endpoint])
+                .trust_threshold(2, 3)
+                .trusting_period(Duration::from_secs(86400)) // 24 hours
+                .max_clock_drift(Duration::from_secs(30))
+                .rpc_timeout(Duration::from_secs(30))
+                .auto_sync(false)
+                .build();
+
+            let lc = Arc::new(LightClient::new(config)?);
+            lc.initialize_with_trust_on_first_use().await?;
+
+            Ok::<Arc<LightClient>, WillowError>(lc)
+        }).await?;
+
+        Ok(lc.clone())
     }
 
     /// Get registration operations
@@ -451,6 +501,8 @@ impl WillowClientBuilder {
             retry_config: self.retry_config,
             #[cfg(not(feature = "no-light-client"))]
             light_client,
+            #[cfg(not(feature = "no-light-client"))]
+            light_client_once: Arc::new(OnceCell::new()),
         })
     }
 }

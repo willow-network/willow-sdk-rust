@@ -222,13 +222,13 @@ let indexers = client.indexing().list_indexers().await?;
 ## Token Operations
 
 ```rust
-// Get CAN token info
+// Get WILL token info
 let info = client.token().get_info().await?;
 println!("Symbol: {}, Total Supply: {}", info.symbol, info.total_supply);
 
 // Check DID balance
 let balance = client.token().get_balance("did:willow:abc123").await?;
-println!("Balance: {} CAN", balance.balance);
+println!("Balance: {} WILL", balance.balance);
 
 // Check app balance
 let app_balance = client.token().get_app_balance("my-app").await?;

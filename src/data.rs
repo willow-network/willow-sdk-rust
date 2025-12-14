@@ -86,7 +86,11 @@ impl DataOperations {
             .data
             .ok_or_else(|| WillowError::NotFound(format!("Key not found: {}", key)))?;
 
-        // Verify proof using light client if available (default behavior)
+        // Always verify proof using light client for trustless verification (default behavior).
+        // The light client auto-initializes with trust-on-first-use if not already configured.
+        //
+        // Important: TODO: When mainnet/testnet launches, the light client will be
+        // initialized with hardcoded checkpoint headers instead of trust-on-first-use.
         #[cfg(not(feature = "no-light-client"))]
         {
             // Get proof for this specific item
@@ -102,21 +106,22 @@ impl DataOperations {
 
             if let Some(proof_data) = proof_response.data {
                 if let Some(proof_hex) = proof_data.get("proof").and_then(|p| p.as_str()) {
-                    if let Some(light_client) = self.client.light_client() {
-                        // Use light client for trustless verification
-                        let data_bytes =
-                            serde_json::to_vec(&data).map_err(|e| WillowError::Serialization(e))?;
-                        let query_result = vec![data_bytes];
+                    // Get or create light client (auto-initializes with trust-on-first-use)
+                    let light_client = self.client.get_or_create_light_client().await?;
 
-                        let is_valid = light_client
-                            .verify_proof_hex(proof_hex, &query_result, None)
-                            .await?;
+                    // Use light client for trustless verification
+                    let data_bytes =
+                        serde_json::to_vec(&data).map_err(|e| WillowError::Serialization(e))?;
+                    let query_result = vec![data_bytes];
 
-                        if !is_valid {
-                            return Err(WillowError::ProofVerificationFailed(
-                                "Light client proof verification failed for item".to_string(),
-                            ));
-                        }
+                    let is_valid = light_client
+                        .verify_proof_hex(proof_hex, &query_result, None)
+                        .await?;
+
+                    if !is_valid {
+                        return Err(WillowError::ProofVerificationFailed(
+                            "Light client proof verification failed for item".to_string(),
+                        ));
                     }
                 }
             } else {
@@ -303,43 +308,48 @@ impl DataOperations {
 
     /// Verify proof and compare with consensus root hash.
     ///
+    /// This method always uses the light client for trustless verification.
+    /// The light client auto-initializes with trust-on-first-use if not already configured.
+    ///
+    /// Important: TODO: When mainnet/testnet launches, the light client will be
+    /// initialized with hardcoded checkpoint headers instead of trust-on-first-use.
+    ///
     /// Only available when light client verification is enabled.
     #[cfg(not(feature = "no-light-client"))]
     async fn verify_and_compare_root(&self, query_response: &QueryResponse) -> Result<String> {
-        // Use light client for trustless verification if available
-        if let Some(light_client) = self.client.light_client() {
-            if let Some(proof_hex) = &query_response.proof {
-                // Convert documents to bytes for verification
-                let query_result: Vec<Vec<u8>> = query_response
-                    .documents
-                    .iter()
-                    .map(|doc| serde_json::to_vec(doc).unwrap_or_default())
-                    .collect();
+        // Get or create light client (auto-initializes with trust-on-first-use)
+        let light_client = self.client.get_or_create_light_client().await?;
 
-                // Verify using light client
-                let is_valid = light_client
-                    .verify_proof_hex(proof_hex, &query_result, None)
-                    .await?;
+        if let Some(proof_hex) = &query_response.proof {
+            // Convert documents to bytes for verification
+            let query_result: Vec<Vec<u8>> = query_response
+                .documents
+                .iter()
+                .map(|doc| serde_json::to_vec(doc).unwrap_or_default())
+                .collect();
 
-                if !is_valid {
-                    return Err(WillowError::ProofVerificationFailed(
-                        "Light client proof verification failed".to_string(),
-                    ));
-                }
+            // Verify using light client
+            let is_valid = light_client
+                .verify_proof_hex(proof_hex, &query_result, None)
+                .await?;
 
-                // If light client verification passed, we can trust the proof
-                // Still compute the root for informational purposes
-                let computed_root = query_response.verify_proof()?;
-                return Ok(computed_root);
+            if !is_valid {
+                return Err(WillowError::ProofVerificationFailed(
+                    "Light client proof verification failed".to_string(),
+                ));
             }
+
+            // If light client verification passed, we can trust the proof
+            // Still compute the root for informational purposes
+            let computed_root = query_response.verify_proof()?;
+            return Ok(computed_root);
         }
 
-        // Fall back to endpoint verification if no light client configured
-        // This still provides value but requires trusting the endpoint
+        // No proof available - compute root and verify against light client's root hash
         let computed_root = query_response.verify_proof()?;
 
-        // Get consensus root hash from endpoint
-        let consensus_root = self.get_verified_root_hash().await?;
+        // Get verified root hash from light client
+        let consensus_root = light_client.get_verified_root_hash().await?;
 
         // Compare roots
         if computed_root != consensus_root {
@@ -350,31 +360,6 @@ impl DataOperations {
         }
 
         Ok(computed_root)
-    }
-
-    /// Get the verified root hash from CometBFT consensus.
-    ///
-    /// Only available when light client verification is enabled.
-    #[cfg(not(feature = "no-light-client"))]
-    async fn get_verified_root_hash(&self) -> Result<String> {
-        let response: ApiResponse<Value> = self
-            .client
-            .request(
-                "GET",
-                "/state/root-hash/verified",
-                None::<&()>,
-                false, // No auth needed for public endpoint
-            )
-            .await?;
-
-        let data = response
-            .data
-            .ok_or_else(|| WillowError::Custom("No data in root hash response".to_string()))?;
-
-        data.get("root_hash")
-            .and_then(|h| h.as_str())
-            .map(|s| s.to_string())
-            .ok_or_else(|| WillowError::Custom("Invalid root hash response format".to_string()))
     }
 }
 

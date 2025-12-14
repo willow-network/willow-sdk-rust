@@ -445,6 +445,66 @@ impl LightClient {
         Ok(())
     }
 
+    /// Initializes the light client using trust-on-first-use.
+    ///
+    /// This fetches the latest block from validators and trusts it as the initial state.
+    /// All subsequent blocks are verified against this initial trusted state.
+    ///
+    /// Important: TODO: When mainnet/testnet launches, replace trust-on-first-use
+    /// with hardcoded checkpoint headers for true trustless initialization.
+    /// Trust-on-first-use is secure for subsequent operations but trusts the
+    /// initial block from the connected validators.
+    pub async fn initialize_with_trust_on_first_use(&self) -> Result<()> {
+        if self.config.validator_endpoints.is_empty() {
+            return Err(WillowError::LightClient(
+                "No validator endpoints configured for trust-on-first-use initialization".to_string(),
+            ));
+        }
+
+        // TODO: When mainnet/testnet launches, use hardcoded checkpoint headers
+        // instead of trust-on-first-use for true trustless initialization from genesis.
+
+        // Fetch the latest block from validators
+        let latest = self.fetch_latest_block().await?;
+
+        // Trust this block as our initial state
+        let mut headers = self.headers.write().await;
+        headers.insert(latest.header.height, latest);
+
+        log::info!("Light client initialized with trust-on-first-use at height {}",
+            headers.keys().last().unwrap_or(&0));
+
+        Ok(())
+    }
+
+    /// Gets the verified root hash (app_hash) from the latest trusted header.
+    ///
+    /// This is the cryptographically verified root hash that proofs should be
+    /// verified against for trustless data verification.
+    ///
+    /// If no trusted headers are available, this will auto-initialize using
+    /// trust-on-first-use.
+    ///
+    /// Returns the app_hash as a hex string.
+    pub async fn get_verified_root_hash(&self) -> Result<String> {
+        // Check if we have any trusted headers
+        {
+            let headers = self.headers.read().await;
+            if headers.is_empty() {
+                drop(headers); // Release read lock before acquiring write
+                // Auto-initialize with trust-on-first-use
+                self.initialize_with_trust_on_first_use().await?;
+            }
+        }
+
+        let header = self
+            .get_latest_header()
+            .await
+            .ok_or_else(|| WillowError::LightClient("No trusted header available".to_string()))?;
+
+        Ok(hex::encode(&header.header.app_hash))
+    }
+
     /// Verifies a new header against the latest trusted header.
     async fn verify_and_store_header(&self, header: LightBlock) -> Result<()> {
         let trusted = self

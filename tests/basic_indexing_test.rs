@@ -103,7 +103,7 @@ async fn basic_indexing_test() {
     let fund_tx = json!({
         "FundApp": {
             "app_id": "test_app",
-            "amount": 10_000_000_000_000_000_000u128, // 10 CAN
+            "amount": 10_000_000_000_000_000_000u128, // 10 WILL
             "from_did": funded_did.clone(),
             "signature": []
         }

@@ -611,7 +611,7 @@ async fn fund_app(
     let fund_tx = json!({
         "FundApp": {
             "app_id": "test_app",
-            "amount": "20000000000000000000", // 20 CAN for performance test
+            "amount": "20000000000000000000", // 20 WILL for performance test
             "from_did": from_did,
             "signature": []
         }

@@ -287,7 +287,7 @@ pub struct FundAppRequest {
 pub struct TokenInfo {
     /// Token name (e.g., "Willow")
     pub name: String,
-    /// Token symbol (e.g., "CAN")
+    /// Token symbol (e.g., "WILL")
     pub symbol: String,
     /// Number of decimal places
     pub decimals: u8,
@@ -328,7 +328,7 @@ pub struct TransferRequest {
 /// Fee schedule for storage and operations
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FeeSchedule {
-    /// Fee per byte of storage per day (in CAN)
+    /// Fee per byte of storage per day (in WILL)
     pub storage_fee_per_byte_per_day: u128,
     /// Fee for queries (per query)
     pub query_fee: u128,
