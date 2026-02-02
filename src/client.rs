@@ -1,16 +1,16 @@
 //! Main client for interacting with Willow
 
 use crate::auth::{detect_algorithm_from_did, sign_challenge};
+use crate::consensus::ConsensusClient;
 use crate::data::DataOperations;
-use crate::errors::{WillowError, Result};
+use crate::errors::{Result, WillowError};
 use crate::indexing::IndexingOperations;
 #[cfg(not(feature = "no-light-client"))]
 use crate::light_client::{LightClient, LightClientConfig};
 use crate::registration::RegistrationOperations;
 use crate::token::TokenOperations;
 use crate::types::{
-    ApiResponse, AuthenticationChallenge, AuthenticationResponse, DidDocument, HealthStatus,
-    Session,
+    ApiResponse, AuthenticationChallenge, AuthenticationResponse, HealthStatus, Session,
 };
 use crate::utils::{parse_api_url, RetryConfig};
 use crate::validators::ValidatorOperations;
@@ -35,6 +35,8 @@ pub struct WillowClient {
     /// Lazily initialized light client for auto-initialization with trust-on-first-use
     #[cfg(not(feature = "no-light-client"))]
     light_client_once: Arc<OnceCell<Arc<LightClient>>>,
+    /// Consensus client for submitting transactions to CometBFT
+    consensus_client: Option<Arc<ConsensusClient>>,
 }
 
 impl WillowClient {
@@ -46,17 +48,6 @@ impl WillowClient {
     /// Create a client builder
     pub fn builder() -> WillowClientBuilder {
         WillowClientBuilder::default()
-    }
-
-    /// Register a DID document
-    pub async fn register_did(&self, did_document: &DidDocument) -> Result<DidDocument> {
-        let response: ApiResponse<DidDocument> = self
-            .request_with_retry("POST", "/did", Some(did_document), false)
-            .await?;
-
-        response
-            .data
-            .ok_or_else(|| WillowError::Custom("No data in response".to_string()))
     }
 
     /// Authenticate with DID and private key
@@ -173,27 +164,30 @@ impl WillowClient {
         }
 
         // Use OnceCell to ensure only one initialization happens
-        let lc = self.light_client_once.get_or_try_init(|| async {
-            // TODO: When mainnet/testnet launches, use hardcoded checkpoint headers
-            // instead of trust-on-first-use for true trustless initialization from genesis.
+        let lc = self
+            .light_client_once
+            .get_or_try_init(|| async {
+                // TODO: When mainnet/testnet launches, use hardcoded checkpoint headers
+                // instead of trust-on-first-use for true trustless initialization from genesis.
 
-            // Derive CometBFT RPC endpoint from API URL (typically :3031 -> :26657)
-            let rpc_endpoint = self.base_url.to_string().replace(":3031", ":26657");
+                // Derive CometBFT RPC endpoint from API URL (typically :3031 -> :26657)
+                let rpc_endpoint = self.base_url.to_string().replace(":3031", ":26657");
 
-            let config = LightClientConfig::builder("willow-chain")
-                .validator_endpoints(vec![rpc_endpoint])
-                .trust_threshold(2, 3)
-                .trusting_period(Duration::from_secs(86400)) // 24 hours
-                .max_clock_drift(Duration::from_secs(30))
-                .rpc_timeout(Duration::from_secs(30))
-                .auto_sync(false)
-                .build();
+                let config = LightClientConfig::builder("willow-chain")
+                    .validator_endpoints(vec![rpc_endpoint])
+                    .trust_threshold(2, 3)
+                    .trusting_period(Duration::from_secs(86400)) // 24 hours
+                    .max_clock_drift(Duration::from_secs(30))
+                    .rpc_timeout(Duration::from_secs(30))
+                    .auto_sync(false)
+                    .build();
 
-            let lc = Arc::new(LightClient::new(config)?);
-            lc.initialize_with_trust_on_first_use().await?;
+                let lc = Arc::new(LightClient::new(config)?);
+                lc.initialize_with_trust_on_first_use().await?;
 
-            Ok::<Arc<LightClient>, WillowError>(lc)
-        }).await?;
+                Ok::<Arc<LightClient>, WillowError>(lc)
+            })
+            .await?;
 
         Ok(lc.clone())
     }
@@ -216,6 +210,49 @@ impl WillowClient {
     /// Get indexing operations (GraphQL, subgraphs)
     pub fn indexing(&self) -> IndexingOperations {
         IndexingOperations::new(self.clone())
+    }
+
+    /// Get consensus operations for submitting transactions.
+    ///
+    /// Returns the consensus client if a consensus URL was configured.
+    /// Use this for operations that require blockchain consensus:
+    /// - DID registration
+    /// - App registration
+    /// - Subgrove registration
+    /// - Token transfers
+    /// - Data storage through consensus
+    ///
+    /// # Panics
+    /// Panics if no consensus URL was configured. Use `consensus_opt()` for a non-panicking version.
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// use willow_sdk::{WillowClient, types::SignatureAlgorithm};
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    ///     let client = WillowClient::builder()
+    ///         .api_url("http://localhost:3031")
+    ///         .consensus_url("http://localhost:26657")
+    ///         .build()
+    ///         .await?;
+    ///
+    ///     // Submit transactions through consensus
+    ///     let tx_hash = client.consensus().register_did(...).await?;
+    ///     Ok(())
+    /// }
+    /// ```
+    pub fn consensus(&self) -> &ConsensusClient {
+        self.consensus_client
+            .as_ref()
+            .expect("Consensus client not configured. Use WillowClientBuilder::consensus_url() to configure.")
+    }
+
+    /// Get consensus operations if configured, or None.
+    ///
+    /// Non-panicking version of `consensus()`.
+    pub fn consensus_opt(&self) -> Option<&ConsensusClient> {
+        self.consensus_client.as_ref().map(|c| c.as_ref())
     }
 
     /// Check the health of the Willow node
@@ -413,6 +450,7 @@ impl WillowClient {
 /// Builder for WillowClient
 pub struct WillowClientBuilder {
     api_url: Option<String>,
+    consensus_url: Option<String>,
     timeout: Duration,
     retry_config: RetryConfig,
     #[cfg(not(feature = "no-light-client"))]
@@ -423,6 +461,7 @@ impl Default for WillowClientBuilder {
     fn default() -> Self {
         Self {
             api_url: None,
+            consensus_url: None,
             timeout: Duration::from_secs(30),
             retry_config: RetryConfig::default(),
             #[cfg(not(feature = "no-light-client"))]
@@ -435,6 +474,30 @@ impl WillowClientBuilder {
     /// Set the API URL
     pub fn api_url(mut self, url: &str) -> Self {
         self.api_url = Some(url.to_string());
+        self
+    }
+
+    /// Set the CometBFT consensus RPC URL.
+    ///
+    /// Required for consensus operations like DID registration, app registration,
+    /// token transfers, and data storage through consensus.
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// use willow_sdk::WillowClient;
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    ///     let client = WillowClient::builder()
+    ///         .api_url("http://localhost:3031")
+    ///         .consensus_url("http://localhost:26657")
+    ///         .build()
+    ///         .await?;
+    ///     Ok(())
+    /// }
+    /// ```
+    pub fn consensus_url(mut self, url: &str) -> Self {
+        self.consensus_url = Some(url.to_string());
         self
     }
 
@@ -494,6 +557,11 @@ impl WillowClientBuilder {
             None
         };
 
+        // Create consensus client if configured
+        let consensus_client = self
+            .consensus_url
+            .map(|url| Arc::new(ConsensusClient::new(&url)));
+
         Ok(WillowClient {
             http_client,
             base_url,
@@ -503,6 +571,7 @@ impl WillowClientBuilder {
             light_client,
             #[cfg(not(feature = "no-light-client"))]
             light_client_once: Arc::new(OnceCell::new()),
+            consensus_client,
         })
     }
 }

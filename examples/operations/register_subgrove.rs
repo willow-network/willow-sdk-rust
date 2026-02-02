@@ -1,0 +1,103 @@
+//! Register Subgrove Example
+//!
+//! Registers a new subgrove (data collection) within an app.
+//!
+//! Run with: cargo run --example register_subgrove
+//!
+//! Prerequisites:
+//! - Local Willow network running (./scripts/start_network.sh)
+//! - An app must already be registered
+
+use ed25519_dalek::SigningKey;
+use std::collections::HashMap;
+use willow_sdk::{
+    types::{RegisterSubgroveRequest, SchemaDefinition, SchemaField},
+    WillowClient, DEVNET_VALIDATOR_1,
+};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // =========================================================================
+    // CONFIGURATION - Modify these values for your testing
+    // =========================================================================
+    let api_url = "http://localhost:3031";
+    let consensus_url = "http://localhost:26657";
+
+    // DID to use (must be app owner or admin)
+    let owner_did = DEVNET_VALIDATOR_1.did;
+    let private_key_hex = DEVNET_VALIDATOR_1.private_key;
+    let public_key_id = DEVNET_VALIDATOR_1.public_key_id;
+
+    // Subgrove details
+    let app_id = "my-app"; // Must exist - run register_app first
+    let subgrove_id = "users";
+    let subgrove_name = "Users Collection";
+
+    let nonce: u64 = 1; // Increment for each transaction from this DID
+    // =========================================================================
+
+    let client = WillowClient::builder()
+        .api_url(api_url)
+        .consensus_url(consensus_url)
+        .build()
+        .await?;
+
+    // Create signing key
+    let private_key_bytes = hex::decode(private_key_hex)?;
+    let signing_key = SigningKey::from_bytes(
+        &private_key_bytes
+            .try_into()
+            .map_err(|_| "Invalid key length")?,
+    );
+
+    // Define schema
+    let mut fields = HashMap::new();
+    fields.insert(
+        "name".to_string(),
+        SchemaField {
+            field_type: "string".to_string(),
+            required: true,
+            indexed: true,
+        },
+    );
+    fields.insert(
+        "email".to_string(),
+        SchemaField {
+            field_type: "string".to_string(),
+            required: true,
+            indexed: true,
+        },
+    );
+
+    let request = RegisterSubgroveRequest {
+        subgrove_id: subgrove_id.to_string(),
+        app_id: app_id.to_string(),
+        name: subgrove_name.to_string(),
+        schema: Some(SchemaDefinition {
+            version: 1,
+            fields,
+            indexes: None,
+        }),
+        owner_did: owner_did.to_string(),
+        writers: vec![owner_did.to_string()],
+        readers: vec![], // empty = public read
+        signature: vec![],
+        public_key_id: public_key_id.to_string(),
+        nonce,
+    };
+
+    println!("Registering subgrove: {}/{}", app_id, subgrove_id);
+
+    match client.consensus().register_subgrove(request, &signing_key).await {
+        Ok(tx_hash) => {
+            println!("SUCCESS! TX: {}", tx_hash);
+            client.consensus().wait_for_transaction(&tx_hash, 5).await?;
+            println!("Confirmed!");
+        }
+        Err(e) => {
+            println!("Error: {}", e);
+        }
+    }
+
+    Ok(())
+}

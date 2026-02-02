@@ -7,11 +7,7 @@
 //!
 //! Run with: cargo run --example proof_verification
 
-use willow_sdk::{
-    auth::generate_did,
-    types::SignatureAlgorithm,
-    WillowClient,
-};
+use willow_sdk::{WillowClient, DEVNET_VALIDATOR_1};
 use serde_json::json;
 
 #[tokio::main]
@@ -19,20 +15,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Willow SDK - Proof Verification Example");
     println!("========================================\n");
 
-    // Setup
+    // Setup: authenticate with devnet test account
     let client = WillowClient::new("http://localhost:3031").await?;
-    let did_info = generate_did(SignatureAlgorithm::Ed25519)?;
-
-    client.register_did(&did_info.did_document).await?;
     client
         .authenticate(
-            &did_info.did,
-            &did_info.private_key_hex(),
-            &did_info.public_key_id,
+            DEVNET_VALIDATOR_1.did,
+            DEVNET_VALIDATOR_1.private_key,
+            DEVNET_VALIDATOR_1.public_key_id,
         )
         .await?;
 
-    println!("Authenticated as: {}\n", did_info.did);
+    println!("Authenticated as: {}\n", DEVNET_VALIDATOR_1.did);
 
     let app_id = "proof-demo";
     let subgrove_id = "test-data";

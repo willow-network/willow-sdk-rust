@@ -14,25 +14,29 @@
 //! ## Quick Start
 //!
 //! ```rust,no_run
-//! use willow_sdk::{WillowClient, auth::generate_did, types::SignatureAlgorithm};
+//! use willow_sdk::{WillowClient, DEVNET_VALIDATOR_1};
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     // Create client
-//!     let client = WillowClient::new("http://localhost:3031").await?;
+//!     // Create client with API and consensus endpoints
+//!     let client = WillowClient::builder()
+//!         .api_url("http://localhost:3031")
+//!         .consensus_url("http://localhost:26657") // Optional: for consensus operations
+//!         .build()
+//!         .await?;
 //!
-//!     // Generate DID
-//!     let did_info = generate_did(SignatureAlgorithm::Ed25519)?;
-//!
-//!     // Authenticate
+//!     // Authenticate with devnet validator 1 (or your own DID)
 //!     client.authenticate(
-//!         &did_info.did,
-//!         &did_info.private_key_hex(),
-//!         &did_info.public_key_id
+//!         DEVNET_VALIDATOR_1.did,
+//!         DEVNET_VALIDATOR_1.private_key,
+//!         DEVNET_VALIDATOR_1.public_key_id
 //!     ).await?;
 //!
 //!     // All data operations are automatically verified against consensus
 //!     let data = client.data().get("app_id", "dataset", "key").await?;
+//!
+//!     // Consensus operations (DID registration, transfers, etc.)
+//!     // client.consensus().register_did(...).await?;
 //!
 //!     Ok(())
 //! }
@@ -76,11 +80,12 @@ pub mod types;
 pub mod utils;
 pub mod validators;
 
-// Re-export main types
 pub use client::WillowClient;
 pub use consensus::{ConsensusClient, Transaction};
-pub use data::{DataOperations, QueryResponse};
-pub use errors::{WillowError, Result};
+pub use data::{
+    CheckpointInfo, DataOperations, HistoricalQueryRequest, HistoricalQueryResponse, QueryResponse,
+};
+pub use errors::{Result, WillowError};
 pub use indexing::IndexingOperations;
 #[cfg(not(feature = "no-light-client"))]
 pub use light_client::{
@@ -101,37 +106,37 @@ pub use types::{
 };
 pub use validators::ValidatorOperations;
 
-// Version info
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Pre-funded test account for local devnet development.
+/// Devnet validator accounts for local development.
 ///
-/// This account is pre-registered and funded in the devnet genesis.
-/// Use it for SDK testing and development - DO NOT use in production!
+/// These are the validator accounts pre-registered and funded in the devnet genesis.
+/// Each validator has staked tokens (100,000 WILL) plus available balance (100,000 WILL)
+/// for testing. Use them for SDK testing and development - DO NOT use in production!
 ///
 /// # Example
 ///
 /// ```rust,no_run
-/// use willow_sdk::{WillowClient, DEVNET_TEST_ACCOUNT};
+/// use willow_sdk::{WillowClient, DEVNET_VALIDATOR_1};
 ///
 /// #[tokio::main]
 /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ///     let client = WillowClient::new("http://localhost:3031").await?;
 ///
-///     // Authenticate with the pre-funded test account
+///     // Authenticate with devnet validator 1
 ///     client.authenticate(
-///         DEVNET_TEST_ACCOUNT.did,
-///         DEVNET_TEST_ACCOUNT.private_key,
-///         DEVNET_TEST_ACCOUNT.public_key_id
+///         DEVNET_VALIDATOR_1.did,
+///         DEVNET_VALIDATOR_1.private_key,
+///         DEVNET_VALIDATOR_1.public_key_id
 ///     ).await?;
 ///
 ///     Ok(())
 /// }
 /// ```
 pub mod devnet {
-    /// Pre-funded devnet test account credentials
-    pub struct TestAccount {
-        /// DID of the test account
+    /// Devnet validator account credentials
+    pub struct ValidatorAccount {
+        /// DID of the validator
         pub did: &'static str,
         /// Private key (hex) - DO NOT USE IN PRODUCTION
         pub private_key: &'static str,
@@ -141,18 +146,19 @@ pub mod devnet {
         pub public_key_id: &'static str,
     }
 
-    /// Pre-funded test account for local devnet development
-    pub const TEST_ACCOUNT: TestAccount = TestAccount {
-        did: "did:willow:devnet-test",
-        private_key: "b5ecc03536f5e039e3c5bc46ad178d7faf80cee5f063016a4f4084e163409b3c",
-        public_key: "c153874d3d284a11e3cb12b524e1a9cc32fef966d56b903c79688a95d5193c8f",
-        public_key_id: "did:willow:devnet-test#key-1",
+    /// Validator 1 account for local devnet development.
+    /// Has 100,000 WILL staked + 100,000 WILL available for testing.
+    pub const VALIDATOR_1: ValidatorAccount = ValidatorAccount {
+        did: "did:willow:validator1",
+        private_key: "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+        public_key: "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+        public_key_id: "did:willow:validator1#key-1",
     };
 }
 
-/// Pre-funded test account for local devnet development.
-/// See [`devnet::TEST_ACCOUNT`] for usage details.
-pub use devnet::TEST_ACCOUNT as DEVNET_TEST_ACCOUNT;
+/// Devnet validator 1 account for local development.
+/// See [`devnet::VALIDATOR_1`] for usage details.
+pub use devnet::VALIDATOR_1 as DEVNET_VALIDATOR_1;
 
 #[cfg(test)]
 mod tests {

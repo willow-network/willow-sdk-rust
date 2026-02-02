@@ -7,11 +7,7 @@
 //!
 //! Run with: cargo run --example light_client
 
-use willow_sdk::{
-    auth::generate_did,
-    types::SignatureAlgorithm,
-    WillowClient, LightClientConfigBuilder,
-};
+use willow_sdk::{WillowClient, LightClientConfigBuilder, DEVNET_VALIDATOR_1};
 use serde_json::json;
 use std::time::Duration;
 
@@ -24,9 +20,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("1. Configuring light client...");
     let light_client_config = LightClientConfigBuilder::new("willow-testnet")
         .validator_endpoints(vec![
-            "http://localhost:26657".to_string(),
-            "http://localhost:26757".to_string(),
-            "http://localhost:26857".to_string(),
+            "http://localhost:26657".to_string(), // Node 1
+            "http://localhost:26757".to_string(), // Node 2
+            "http://localhost:26857".to_string(), // Node 3
         ])
         .trust_threshold(2, 3) // Require 2/3+ validator agreement
         .trusting_period(Duration::from_secs(86400)) // 24 hours
@@ -44,6 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("2. Creating client with light client...");
     let client = WillowClient::builder()
         .api_url("http://localhost:3031")
+        .consensus_url("http://localhost:26657") // Optional: for consensus operations
         .light_client_config(light_client_config)
         .build()
         .await?;
@@ -55,18 +52,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("   Light client: Not available");
     }
 
-    // 3. Authenticate
+    // 3. Authenticate with devnet test account
     println!("\n3. Authenticating...");
-    let did_info = generate_did(SignatureAlgorithm::Ed25519)?;
-    client.register_did(&did_info.did_document).await?;
     client
         .authenticate(
-            &did_info.did,
-            &did_info.private_key_hex(),
-            &did_info.public_key_id,
+            DEVNET_VALIDATOR_1.did,
+            DEVNET_VALIDATOR_1.private_key,
+            DEVNET_VALIDATOR_1.public_key_id,
         )
         .await?;
-    println!("   Authenticated as: {}", did_info.did);
+    println!("   Authenticated as: {}", DEVNET_VALIDATOR_1.did);
 
     // 4. Store test data
     println!("\n4. Storing test data...");

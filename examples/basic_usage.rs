@@ -2,17 +2,12 @@
 //!
 //! This example demonstrates:
 //! - Creating a client
-//! - Generating and registering a DID
-//! - Authenticating
+//! - Authenticating with the pre-registered devnet test account
 //! - Storing and retrieving data with automatic proof verification
 //!
 //! Run with: cargo run --example basic_usage
 
-use willow_sdk::{
-    auth::generate_did,
-    types::SignatureAlgorithm,
-    WillowClient,
-};
+use willow_sdk::{WillowClient, DEVNET_VALIDATOR_1};
 use serde_json::json;
 
 #[tokio::main]
@@ -25,31 +20,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = WillowClient::new("http://localhost:3031").await?;
     println!("   Connected to Willow node\n");
 
-    // 2. Generate a DID
-    println!("2. Generating Ed25519 DID...");
-    let did_info = generate_did(SignatureAlgorithm::Ed25519)?;
-    println!("   DID: {}", did_info.did);
-    println!("   Public Key ID: {}\n", did_info.public_key_id);
-
-    // 3. Register the DID
-    println!("3. Registering DID...");
-    client.register_did(&did_info.did_document).await?;
-    println!("   DID registered successfully\n");
-
-    // 4. Authenticate
-    println!("4. Authenticating...");
+    // 2. Authenticate with devnet test account
+    println!("2. Authenticating with devnet test account...");
+    println!("   DID: {}", DEVNET_VALIDATOR_1.did);
     client
         .authenticate(
-            &did_info.did,
-            &did_info.private_key_hex(),
-            &did_info.public_key_id,
+            DEVNET_VALIDATOR_1.did,
+            DEVNET_VALIDATOR_1.private_key,
+            DEVNET_VALIDATOR_1.public_key_id,
         )
         .await?;
     println!("   Authenticated successfully\n");
 
-    // 5. Store data (requires an existing app and dataset)
+    // 3. Store data (requires an existing app and dataset)
     // For a complete example, you would first register an app and dataset
-    println!("5. Storing data...");
+    println!("3. Storing data...");
     let test_data = json!({
         "name": "Alice",
         "score": 100,
@@ -65,8 +50,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => println!("   Note: {}", e),
     }
 
-    // 6. Retrieve data with automatic proof verification
-    println!("\n6. Retrieving data (with proof verification)...");
+    // 4. Retrieve data with automatic proof verification
+    println!("\n4. Retrieving data (with proof verification)...");
     match client.data().get("my-app", "users", "alice").await {
         Ok(data) => {
             println!("   Data retrieved and verified:");
@@ -75,8 +60,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => println!("   Note: {}", e),
     }
 
-    // 7. Retrieve data without verification (faster)
-    println!("\n7. Retrieving data (without verification)...");
+    // 5. Retrieve data without verification (faster)
+    println!("\n5. Retrieving data (without verification)...");
     match client
         .data()
         .get_unverified("my-app", "users", "alice")
@@ -89,8 +74,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => println!("   Note: {}", e),
     }
 
-    // 8. Get root hash
-    println!("\n8. Getting root hash...");
+    // 6. Get root hash
+    println!("\n6. Getting root hash...");
     match client.get_root_hash().await {
         Ok(root_hash) => println!("   Verified root hash: {}", root_hash),
         Err(e) => println!("   Note: {}", e),

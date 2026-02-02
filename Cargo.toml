@@ -71,3 +71,41 @@ no-light-client = []
 name = "willow-cli"
 path = "src/bin/cli.rs"
 required-features = ["cli"]
+
+# Operation examples - individual consensus transactions
+[[example]]
+name = "register_did"
+path = "examples/operations/register_did.rs"
+
+[[example]]
+name = "register_app"
+path = "examples/operations/register_app.rs"
+
+[[example]]
+name = "register_subgrove"
+path = "examples/operations/register_subgrove.rs"
+
+[[example]]
+name = "store_data"
+path = "examples/operations/store_data.rs"
+
+[[example]]
+name = "transfer"
+path = "examples/operations/transfer.rs"
+
+[[example]]
+name = "fund_app"
+path = "examples/operations/fund_app.rs"
+
+# Query/read examples
+[[example]]
+name = "query_data"
+path = "examples/operations/query_data.rs"
+
+[[example]]
+name = "check_balances"
+path = "examples/operations/check_balances.rs"
+
+[[example]]
+name = "list_registrations"
+path = "examples/operations/list_registrations.rs"

@@ -60,6 +60,13 @@ pub enum WillowError {
     #[error("Light client error: {0}")]
     LightClient(String),
 
+    /// Historical data unavailable
+    #[error("Historical data unavailable: {message}")]
+    HistoricalDataUnavailable {
+        message: String,
+        can_reindex: bool,
+    },
+
     /// Configuration error
     #[error("Configuration error: {0}")]
     Config(String),
