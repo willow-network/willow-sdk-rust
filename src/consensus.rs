@@ -1,7 +1,7 @@
 //! Consensus transaction handling for Willow SDK
 
 use crate::auth::sign_challenge;
-use crate::errors::{WillowError, Result};
+use crate::errors::{Result, WillowError};
 use crate::types::{DidDocument, RegisterSubgroveRequest, SignatureAlgorithm, StoreDataRequest};
 use base64::Engine;
 use ed25519_dalek::{Signer, SigningKey};
@@ -217,6 +217,13 @@ impl ConsensusClient {
             "Transfer": transfer_tx
         });
 
+        self.submit_transaction(&transaction).await
+    }
+
+    /// Submit a raw JSON transaction to CometBFT.
+    ///
+    /// This is a public wrapper around submit_transaction for CLI/external use.
+    pub async fn submit_raw_transaction(&self, transaction: serde_json::Value) -> Result<String> {
         self.submit_transaction(&transaction).await
     }
 

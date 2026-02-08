@@ -6,7 +6,7 @@
 //!
 //! Disable with the `no-light-client` feature for minimal dependencies.
 
-use crate::errors::{WillowError, Result};
+use crate::errors::{Result, WillowError};
 use serde_json::Value;
 
 #[cfg(not(feature = "no-light-client"))]

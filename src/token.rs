@@ -23,7 +23,7 @@
 //! ```
 
 use crate::client::WillowClient;
-use crate::errors::{WillowError, Result};
+use crate::errors::{Result, WillowError};
 use crate::types::{ApiResponse, BalanceInfo, FeeSchedule, TokenInfo};
 
 /// Operations for token information and balances.

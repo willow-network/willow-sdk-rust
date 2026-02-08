@@ -31,7 +31,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let memo = Some("Test transfer".to_string());
     let nonce: u64 = 0; // Increment for each transaction from this DID
-    // =========================================================================
+                        // =========================================================================
 
     let client = WillowClient::builder()
         .api_url(api_url)

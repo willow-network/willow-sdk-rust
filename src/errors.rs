@@ -62,10 +62,7 @@ pub enum WillowError {
 
     /// Historical data unavailable
     #[error("Historical data unavailable: {message}")]
-    HistoricalDataUnavailable {
-        message: String,
-        can_reindex: bool,
-    },
+    HistoricalDataUnavailable { message: String, can_reindex: bool },
 
     /// Configuration error
     #[error("Configuration error: {0}")]

@@ -1,6 +1,6 @@
 //! Authentication utilities for Willow SDK
 
-use crate::errors::{WillowError, Result};
+use crate::errors::{Result, WillowError};
 use crate::types::{DidDocument, PublicKey, SignatureAlgorithm};
 
 // Re-export types that may be needed by examples

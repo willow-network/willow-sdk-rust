@@ -1,8 +1,4 @@
 use anyhow::{anyhow, Result};
-use willow_sdk::{
-    Client, ClientOptions, ConsensusClient, ConsensusClientOptions, DataOperations, Identity,
-    RegistrationOperations,
-};
 use clap::{Parser, Subcommand};
 use hex;
 use serde::{Deserialize, Serialize};
@@ -13,6 +9,10 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio;
+use willow_sdk::{
+    Client, ClientOptions, ConsensusClient, ConsensusClientOptions, DataOperations, Identity,
+    RegistrationOperations,
+};
 
 #[derive(Parser)]
 #[command(name = "willow-cli")]
@@ -481,11 +481,7 @@ async fn create_consensus_client(node_url: String) -> Result<ConsensusClient> {
     ConsensusClient::new(&node_url, options).await
 }
 
-fn create_identity(
-    identity_id: &str,
-    public_key: &str,
-    private_key: &str,
-) -> Result<Identity> {
+fn create_identity(identity_id: &str, public_key: &str, private_key: &str) -> Result<Identity> {
     let id_bytes = hex::decode(identity_id)?;
     let mut id_array = [0u8; 32];
     id_array.copy_from_slice(&id_bytes);
@@ -523,18 +519,12 @@ async fn main() -> Result<()> {
         Commands::Identity { command } => {
             handle_identity_command(command, &config, cli.output, cli.config).await?
         }
-        Commands::App { command } => {
-            handle_app_command(command, &node_url, cli.output).await?
-        }
+        Commands::App { command } => handle_app_command(command, &node_url, cli.output).await?,
         Commands::Subgrove { command } => {
             handle_subgrove_command(command, &node_url, cli.output).await?
         }
-        Commands::Data { command } => {
-            handle_data_command(command, &node_url, cli.output).await?
-        }
-        Commands::Token { command } => {
-            handle_token_command(command, &node_url, cli.output).await?
-        }
+        Commands::Data { command } => handle_data_command(command, &node_url, cli.output).await?,
+        Commands::Token { command } => handle_token_command(command, &node_url, cli.output).await?,
         Commands::Consensus { command } => {
             handle_consensus_command(command, &node_url, cli.output).await?
         }
@@ -560,7 +550,7 @@ async fn handle_identity_command(
             // For now, generate a simple Ed25519 key pair
             let private_key = rand::random::<[u8; 32]>();
             let public_key = rand::random::<[u8; 32]>(); // In real implementation, derive from private
-            
+
             let identity_id = generate_identity_id(&public_key);
             let identity_id_hex = hex::encode(&identity_id);
             let public_key_hex = hex::encode(&public_key);
@@ -600,7 +590,7 @@ async fn handle_identity_command(
             let mut client = create_consensus_client(node_url).await?;
 
             let identity = create_identity(&identity_id, &public_key, &private_key)?;
-            
+
             // Note: Actual implementation would require proper asset lock proof
             let result = json!({
                 "identity_id": identity_id,
@@ -670,7 +660,7 @@ async fn handle_app_command(
             private_key,
         } => {
             let mut client = create_consensus_client(node_url.to_string()).await?;
-            
+
             // Note: Simplified implementation
             let result = json!({
                 "app_name": name,
@@ -682,7 +672,7 @@ async fn handle_app_command(
         }
         AppCommands::Info { app_id } => {
             let client = create_client(node_url.to_string()).await?;
-            
+
             match client.get_app(&app_id).await {
                 Ok(Some(app)) => {
                     let result = json!({
@@ -710,9 +700,9 @@ async fn handle_app_command(
         }
         AppCommands::List { identity_id } => {
             let client = create_client(node_url.to_string()).await?;
-            
+
             let apps = client.list_my_apps().await?;
-            
+
             let app_list: Vec<Value> = apps
                 .into_iter()
                 .map(|app| {
@@ -738,7 +728,7 @@ async fn handle_app_command(
             private_key,
         } => {
             let mut client = create_consensus_client(node_url.to_string()).await?;
-            
+
             let result = json!({
                 "app_id": app_id,
                 "amount": amount,
@@ -766,7 +756,7 @@ async fn handle_subgrove_command(
             private_key,
         } => {
             let mut client = create_consensus_client(node_url.to_string()).await?;
-            
+
             // Read schema from file
             let schema_content = fs::read_to_string(schema)?;
             let schema_json: Value = serde_json::from_str(&schema_content)?;
@@ -784,7 +774,7 @@ async fn handle_subgrove_command(
             subgrove_name,
         } => {
             let client = create_client(node_url.to_string()).await?;
-            
+
             match client.get_subgrove(&app_id, &subgrove_name).await {
                 Ok(Some(subgrove)) => {
                     let result = json!({
@@ -829,15 +819,19 @@ async fn handle_data_command(
             private_key,
         } => {
             let mut client = create_client(node_url.to_string()).await?;
-            
+
             // Create and authenticate identity
-            let pub_key_bytes = hex::decode("0000000000000000000000000000000000000000000000000000000000000000")?; // Placeholder
-            let identity = create_identity(&identity_id, &hex::encode(&pub_key_bytes), &private_key)?;
+            let pub_key_bytes =
+                hex::decode("0000000000000000000000000000000000000000000000000000000000000000")?; // Placeholder
+            let identity =
+                create_identity(&identity_id, &hex::encode(&pub_key_bytes), &private_key)?;
             client.authenticate(identity)?;
 
             let data_json: Value = serde_json::from_str(&data)?;
-            
-            client.store_item(&app_id, &subgrove, &key, data_json.clone()).await?;
+
+            client
+                .store_item(&app_id, &subgrove, &key, data_json.clone())
+                .await?;
 
             let result = json!({
                 "app_id": app_id,
@@ -855,7 +849,7 @@ async fn handle_data_command(
             no_verify,
         } => {
             let client = create_client(node_url.to_string()).await?;
-            
+
             let item = if no_verify {
                 client.get_unverified(&app_id, &subgrove, &key).await?
             } else {
@@ -886,9 +880,9 @@ async fn handle_data_command(
             no_verify,
         } => {
             let client = create_client(node_url.to_string()).await?;
-            
+
             let conditions_json: Value = serde_json::from_str(&conditions)?;
-            
+
             let results = if no_verify {
                 client
                     .query_unverified(&app_id, &subgrove, conditions_json)
@@ -916,14 +910,16 @@ async fn handle_data_command(
             private_key,
         } => {
             let mut client = create_client(node_url.to_string()).await?;
-            
+
             // Create and authenticate identity
-            let pub_key_bytes = hex::decode("0000000000000000000000000000000000000000000000000000000000000000")?; // Placeholder
-            let identity = create_identity(&identity_id, &hex::encode(&pub_key_bytes), &private_key)?;
+            let pub_key_bytes =
+                hex::decode("0000000000000000000000000000000000000000000000000000000000000000")?; // Placeholder
+            let identity =
+                create_identity(&identity_id, &hex::encode(&pub_key_bytes), &private_key)?;
             client.authenticate(identity)?;
 
             let data_json: Value = serde_json::from_str(&data)?;
-            
+
             client.update(&app_id, &subgrove, &key, data_json).await?;
 
             let result = json!({
@@ -943,10 +939,12 @@ async fn handle_data_command(
             private_key,
         } => {
             let mut client = create_client(node_url.to_string()).await?;
-            
+
             // Create and authenticate identity
-            let pub_key_bytes = hex::decode("0000000000000000000000000000000000000000000000000000000000000000")?; // Placeholder
-            let identity = create_identity(&identity_id, &hex::encode(&pub_key_bytes), &private_key)?;
+            let pub_key_bytes =
+                hex::decode("0000000000000000000000000000000000000000000000000000000000000000")?; // Placeholder
+            let identity =
+                create_identity(&identity_id, &hex::encode(&pub_key_bytes), &private_key)?;
             client.authenticate(identity)?;
 
             client.delete(&app_id, &subgrove, &key).await?;
@@ -968,17 +966,21 @@ async fn handle_data_command(
             private_key,
         } => {
             let mut client = create_client(node_url.to_string()).await?;
-            
+
             // Create and authenticate identity
-            let pub_key_bytes = hex::decode("0000000000000000000000000000000000000000000000000000000000000000")?; // Placeholder
-            let identity = create_identity(&identity_id, &hex::encode(&pub_key_bytes), &private_key)?;
+            let pub_key_bytes =
+                hex::decode("0000000000000000000000000000000000000000000000000000000000000000")?; // Placeholder
+            let identity =
+                create_identity(&identity_id, &hex::encode(&pub_key_bytes), &private_key)?;
             client.authenticate(identity)?;
 
             // Read batch data from file
             let batch_content = fs::read_to_string(data_file)?;
             let batch_data: HashMap<String, Value> = serde_json::from_str(&batch_content)?;
 
-            client.batch_store(&app_id, &subgrove, batch_data.clone()).await?;
+            client
+                .batch_store(&app_id, &subgrove, batch_data.clone())
+                .await?;
 
             let result = json!({
                 "app_id": app_id,
@@ -1007,7 +1009,7 @@ async fn handle_token_command(
             private_key,
         } => {
             let mut client = create_consensus_client(node_url.to_string()).await?;
-            
+
             let result = json!({
                 "from": from_identity,
                 "to": to_identity,
@@ -1018,14 +1020,23 @@ async fn handle_token_command(
             output_result(result, format);
         }
         TokenCommands::Balance { identity_id } => {
-            // This would require a query to get the balance
-            let result = json!({
-                "identity_id": identity_id,
-                "balance": 0,
-                "message": "Balance query not yet implemented"
-            });
-
-            output_result(result, format);
+            let client = create_client(node_url.to_string()).await?;
+            match client.token().get_balance(&identity_id).await {
+                Ok(balance_info) => {
+                    let result = json!({
+                        "identity_id": identity_id,
+                        "balance": serde_json::to_value(&balance_info).unwrap_or_default(),
+                    });
+                    output_result(result, format);
+                }
+                Err(e) => {
+                    let result = json!({
+                        "identity_id": identity_id,
+                        "error": format!("Failed to get balance: {}", e),
+                    });
+                    output_result(result, format);
+                }
+            }
         }
     }
 
@@ -1039,22 +1050,53 @@ async fn handle_consensus_command(
 ) -> Result<()> {
     match command {
         ConsensusCommands::Submit { transaction } => {
-            let client = create_consensus_client(node_url.to_string()).await?;
-            
-            let result = json!({
-                "error": "Raw transaction submission not yet implemented"
-            });
+            let mut client = create_consensus_client(node_url.to_string()).await?;
 
-            output_result(result, format);
+            let tx_json: Value = serde_json::from_str(&transaction)
+                .map_err(|e| anyhow!("Invalid JSON transaction: {}", e))?;
+
+            match client.submit_raw_transaction(tx_json).await {
+                Ok(tx_hash) => {
+                    let result = json!({
+                        "tx_hash": tx_hash,
+                        "status": "submitted",
+                    });
+                    output_result(result, format);
+                }
+                Err(e) => {
+                    let result = json!({
+                        "error": format!("Transaction submission failed: {}", e),
+                    });
+                    output_result(result, format);
+                }
+            }
         }
         ConsensusCommands::Status { tx_hash } => {
-            let result = json!({
-                "tx_hash": tx_hash,
-                "status": "unknown",
-                "message": "Transaction status query not yet implemented"
-            });
+            let client = create_consensus_client(node_url.to_string()).await?;
 
-            output_result(result, format);
+            match client.get_transaction(&tx_hash).await {
+                Ok(tx_result) => {
+                    let status = if tx_result.code == 0 {
+                        "success"
+                    } else {
+                        "failed"
+                    };
+                    let result = json!({
+                        "tx_hash": tx_hash,
+                        "status": status,
+                        "code": tx_result.code,
+                        "log": tx_result.log,
+                    });
+                    output_result(result, format);
+                }
+                Err(e) => {
+                    let result = json!({
+                        "tx_hash": tx_hash,
+                        "error": format!("Failed to query transaction: {}", e),
+                    });
+                    output_result(result, format);
+                }
+            }
         }
     }
 
@@ -1081,7 +1123,7 @@ async fn handle_verify_command(
         }
         VerifyCommands::RootHash { local, consensus } => {
             let client = create_client(node_url.to_string()).await?;
-            
+
             let mut results = json!({});
 
             if local {
@@ -1126,7 +1168,7 @@ async fn handle_config_command(
         }
         ConfigCommands::Show => {
             let config = load_config(config_path)?;
-            
+
             let result = json!({
                 "node_url": config.node_url,
                 "default_identity": config.default_identity,

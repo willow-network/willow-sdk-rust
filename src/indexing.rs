@@ -28,7 +28,7 @@
 //! ```
 
 use crate::client::WillowClient;
-use crate::errors::{WillowError, Result};
+use crate::errors::{Result, WillowError};
 use crate::types::{
     ApiResponse, GraphQLRequest, GraphQLResponse, IndexerInfo, SubgraphIndexingStatus,
     SubgraphInfo, VerificationStats,

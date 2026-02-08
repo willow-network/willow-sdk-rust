@@ -34,7 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let subgrove_name = "Users Collection";
 
     let nonce: u64 = 1; // Increment for each transaction from this DID
-    // =========================================================================
+                        // =========================================================================
 
     let client = WillowClient::builder()
         .api_url(api_url)
@@ -88,7 +88,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Registering subgrove: {}/{}", app_id, subgrove_id);
 
-    match client.consensus().register_subgrove(request, &signing_key).await {
+    match client
+        .consensus()
+        .register_subgrove(request, &signing_key)
+        .await
+    {
         Ok(tx_hash) => {
             println!("SUCCESS! TX: {}", tx_hash);
             client.consensus().wait_for_transaction(&tx_hash, 5).await?;

@@ -1,11 +1,11 @@
 //! Query operations test - tests current query capabilities
 
-use willow_sdk::{WillowClient, ConsensusClient};
 use ed25519_dalek::SigningKey;
 use serde_json::json;
 use std::fs;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::time::sleep;
+use willow_sdk::{ConsensusClient, WillowClient};
 
 const PRIVATE_KEY_HEX: &str = "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb";
 

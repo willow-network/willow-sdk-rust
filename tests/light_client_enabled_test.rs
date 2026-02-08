@@ -2,13 +2,13 @@
 //!
 //! This test demonstrates the ACTUAL light client functionality
 
-use willow_sdk::types::SignatureAlgorithm;
-use willow_sdk::{WillowClient, ConsensusClient, LightClientConfigBuilder};
 use ed25519_dalek::SigningKey;
 use serde_json::json;
 use std::fs;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::time::sleep;
+use willow_sdk::types::SignatureAlgorithm;
+use willow_sdk::{ConsensusClient, LightClientConfigBuilder, WillowClient};
 
 const PRIVATE_KEY_HEX: &str = "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb";
 
@@ -133,8 +133,8 @@ async fn light_client_enabled_verification_test() {
     }
 
     // Register subgrove with proper schema
-    use willow_sdk::types::{RegisterSubgroveRequest, SchemaDefinition, SchemaField};
     use std::collections::HashMap;
+    use willow_sdk::types::{RegisterSubgroveRequest, SchemaDefinition, SchemaField};
 
     let mut fields = HashMap::new();
     fields.insert(

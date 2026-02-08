@@ -5,13 +5,13 @@
 //! 2. Storing data through the untrusted API
 //! 3. Verifying the data is correctly verified against consensus
 
-use willow_sdk::types::SignatureAlgorithm;
-use willow_sdk::{WillowClient, ConsensusClient};
 use ed25519_dalek::SigningKey;
 use serde_json::json;
 use std::fs;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::time::sleep;
+use willow_sdk::types::SignatureAlgorithm;
+use willow_sdk::{ConsensusClient, WillowClient};
 
 // Standard test private key used by the funded DID
 const PRIVATE_KEY_HEX: &str = "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb";
@@ -132,8 +132,8 @@ async fn light_client_verification_test() {
     }
 
     // Prepare the schema with proper structure
-    use willow_sdk::types::{RegisterSubgroveRequest, SchemaDefinition, SchemaField};
     use std::collections::HashMap;
+    use willow_sdk::types::{RegisterSubgroveRequest, SchemaDefinition, SchemaField};
 
     let mut fields = HashMap::new();
     fields.insert(

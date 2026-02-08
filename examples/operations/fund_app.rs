@@ -32,7 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let amount: u128 = 10_000_000_000_000_000_000; // 10 WILL
 
     let nonce: u64 = 0; // Increment for each transaction from this DID
-    // =========================================================================
+                        // =========================================================================
 
     let client = WillowClient::builder()
         .api_url(api_url)

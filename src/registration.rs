@@ -22,7 +22,7 @@
 //! ```
 
 use crate::client::WillowClient;
-use crate::errors::{WillowError, Result};
+use crate::errors::{Result, WillowError};
 use crate::types::{ApiResponse, AppRegistration, DidPermissions, SubgroveRegistration};
 
 /// Operations for querying app and subgrove registrations.

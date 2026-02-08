@@ -8,12 +8,7 @@
 //!
 //! Run with: cargo run --example registration
 
-use willow_sdk::{
-    auth::generate_did,
-    types::SignatureAlgorithm,
-    WillowClient,
-    DEVNET_VALIDATOR_1,
-};
+use willow_sdk::{auth::generate_did, types::SignatureAlgorithm, WillowClient, DEVNET_VALIDATOR_1};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -128,12 +123,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 8. Get a specific subgrove
     println!("\n8. Getting specific subgrove...");
     let subgrove_id = "test-subgrove";
-    match client.registration().get_subgrove(app_id, subgrove_id).await {
+    match client
+        .registration()
+        .get_subgrove(app_id, subgrove_id)
+        .await
+    {
         Ok(sg) => {
             println!("   Subgrove ID: {}", sg.subgrove_id);
             println!("   Name: {}", sg.name);
             println!("   Schema version: {}", sg.schema.version);
-            println!("   Fields: {:?}", sg.schema.fields.keys().collect::<Vec<_>>());
+            println!(
+                "   Fields: {:?}",
+                sg.schema.fields.keys().collect::<Vec<_>>()
+            );
         }
         Err(e) => println!("   Note: {} (subgrove may not exist)", e),
     }

@@ -1,13 +1,13 @@
 //! Integration tests for automatic proof verification
 
-use willow_sdk::{
-    auth::generate_did,
-    types::{DidInfo, RegisterSubgroveRequest, SchemaDefinition, SchemaField, SignatureAlgorithm},
-    WillowClient, WillowError, ConsensusClient,
-};
 use ed25519_dalek::SigningKey;
 use serde_json::json;
 use std::collections::HashMap;
+use willow_sdk::{
+    auth::generate_did,
+    types::{DidInfo, RegisterSubgroveRequest, SchemaDefinition, SchemaField, SignatureAlgorithm},
+    ConsensusClient, WillowClient, WillowError,
+};
 
 async fn setup_test_environment(
 ) -> Result<(WillowClient, ConsensusClient, DidInfo, String, String), Box<dyn std::error::Error>> {

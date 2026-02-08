@@ -56,7 +56,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\nFee Schedule:");
     match client.token().get_fee_schedule().await {
         Ok(fees) => {
-            println!("  Storage: {} WILL/byte/day", fees.storage_fee_per_byte_per_day);
+            println!(
+                "  Storage: {} WILL/byte/day",
+                fees.storage_fee_per_byte_per_day
+            );
             println!("  Query: {} WILL", fees.query_fee);
             println!("  Indexing: {} WILL/block", fees.indexing_fee_per_block);
             println!("  Min App Balance: {} WILL", fees.minimum_app_balance);

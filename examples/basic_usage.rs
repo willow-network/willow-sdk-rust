@@ -7,8 +7,8 @@
 //!
 //! Run with: cargo run --example basic_usage
 
-use willow_sdk::{WillowClient, DEVNET_VALIDATOR_1};
 use serde_json::json;
+use willow_sdk::{WillowClient, DEVNET_VALIDATOR_1};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

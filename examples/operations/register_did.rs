@@ -20,7 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let consensus_url = "http://localhost:26657";
     let algorithm = SignatureAlgorithm::Ed25519;
     let nonce: u64 = 0; // First transaction for this DID
-    // =========================================================================
+                        // =========================================================================
 
     let client = WillowClient::builder()
         .api_url(api_url)

@@ -7,8 +7,8 @@
 //!
 //! Run with: cargo run --example proof_verification
 
-use willow_sdk::{WillowClient, DEVNET_VALIDATOR_1};
 use serde_json::json;
+use willow_sdk::{WillowClient, DEVNET_VALIDATOR_1};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -68,7 +68,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   Skips all proof verification for maximum performance");
     println!("   Use only when you trust the node\n");
 
-    match client.data().get_unverified(app_id, subgrove_id, "test-key").await {
+    match client
+        .data()
+        .get_unverified(app_id, subgrove_id, "test-key")
+        .await
+    {
         Ok(data) => {
             println!("   Data retrieved (no verification):");
             println!("   {}\n", serde_json::to_string_pretty(&data)?);
@@ -80,11 +84,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("4. Query with automatic verification...");
     let query = json!({ "limit": 5 });
 
-    match client.data().query(app_id, subgrove_id, query.clone()).await {
+    match client
+        .data()
+        .query(app_id, subgrove_id, query.clone())
+        .await
+    {
         Ok(response) => {
             println!("   Found {} documents", response.documents.len());
             if let Some(root_hash) = &response.verified_root_hash {
-                println!("   Verified against root: {}...", &root_hash[..32.min(root_hash.len())]);
+                println!(
+                    "   Verified against root: {}...",
+                    &root_hash[..32.min(root_hash.len())]
+                );
             }
             if response.proof.is_some() {
                 println!("   Proof was included and verified\n");
@@ -95,7 +106,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 5. Query without verification (for comparison)
     println!("5. Query without verification (unverified)...");
-    match client.data().query_unverified(app_id, subgrove_id, query).await {
+    match client
+        .data()
+        .query_unverified(app_id, subgrove_id, query)
+        .await
+    {
         Ok(response) => {
             println!("   Found {} documents", response.documents.len());
             println!("   No verification performed");

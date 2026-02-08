@@ -1,7 +1,7 @@
 //! Data operations for Willow
 
 use crate::client::WillowClient;
-use crate::errors::{WillowError, Result};
+use crate::errors::{Result, WillowError};
 #[cfg(not(feature = "no-light-client"))]
 use crate::proof::{ProofVerifier, QueryResponseExt};
 use crate::types::ApiResponse;
@@ -440,7 +440,9 @@ impl DataOperations {
         query: HistoricalQueryRequest,
     ) -> Result<HistoricalQueryResponse> {
         // First, verify the checkpoint exists and get its state root
-        let checkpoint = self.get_checkpoint_state_root(subgrove_id, checkpoint_id).await?;
+        let checkpoint = self
+            .get_checkpoint_state_root(subgrove_id, checkpoint_id)
+            .await?;
 
         // Make the historical query
         let response: HistoricalQueryResponse = self
@@ -455,7 +457,10 @@ impl DataOperations {
 
         // If query failed due to no providers, return error with can_reindex info
         if !response.success {
-            let error_msg = response.error.clone().unwrap_or_else(|| "Historical query failed".to_string());
+            let error_msg = response
+                .error
+                .clone()
+                .unwrap_or_else(|| "Historical query failed".to_string());
             if response.can_reindex == Some(true) {
                 return Err(WillowError::HistoricalDataUnavailable {
                     message: error_msg,
@@ -504,7 +509,9 @@ impl DataOperations {
         // Force proof inclusion for verification
         query.include_proof = Some(true);
 
-        let result = self.query_historical(subgrove_id, checkpoint_id, query).await?;
+        let result = self
+            .query_historical(subgrove_id, checkpoint_id, query)
+            .await?;
 
         // Verify the proof against the checkpoint state root
         #[cfg(not(feature = "no-light-client"))]
@@ -521,8 +528,15 @@ impl DataOperations {
                 let computed_root = ProofVerifier::verify_query_proof(proof, &documents)?;
 
                 // Compare with the checkpoint's state root (normalize hex strings)
-                let normalized_computed = computed_root.to_lowercase().trim_start_matches("0x").to_string();
-                let normalized_expected = result.state_root.to_lowercase().trim_start_matches("0x").to_string();
+                let normalized_computed = computed_root
+                    .to_lowercase()
+                    .trim_start_matches("0x")
+                    .to_string();
+                let normalized_expected = result
+                    .state_root
+                    .to_lowercase()
+                    .trim_start_matches("0x")
+                    .to_string();
 
                 if normalized_computed != normalized_expected {
                     return Err(WillowError::ProofVerificationFailed(format!(
@@ -533,7 +547,8 @@ impl DataOperations {
             } else {
                 // Proof was requested but not returned
                 return Err(WillowError::ProofVerificationFailed(
-                    "Historical query did not return proof data despite include_proof=true".to_string(),
+                    "Historical query did not return proof data despite include_proof=true"
+                        .to_string(),
                 ));
             }
         }

@@ -10,8 +10,8 @@
 //!
 //! Run with: cargo run --example data_operations
 
-use willow_sdk::{WillowClient, DEVNET_VALIDATOR_1};
 use serde_json::json;
+use willow_sdk::{WillowClient, DEVNET_VALIDATOR_1};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -42,7 +42,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "in_stock": true
     });
 
-    match client.data().store_item(app_id, dataset_id, "product-1", product1).await {
+    match client
+        .data()
+        .store_item(app_id, dataset_id, "product-1", product1)
+        .await
+    {
         Ok(_) => println!("   Stored product-1"),
         Err(e) => println!("   Note: {}", e),
     }
@@ -96,7 +100,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 4. Get without verification (faster)
     println!("\n4. Get without verification (unverified)...");
-    match client.data().get_unverified(app_id, dataset_id, "product-2").await {
+    match client
+        .data()
+        .get_unverified(app_id, dataset_id, "product-2")
+        .await
+    {
         Ok(data) => {
             println!("   Retrieved (unverified):");
             println!("   {}", serde_json::to_string_pretty(&data)?);
@@ -114,7 +122,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "updated": true
     });
 
-    match client.data().update(app_id, dataset_id, "product-1", updated_product).await {
+    match client
+        .data()
+        .update(app_id, dataset_id, "product-1", updated_product)
+        .await
+    {
         Ok(_) => println!("   Updated product-1"),
         Err(e) => println!("   Note: {}", e),
     }
@@ -133,7 +145,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(response) => {
             println!("   Found {} documents", response.documents.len());
             if let Some(root_hash) = response.verified_root_hash {
-                println!("   Verified against root: {}...", &root_hash[..16.min(root_hash.len())]);
+                println!(
+                    "   Verified against root: {}...",
+                    &root_hash[..16.min(root_hash.len())]
+                );
             }
             for doc in &response.documents {
                 println!("   - {}", serde_json::to_string(doc)?);
@@ -148,9 +163,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "limit": 5
     });
 
-    match client.data().query_unverified(app_id, dataset_id, query).await {
+    match client
+        .data()
+        .query_unverified(app_id, dataset_id, query)
+        .await
+    {
         Ok(response) => {
-            println!("   Found {} documents (unverified)", response.documents.len());
+            println!(
+                "   Found {} documents (unverified)",
+                response.documents.len()
+            );
         }
         Err(e) => println!("   Note: {}", e),
     }

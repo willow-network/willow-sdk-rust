@@ -8,8 +8,8 @@
 //!
 //! Run with: cargo run --example graphql_indexing
 
-use willow_sdk::WillowClient;
 use serde_json::json;
+use willow_sdk::WillowClient;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -58,7 +58,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     "#;
 
-    match client.indexing().graphql_query("uniswap-v3", query, None).await {
+    match client
+        .indexing()
+        .graphql_query("uniswap-v3", query, None)
+        .await
+    {
         Ok(response) => {
             println!("   Query result:");
             if let Some(data) = response.data {
@@ -159,7 +163,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("   Unverified blocks: {}", stats.unverified_blocks);
             println!("   Finalized blocks: {}", stats.finalized_blocks);
             println!("   Failed blocks: {}", stats.failed_blocks);
-            println!("   Verification rate: {:.2}%", stats.verification_rate * 100.0);
+            println!(
+                "   Verification rate: {:.2}%",
+                stats.verification_rate * 100.0
+            );
         }
         Err(e) => println!("   Note: {}", e),
     }

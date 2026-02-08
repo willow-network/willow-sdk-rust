@@ -30,7 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app_type = "storage"; // "storage" or "indexing"
 
     let nonce: u64 = 0; // Increment for each transaction from this DID
-    // =========================================================================
+                        // =========================================================================
 
     let client = WillowClient::builder()
         .api_url(api_url)
