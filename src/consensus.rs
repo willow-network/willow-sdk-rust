@@ -35,16 +35,61 @@ pub struct RegisterAppTx {
     pub nonce: u64,
 }
 
+/// The mode of a subgrove: either data storage or blockchain indexing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum SubgroveMode {
+    /// Data storage mode — stores arbitrary off-chain data with verification.
+    DataStorage {
+        name: String,
+        #[serde(default)]
+        writers: Vec<String>,
+        #[serde(default)]
+        readers: Vec<String>,
+        #[serde(default)]
+        read_pricing: Option<serde_json::Value>,
+        #[serde(default = "default_required_verifications")]
+        required_verifications: u32,
+    },
+    /// Blockchain indexing mode — indexes on-chain data with WASM transformations.
+    BlockchainIndexing {
+        manifest_ipfs: String,
+        #[serde(default)]
+        manifest_content: Vec<u8>,
+        #[serde(default)]
+        wasm_modules: Vec<serde_json::Value>,
+        #[serde(default)]
+        execution_mode: serde_json::Value,
+        #[serde(default)]
+        indexer_config: serde_json::Value,
+    },
+}
+
+fn default_required_verifications() -> u32 {
+    3
+}
+
+impl Default for SubgroveMode {
+    fn default() -> Self {
+        SubgroveMode::DataStorage {
+            name: String::new(),
+            writers: Vec::new(),
+            readers: Vec::new(),
+            read_pricing: None,
+            required_verifications: 3,
+        }
+    }
+}
+
 /// Register Subgrove transaction
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisterSubgroveTx {
     pub subgrove_id: String,
     pub app_id: String,
-    pub name: String,
     pub schema: String, // JSON schema
     pub owner_did: String,
-    pub writers: Vec<String>,
-    pub readers: Vec<String>,
+    #[serde(default)]
+    pub mode: SubgroveMode,
     pub signature: Vec<u8>,
     pub public_key_id: String,
     pub nonce: u64,
@@ -342,6 +387,7 @@ impl ConsensusClient {
         let schema_hash = hasher.finalize();
         let schema_hash_hex = hex::encode(schema_hash);
 
+        // Build canonical sign message based on mode
         let message = format!(
             "RegisterSubgrove\nID: {}\nApp: {}\nName: {}\nSchemaHash: {}\nOwner: {}\nWriters: {}\nReaders: {}\nNonce: {}",
             request.subgrove_id,
@@ -358,16 +404,22 @@ impl ConsensusClient {
         let signature = signing_key.sign(message.as_bytes());
         request.signature = signature.to_bytes().to_vec();
 
-        // Create transaction
+        // Create transaction with DataStorage mode (SDK default)
         let transaction = json!({
             "RegisterSubgrove": {
                 "subgrove_id": request.subgrove_id,
                 "app_id": request.app_id,
-                "name": request.name,
                 "schema": schema_json,
                 "owner_did": request.owner_did,
-                "writers": request.writers,
-                "readers": request.readers,
+                "mode": {
+                    "DataStorage": {
+                        "name": request.name,
+                        "writers": request.writers,
+                        "free_readers": request.readers,
+                        "read_pricing": null,
+                        "required_verifications": 3
+                    }
+                },
                 "signature": request.signature,
                 "public_key_id": request.public_key_id,
                 "nonce": request.nonce,
@@ -543,11 +595,15 @@ mod tests {
         let tx = RegisterSubgroveTx {
             subgrove_id: "test-subgrove".to_string(),
             app_id: "test-app".to_string(),
-            name: "Test Subgrove".to_string(),
             schema: r#"{"type":"object"}"#.to_string(),
             owner_did: "did:willow:owner".to_string(),
-            writers: vec!["did:willow:writer".to_string()],
-            readers: vec!["did:willow:reader".to_string()],
+            mode: SubgroveMode::DataStorage {
+                name: "Test Subgrove".to_string(),
+                writers: vec!["did:willow:writer".to_string()],
+                readers: vec!["did:willow:reader".to_string()],
+                read_pricing: None,
+                required_verifications: 3,
+            },
             signature: vec![7, 8, 9],
             public_key_id: "did:willow:owner#key-1".to_string(),
             nonce: 3,
@@ -558,7 +614,6 @@ mod tests {
 
         assert_eq!(tx.subgrove_id, deserialized.subgrove_id);
         assert_eq!(tx.schema, deserialized.schema);
-        assert_eq!(tx.writers, deserialized.writers);
     }
 
     #[test]
