@@ -1,9 +1,9 @@
 //! GraphQL indexing example for the Willow Rust SDK
 //!
 //! This example demonstrates:
-//! - Listing available subgraphs
+//! - Listing available subgroves
 //! - Querying indexed blockchain data with GraphQL
-//! - Checking subgraph indexing status
+//! - Checking subgrove indexing status
 //! - Listing indexers
 //!
 //! Run with: cargo run --example graphql_indexing
@@ -18,16 +18,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let client = WillowClient::new("http://localhost:3031").await?;
 
-    // 1. List available subgraphs
-    println!("1. Listing available subgraphs...");
-    match client.indexing().list_subgraphs().await {
-        Ok(subgraphs) => {
-            if subgraphs.is_empty() {
-                println!("   No subgraphs deployed yet\n");
+    // 1. List available subgroves
+    println!("1. Listing available subgroves...");
+    match client.indexing().list_subgroves().await {
+        Ok(subgroves) => {
+            if subgroves.is_empty() {
+                println!("   No subgroves deployed yet\n");
             } else {
-                println!("   Found {} subgraphs:", subgraphs.len());
-                for sg in &subgraphs {
-                    println!("   - {} ({})", sg.name, sg.subgraph_id);
+                println!("   Found {} subgroves:", subgroves.len());
+                for sg in &subgroves {
+                    println!("   - {} ({})", sg.name, sg.subgrove_id);
                     println!("     Status: {:?}", sg.status);
                     println!("     Latest block: {}", sg.latest_block);
                 }
@@ -37,8 +37,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => println!("   Note: {}\n", e),
     }
 
-    // 2. Query a subgraph (example: Uniswap V3)
-    println!("2. Querying subgraph (example: uniswap-v3)...");
+    // 2. Query a subgrove (example: Uniswap V3)
+    println!("2. Querying subgrove (example: uniswap-v3)...");
     let query = r#"
         query {
             swaps(first: 5, orderBy: timestamp, orderDirection: desc) {
@@ -77,7 +77,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        Err(e) => println!("   Note: {} (subgraph may not exist)\n", e),
+        Err(e) => println!("   Note: {} (subgrove may not exist)\n", e),
     }
 
     // 3. Query with variables
@@ -118,11 +118,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => println!("   Note: {}\n", e),
     }
 
-    // 4. Get subgraph status
-    println!("\n4. Getting subgraph indexing status...");
-    match client.indexing().get_subgraph_status("uniswap-v3").await {
+    // 4. Get subgrove status
+    println!("\n4. Getting subgrove indexing status...");
+    match client.indexing().get_subgrove_status("uniswap-v3").await {
         Ok(status) => {
-            println!("   Subgraph: {}", status.subgraph_id);
+            println!("   Subgrove: {}", status.subgrove_id);
             println!("   Synced block: {}", status.synced_block);
             println!("   Target block: {}", status.target_block);
             println!("   Progress: {:.2}%", status.progress_percentage);
@@ -147,7 +147,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!("     Stake: {} WILL", indexer.stake_amount);
                     println!("     Status: {:?}", indexer.status);
                     println!("     Performance: {:.1}", indexer.performance_score);
-                    println!("     Subgraphs: {:?}", indexer.subgraphs);
+                    println!("     Subgroves: {:?}", indexer.subgroves);
                 }
             }
         }

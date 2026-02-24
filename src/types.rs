@@ -472,32 +472,32 @@ pub struct EthereumAnchor {
 }
 
 // ============================================================================
-// Subgraph / Indexer Types
+// Subgrove / Indexer Types
 // ============================================================================
 
-/// Subgraph information
+/// Subgrove information
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SubgraphInfo {
-    /// Unique subgraph identifier
-    pub subgraph_id: String,
+pub struct SubgroveInfo {
+    /// Unique subgrove identifier
+    pub subgrove_id: String,
     /// Human-readable name
     pub name: String,
     /// Owner DID
     pub owner_did: String,
     /// Current status
-    pub status: SubgraphStatus,
+    pub status: SubgroveStatus,
     /// Latest indexed block
     pub latest_block: u64,
-    /// Indexers currently serving this subgraph
+    /// Indexers currently serving this subgrove
     pub indexers: Vec<String>,
-    /// IPFS hash of the subgraph manifest
+    /// IPFS hash of the subgrove manifest
     pub manifest_ipfs: String,
 }
 
-/// Subgraph status
+/// Subgrove status
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum SubgraphStatus {
+pub enum SubgroveStatus {
     /// Currently being indexed
     Syncing,
     /// Fully synced and serving queries
@@ -508,11 +508,11 @@ pub enum SubgraphStatus {
     Failed,
 }
 
-/// Subgraph indexing status with detailed progress
+/// Subgrove indexing status with detailed progress
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SubgraphIndexingStatus {
-    /// Subgraph identifier
-    pub subgraph_id: String,
+pub struct SubgroveIndexingStatus {
+    /// Subgrove identifier
+    pub subgrove_id: String,
     /// Current synced block
     pub synced_block: u64,
     /// Target block (chain head)
@@ -531,8 +531,8 @@ pub struct SubgraphIndexingStatus {
 pub struct IndexerInfo {
     /// Indexer's DID
     pub indexer_did: String,
-    /// Subgraphs being indexed
-    pub subgraphs: Vec<String>,
+    /// Subgroves being indexed
+    pub subgroves: Vec<String>,
     /// Total staked amount
     pub stake_amount: u128,
     /// Query endpoint URL

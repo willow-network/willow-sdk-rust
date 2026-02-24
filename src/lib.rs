@@ -100,7 +100,7 @@ pub use types::{
     HealthStatus, IndexDefinition, IndexerInfo, IndexerStatus, MerkleProof, PathQueryData,
     PublicKey, QueryProof, RegisterAppRequest, RegisterSubgroveRequest, SchemaDefinition,
     SchemaField, SignatureAlgorithm, SignedRequestHeaders, StakeRequest, StoreDataRequest,
-    SubgraphIndexingStatus, SubgraphInfo, SubgraphStatus, SubgroveRegistration, TokenInfo,
+    SubgroveIndexingStatus, SubgroveInfo, SubgroveRegistration, SubgroveStatus, TokenInfo,
     TransferRequest, UnstakeRequest, ValidatorInfo, ValidatorStatus, VerificationStats,
     VerifyProofRequest, VerifyProofResponse,
 };

@@ -193,7 +193,7 @@ impl WillowClient {
         ValidatorOperations::new(self.clone())
     }
 
-    /// Get indexing operations (GraphQL, subgraphs)
+    /// Get indexing operations (GraphQL, subgroves)
     pub fn indexing(&self) -> IndexingOperations {
         IndexingOperations::new(self.clone())
     }

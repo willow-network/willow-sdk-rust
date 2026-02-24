@@ -192,7 +192,7 @@ let is_valid = verify_signature(message, &signature, &public_key_hex, SignatureA
 Query indexed blockchain data with cryptographic proofs:
 
 ```rust
-// Query a subgraph
+// Query a subgrove
 let result = client.indexing().graphql_query(
     "uniswap-v3",
     r#"
@@ -208,11 +208,11 @@ let result = client.indexing().graphql_query(
     None
 ).await?;
 
-// List available subgraphs
-let subgraphs = client.indexing().list_subgraphs().await?;
+// List available subgroves
+let subgroves = client.indexing().list_subgroves().await?;
 
-// Get subgraph status
-let status = client.indexing().get_subgraph_status("uniswap-v3").await?;
+// Get subgrove status
+let status = client.indexing().get_subgrove_status("uniswap-v3").await?;
 println!("Synced to block: {}", status.synced_block);
 
 // List indexers

@@ -1,7 +1,7 @@
 //! Indexing and GraphQL operations for querying blockchain data.
 //!
 //! This module provides access to indexed blockchain data through GraphQL
-//! queries and subgraph management.
+//! queries and subgrove management.
 //!
 //! # Example
 //!
@@ -10,7 +10,7 @@
 //!
 //! let client = WillowClient::new("http://localhost:3031").await?;
 //!
-//! // Query a subgraph using GraphQL
+//! // Query a subgrove using GraphQL
 //! let result = client.indexing()
 //!     .graphql_query("uniswap-v3", r#"
 //!         query {
@@ -23,15 +23,15 @@
 //!     "#, None)
 //!     .await?;
 //!
-//! // List available subgraphs
-//! let subgraphs = client.indexing().list_subgraphs().await?;
+//! // List available subgroves
+//! let subgroves = client.indexing().list_subgroves().await?;
 //! ```
 
 use crate::client::WillowClient;
 use crate::errors::{Result, WillowError};
 use crate::types::{
-    ApiResponse, GraphQLRequest, GraphQLResponse, IndexerInfo, SubgraphIndexingStatus,
-    SubgraphInfo, VerificationStats,
+    ApiResponse, GraphQLRequest, GraphQLResponse, IndexerInfo, SubgroveIndexingStatus,
+    SubgroveInfo, VerificationStats,
 };
 
 /// Operations for interacting with indexed blockchain data.
@@ -44,11 +44,11 @@ impl IndexingOperations {
         Self { client }
     }
 
-    /// Executes a GraphQL query against an indexed subgraph.
+    /// Executes a GraphQL query against an indexed subgrove.
     ///
     /// # Arguments
     ///
-    /// * `subgraph_id` - The subgraph to query
+    /// * `subgrove_id` - The subgrove to query
     /// * `query` - The GraphQL query string
     /// * `variables` - Optional query variables
     ///
@@ -57,7 +57,7 @@ impl IndexingOperations {
     /// The query result with optional cryptographic proof.
     pub async fn graphql_query(
         &self,
-        subgraph_id: &str,
+        subgrove_id: &str,
         query: &str,
         variables: Option<serde_json::Value>,
     ) -> Result<GraphQLResponse> {
@@ -70,7 +70,7 @@ impl IndexingOperations {
             .client
             .request(
                 "POST",
-                &format!("/graphql/{}", subgraph_id),
+                &format!("/graphql/{}", subgrove_id),
                 Some(&request),
                 false, // GraphQL queries don't require auth
             )
@@ -81,23 +81,23 @@ impl IndexingOperations {
             .ok_or_else(|| WillowError::Custom("No data in GraphQL response".to_string()))
     }
 
-    /// Lists all available subgraphs.
-    pub async fn list_subgraphs(&self) -> Result<Vec<SubgraphInfo>> {
-        let response: ApiResponse<Vec<SubgraphInfo>> = self
+    /// Lists all available subgroves.
+    pub async fn list_subgroves(&self) -> Result<Vec<SubgroveInfo>> {
+        let response: ApiResponse<Vec<SubgroveInfo>> = self
             .client
-            .request("GET", "/subgraphs", None::<&()>, false)
+            .request("GET", "/subgroves", None::<&()>, false)
             .await?;
 
         Ok(response.data.unwrap_or_default())
     }
 
-    /// Gets information about a specific subgraph.
-    pub async fn get_subgraph(&self, subgraph_id: &str) -> Result<SubgraphInfo> {
-        let response: ApiResponse<SubgraphInfo> = self
+    /// Gets information about a specific subgrove.
+    pub async fn get_subgrove(&self, subgrove_id: &str) -> Result<SubgroveInfo> {
+        let response: ApiResponse<SubgroveInfo> = self
             .client
             .request(
                 "GET",
-                &format!("/subgraphs/{}", subgraph_id),
+                &format!("/subgroves/{}", subgrove_id),
                 None::<&()>,
                 false,
             )
@@ -105,16 +105,16 @@ impl IndexingOperations {
 
         response
             .data
-            .ok_or_else(|| WillowError::NotFound(format!("Subgraph not found: {}", subgraph_id)))
+            .ok_or_else(|| WillowError::NotFound(format!("Subgrove not found: {}", subgrove_id)))
     }
 
-    /// Gets the indexing status of a subgraph.
-    pub async fn get_subgraph_status(&self, subgraph_id: &str) -> Result<SubgraphIndexingStatus> {
-        let response: ApiResponse<SubgraphIndexingStatus> = self
+    /// Gets the indexing status of a subgrove.
+    pub async fn get_subgrove_status(&self, subgrove_id: &str) -> Result<SubgroveIndexingStatus> {
+        let response: ApiResponse<SubgroveIndexingStatus> = self
             .client
             .request(
                 "GET",
-                &format!("/subgraphs/{}/status", subgraph_id),
+                &format!("/subgroves/{}/status", subgrove_id),
                 None::<&()>,
                 false,
             )
@@ -122,7 +122,7 @@ impl IndexingOperations {
 
         response
             .data
-            .ok_or_else(|| WillowError::NotFound(format!("Subgraph not found: {}", subgraph_id)))
+            .ok_or_else(|| WillowError::NotFound(format!("Subgrove not found: {}", subgrove_id)))
     }
 
     /// Lists all registered indexers.
