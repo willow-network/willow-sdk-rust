@@ -26,18 +26,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // What to query
     let app_id = "my-app";
     let subgrove_id = "users";
+    let key = "user-1";
     // =========================================================================
 
     let client = WillowClient::new(api_url).await?;
 
-    client.authenticate(did, private_key, public_key_id).await?;
+    client.set_identity(did, private_key, public_key_id);
 
-    println!("Querying: {}/{}", app_id, subgrove_id);
+    // Get a specific document by key
+    println!("Getting: {}/{}/{}", app_id, subgrove_id, key);
+    match client.data().get_unverified(app_id, subgrove_id, key).await {
+        Ok(data) => {
+            println!("Document:");
+            println!("  {}", serde_json::to_string_pretty(&data)?);
+        }
+        Err(e) => {
+            println!("Error: {}", e);
+        }
+    }
 
-    // Query all documents
+    // Query all documents in the subgrove
+    println!("\nQuerying all: {}/{}", app_id, subgrove_id);
     match client
         .data()
-        .query(app_id, subgrove_id, json!({ "limit": 100 }))
+        .query_unverified(app_id, subgrove_id, json!({ "limit": 100 }))
         .await
     {
         Ok(response) => {

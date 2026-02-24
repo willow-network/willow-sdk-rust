@@ -58,17 +58,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 4. Authenticate with devnet test account (pre-registered)
     println!("4. Authenticating with devnet test account...");
     println!("   DID: {}", DEVNET_VALIDATOR_1.did);
-    match client
-        .authenticate(
-            DEVNET_VALIDATOR_1.did,
-            DEVNET_VALIDATOR_1.private_key,
-            DEVNET_VALIDATOR_1.public_key_id,
-        )
-        .await
-    {
-        Ok(_) => println!("   Authenticated successfully\n"),
-        Err(e) => println!("   Note: {}\n", e),
-    }
+    client.set_identity(
+        DEVNET_VALIDATOR_1.did,
+        DEVNET_VALIDATOR_1.private_key,
+        DEVNET_VALIDATOR_1.public_key_id,
+    );
+    println!("   Authenticated successfully\n");
 
     // 5. List registered apps
     println!("5. Listing registered apps...");

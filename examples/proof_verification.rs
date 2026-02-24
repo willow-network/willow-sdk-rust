@@ -17,13 +17,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Setup: authenticate with devnet test account
     let client = WillowClient::new("http://localhost:3031").await?;
-    client
-        .authenticate(
-            DEVNET_VALIDATOR_1.did,
-            DEVNET_VALIDATOR_1.private_key,
-            DEVNET_VALIDATOR_1.public_key_id,
-        )
-        .await?;
+    client.set_identity(
+        DEVNET_VALIDATOR_1.did,
+        DEVNET_VALIDATOR_1.private_key,
+        DEVNET_VALIDATOR_1.public_key_id,
+    );
 
     println!("Authenticated as: {}\n", DEVNET_VALIDATOR_1.did);
 

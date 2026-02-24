@@ -31,7 +31,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Amount to fund (in base units, 18 decimals)
     let amount: u128 = 10_000_000_000_000_000_000; // 10 WILL
 
-    let nonce: u64 = 0; // Increment for each transaction from this DID
+    let nonce: u64 = 3; // Must be > previous nonce; increment for each tx
                         // =========================================================================
 
     let client = WillowClient::builder()

@@ -27,7 +27,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let client = WillowClient::new(api_url).await?;
 
-    client.authenticate(did, private_key, public_key_id).await?;
+    client.set_identity(did, private_key, public_key_id);
 
     // List all apps
     println!("Registered Apps:");

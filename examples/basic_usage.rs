@@ -23,13 +23,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 2. Authenticate with devnet test account
     println!("2. Authenticating with devnet test account...");
     println!("   DID: {}", DEVNET_VALIDATOR_1.did);
-    client
-        .authenticate(
-            DEVNET_VALIDATOR_1.did,
-            DEVNET_VALIDATOR_1.private_key,
-            DEVNET_VALIDATOR_1.public_key_id,
-        )
-        .await?;
+    client.set_identity(
+        DEVNET_VALIDATOR_1.did,
+        DEVNET_VALIDATOR_1.private_key,
+        DEVNET_VALIDATOR_1.public_key_id,
+    );
     println!("   Authenticated successfully\n");
 
     // 3. Store data (requires an existing app and dataset)

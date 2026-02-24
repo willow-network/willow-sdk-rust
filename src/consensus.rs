@@ -148,7 +148,7 @@ impl ConsensusClient {
     ) -> Result<String> {
         // Create app registration message to sign
         let app_message = format!(
-            "RegisterApp\nApp ID: {}\nName: {}\nDescription: {}\nType: {}\nOwner: {}\nAdmins: {}\nNonce: {}",
+            "RegisterApp\nID: {}\nName: {}\nDescription: {}\nType: {}\nOwner: {}\nAdmins: {}\nNonce: {}",
             app_id, name, description, app_type, owner_did, admins.join(","), nonce
         );
 
@@ -258,8 +258,14 @@ impl ConsensusClient {
         // Check for errors
         if let Some(error) = rpc_response.error {
             return Err(WillowError::Custom(format!(
-                "CometBFT error: {} ({})",
-                error.message, error.code
+                "CometBFT error: {} ({}){}",
+                error.message,
+                error.code,
+                error
+                    .data
+                    .as_ref()
+                    .map(|d| format!(": {}", d))
+                    .unwrap_or_default()
             )));
         }
 

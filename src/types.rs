@@ -102,18 +102,19 @@ pub struct SignedRequestHeaders {
     pub x_timestamp: String,
 }
 
-/// Field type in schema
+/// Supported field types for schema definitions
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
 pub enum FieldType {
     String,
     Number,
     Boolean,
-    Object,
     Array,
+    Object,
+    Bytes,
 }
 
-/// Schema field definition
+/// Schema field definition (convenience wrapper used in some APIs)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SchemaField {
     #[serde(rename = "type")]
@@ -133,13 +134,15 @@ pub struct IndexDefinition {
     pub index_type: Option<String>,
 }
 
-/// Schema definition for datasets
+/// Schema definition for datasets (matches backend storage format)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SchemaDefinition {
     pub version: u32,
-    pub fields: HashMap<String, SchemaField>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub indexes: Option<Vec<IndexDefinition>>,
+    pub fields: HashMap<String, FieldType>,
+    #[serde(default)]
+    pub required_fields: Vec<String>,
+    #[serde(default)]
+    pub indexes: Vec<IndexDefinition>,
 }
 
 /// App registration request
@@ -194,12 +197,16 @@ pub struct SubgroveRegistration {
     pub subgrove_id: String,
     pub app_id: String,
     pub name: String,
-    pub subgrove_path: Vec<String>,
     pub schema: SchemaDefinition,
     pub owner_did: String,
     pub writers: Vec<String>,
-    pub readers: Vec<String>,
+    #[serde(alias = "readers")]
+    pub free_readers: Vec<String>,
+    #[serde(default)]
+    pub subgrove_path: Vec<String>,
+    #[serde(default)]
     pub created_at: u64,
+    #[serde(default)]
     pub updated_at: u64,
 }
 
@@ -274,16 +281,31 @@ pub struct TokenInfo {
 /// Balance information for a DID or app
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BalanceInfo {
-    /// Account identifier (DID or app_id)
-    pub account: String,
-    /// Available balance
-    pub balance: u128,
+    /// Account DID
+    pub did: String,
+    /// Available (spendable) balance
+    pub available: u128,
     /// Staked balance (for validators)
     #[serde(default)]
     pub staked: u128,
-    /// Unbonding balance (in cooldown period)
+    /// Locked balance (unbonding or bridge)
     #[serde(default)]
-    pub unbonding: u128,
+    pub locked: u128,
+}
+
+/// Balance information for an application
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppBalanceInfo {
+    /// Application ID
+    pub app_id: String,
+    /// Available balance
+    pub balance: u128,
+    /// Total amount spent
+    #[serde(default)]
+    pub total_spent: u128,
+    /// Last funded timestamp
+    #[serde(default)]
+    pub last_funded: u64,
 }
 
 /// Token transfer request
@@ -299,17 +321,23 @@ pub struct TransferRequest {
 // Fee Types
 // ============================================================================
 
-/// Fee schedule for storage and operations
+/// Fee schedule defining costs for various operations
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FeeSchedule {
-    /// Fee per byte of storage per day (in WILL)
-    pub storage_fee_per_byte_per_day: u128,
-    /// Fee for queries (per query)
-    pub query_fee: u128,
-    /// Fee for indexing (per block)
-    pub indexing_fee_per_block: u128,
-    /// Minimum app balance required
-    pub minimum_app_balance: u128,
+    /// Fee to register a DID (identity)
+    pub did_registration: u128,
+    /// Fee to register an application
+    pub app_registration: u128,
+    /// Fee to register a subgrove
+    pub subgrove_registration: u128,
+    /// Fee per KB of data written
+    pub data_write_per_kb: u128,
+    /// Fee to generate a proof
+    pub proof_generation: u128,
+    /// Fee per query after rate limit
+    pub query_after_limit: u128,
+    /// Transfer fee in basis points (1/10000)
+    pub transfer_fee_percentage: u32,
 }
 
 // ============================================================================

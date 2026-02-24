@@ -27,15 +27,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let client = WillowClient::new(api_url).await?;
 
-    client.authenticate(did, private_key, public_key_id).await?;
+    client.set_identity(did, private_key, public_key_id);
 
     // Check DID balance
     println!("DID: {}", did);
     match client.token().get_balance(did).await {
         Ok(balance) => {
-            println!("  Balance: {} WILL", balance.balance);
+            println!("  Available: {} WILL", balance.available);
             if balance.staked > 0 {
                 println!("  Staked: {} WILL", balance.staked);
+            }
+            if balance.locked > 0 {
+                println!("  Locked: {} WILL", balance.locked);
             }
         }
         Err(e) => println!("  Error: {}", e),
@@ -56,13 +59,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\nFee Schedule:");
     match client.token().get_fee_schedule().await {
         Ok(fees) => {
+            println!("  DID Registration: {} WILL", fees.did_registration);
+            println!("  App Registration: {} WILL", fees.app_registration);
+            println!("  Subgrove Registration: {} WILL", fees.subgrove_registration);
+            println!("  Data Write: {} WILL/KB", fees.data_write_per_kb);
+            println!("  Proof Generation: {} WILL", fees.proof_generation);
+            println!("  Query (after limit): {} WILL", fees.query_after_limit);
             println!(
-                "  Storage: {} WILL/byte/day",
-                fees.storage_fee_per_byte_per_day
+                "  Transfer Fee: {} bps",
+                fees.transfer_fee_percentage
             );
-            println!("  Query: {} WILL", fees.query_fee);
-            println!("  Indexing: {} WILL/block", fees.indexing_fee_per_block);
-            println!("  Min App Balance: {} WILL", fees.minimum_app_balance);
         }
         Err(e) => println!("  Error: {}", e),
     }

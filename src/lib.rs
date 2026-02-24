@@ -95,7 +95,7 @@ pub use proof::{ProofVerifier, QueryResponseExt};
 pub use registration::RegistrationOperations;
 pub use token::TokenOperations;
 pub use types::{
-    ApiResponse, AppRegistration, BalanceInfo, BlockVerificationStatus, DidDocument,
+    ApiResponse, AppBalanceInfo, AppRegistration, BalanceInfo, BlockVerificationStatus, DidDocument,
     DidPermissions, EthereumAnchor, FeeSchedule, GraphQLError, GraphQLRequest, GraphQLResponse,
     HealthStatus, IndexDefinition, IndexerInfo, IndexerStatus, MerkleProof, PathQueryData,
     PublicKey, QueryProof, RegisterAppRequest, RegisterSubgroveRequest, SchemaDefinition,

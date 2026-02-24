@@ -35,10 +35,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let test_did = "did:willow:example123";
     match client.token().get_balance(test_did).await {
         Ok(balance) => {
-            println!("   Account: {}", balance.account);
-            println!("   Balance: {} WILL", balance.balance);
+            println!("   DID: {}", balance.did);
+            println!("   Available: {} WILL", balance.available);
             println!("   Staked: {} WILL", balance.staked);
-            println!("   Unbonding: {} WILL\n", balance.unbonding);
+            println!("   Locked: {} WILL\n", balance.locked);
         }
         Err(e) => println!("   Note: {} (DID may not exist)\n", e),
     }
@@ -48,10 +48,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let test_app = "example-app";
     match client.token().get_app_balance(test_app).await {
         Ok(balance) => {
-            println!("   Account: {}", balance.account);
+            println!("   App: {}", balance.app_id);
             println!("   Balance: {} WILL", balance.balance);
-            println!("   Staked: {} WILL", balance.staked);
-            println!("   Unbonding: {} WILL\n", balance.unbonding);
+            println!("   Total Spent: {} WILL\n", balance.total_spent);
         }
         Err(e) => println!("   Note: {} (App may not exist)\n", e),
     }
@@ -60,19 +59,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("4. Getting fee schedule...");
     match client.token().get_fee_schedule().await {
         Ok(fees) => {
-            println!(
-                "   Storage fee per byte per day: {} WILL",
-                fees.storage_fee_per_byte_per_day
-            );
-            println!("   Query fee: {} WILL", fees.query_fee);
-            println!(
-                "   Indexing fee per block: {} WILL",
-                fees.indexing_fee_per_block
-            );
-            println!(
-                "   Minimum app balance: {} WILL\n",
-                fees.minimum_app_balance
-            );
+            println!("   DID Registration: {} WILL", fees.did_registration);
+            println!("   App Registration: {} WILL", fees.app_registration);
+            println!("   Subgrove Registration: {} WILL", fees.subgrove_registration);
+            println!("   Data Write: {} WILL/KB", fees.data_write_per_kb);
+            println!("   Proof Generation: {} WILL", fees.proof_generation);
+            println!("   Query (after limit): {} WILL", fees.query_after_limit);
+            println!("   Transfer Fee: {} bps\n", fees.transfer_fee_percentage);
         }
         Err(e) => println!("   Note: {}\n", e),
     }

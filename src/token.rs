@@ -16,7 +16,7 @@
 //!
 //! // Check balance
 //! let balance = client.token().get_balance("did:willow:abc123").await?;
-//! println!("Balance: {}", balance.balance);
+//! println!("Available: {}", balance.available);
 //!
 //! // Get fee schedule
 //! let fees = client.token().get_fee_schedule().await?;
@@ -24,7 +24,7 @@
 
 use crate::client::WillowClient;
 use crate::errors::{Result, WillowError};
-use crate::types::{ApiResponse, BalanceInfo, FeeSchedule, TokenInfo};
+use crate::types::{ApiResponse, AppBalanceInfo, BalanceInfo, FeeSchedule, TokenInfo};
 
 /// Operations for token information and balances.
 pub struct TokenOperations {
@@ -70,8 +70,8 @@ impl TokenOperations {
     /// Gets the balance for an application.
     ///
     /// This is a public endpoint and does not require authentication.
-    pub async fn get_app_balance(&self, app_id: &str) -> Result<BalanceInfo> {
-        let response: ApiResponse<BalanceInfo> = self
+    pub async fn get_app_balance(&self, app_id: &str) -> Result<AppBalanceInfo> {
+        let response: ApiResponse<AppBalanceInfo> = self
             .client
             .request(
                 "GET",

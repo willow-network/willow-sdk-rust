@@ -36,7 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "email": "alice@example.com"
     });
 
-    let nonce: u64 = 2; // Increment for each transaction from this DID
+    let nonce: u64 = 4; // Must be > previous nonce; increment for each tx
                         // =========================================================================
 
     let client = WillowClient::builder()

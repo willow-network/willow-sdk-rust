@@ -11,7 +11,7 @@
 use ed25519_dalek::SigningKey;
 use std::collections::HashMap;
 use willow_sdk::{
-    types::{RegisterSubgroveRequest, SchemaDefinition, SchemaField},
+    types::{FieldType, RegisterSubgroveRequest, SchemaDefinition},
     WillowClient, DEVNET_VALIDATOR_1,
 };
 
@@ -33,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let subgrove_id = "users";
     let subgrove_name = "Users Collection";
 
-    let nonce: u64 = 1; // Increment for each transaction from this DID
+    let nonce: u64 = 2; // Must be > previous nonce; increment for each tx
                         // =========================================================================
 
     let client = WillowClient::builder()
@@ -50,24 +50,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map_err(|_| "Invalid key length")?,
     );
 
-    // Define schema
+    // Define schema (field name -> field type)
     let mut fields = HashMap::new();
-    fields.insert(
-        "name".to_string(),
-        SchemaField {
-            field_type: "string".to_string(),
-            required: true,
-            indexed: true,
-        },
-    );
-    fields.insert(
-        "email".to_string(),
-        SchemaField {
-            field_type: "string".to_string(),
-            required: true,
-            indexed: true,
-        },
-    );
+    fields.insert("name".to_string(), FieldType::String);
+    fields.insert("email".to_string(), FieldType::String);
 
     let request = RegisterSubgroveRequest {
         subgrove_id: subgrove_id.to_string(),
@@ -76,7 +62,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         schema: Some(SchemaDefinition {
             version: 1,
             fields,
-            indexes: None,
+            required_fields: vec!["name".to_string(), "email".to_string()],
+            indexes: vec![],
         }),
         owner_did: owner_did.to_string(),
         writers: vec![owner_did.to_string()],
