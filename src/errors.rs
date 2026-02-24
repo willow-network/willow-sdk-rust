@@ -21,12 +21,8 @@ pub enum WillowError {
     Authentication(String),
 
     /// Not authenticated
-    #[error("Not authenticated. Please call authenticate() first")]
+    #[error("Not authenticated. Please call set_identity() first")]
     NotAuthenticated,
-
-    /// Session expired
-    #[error("Session expired")]
-    SessionExpired,
 
     /// Validation error
     #[error("Validation error: {0}")]
@@ -151,12 +147,6 @@ mod tests {
     fn test_not_authenticated_display() {
         let err = WillowError::NotAuthenticated;
         assert!(err.to_string().contains("Not authenticated"));
-    }
-
-    #[test]
-    fn test_session_expired_display() {
-        let err = WillowError::SessionExpired;
-        assert_eq!(err.to_string(), "Session expired");
     }
 
     #[test]

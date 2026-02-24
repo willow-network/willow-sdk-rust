@@ -564,11 +564,7 @@ impl DataOperations {
     }
 
     fn ensure_authenticated(&self) -> Result<()> {
-        if !self.client.is_authenticated() {
-            Err(WillowError::NotAuthenticated)
-        } else {
-            Ok(())
-        }
+        self.client.require_auth()
     }
 
     /// Verify proof and compare with consensus root hash.

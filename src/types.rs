@@ -4,7 +4,6 @@
 //! the Willow API, including request/response types, DID documents, and
 //! indexing-related structures.
 
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -85,47 +84,22 @@ impl DidInfo {
     }
 }
 
-/// Authentication challenge from server
+/// Per-request signature headers for authentication.
+/// Message format: {METHOD}:{PATH}:{TIMESTAMP}
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuthenticationChallenge {
-    pub challenge: String,
-    #[serde(alias = "timestamp")]
-    pub expires_at: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub did: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub nonce: Option<String>,
-}
-
-/// Authentication response to send to server
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuthenticationResponse {
-    pub did: String,
-    pub challenge: String,
-    pub signature: String,
-    pub public_key_id: String,
-}
-
-/// Authenticated session
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Session {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub session_id: Option<String>,
-    pub did: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub token: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub created_at: Option<u64>,
-    pub expires_at: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub permissions: Option<Vec<String>>,
-}
-
-impl Session {
-    pub fn is_expired(&self) -> bool {
-        let now = Utc::now().timestamp() as u64; // Server uses seconds, not milliseconds
-        now > self.expires_at
-    }
+pub struct SignedRequestHeaders {
+    /// The DID being authenticated
+    #[serde(rename = "X-DID")]
+    pub x_did: String,
+    /// Which key in the DID doc signed this
+    #[serde(rename = "X-Public-Key-ID")]
+    pub x_public_key_id: String,
+    /// Hex-encoded signature over the message
+    #[serde(rename = "X-Signature")]
+    pub x_signature: String,
+    /// Unix timestamp (must be within 300s of server time)
+    #[serde(rename = "X-Timestamp")]
+    pub x_timestamp: String,
 }
 
 /// Field type in schema
@@ -794,76 +768,6 @@ mod tests {
 
         assert_eq!(info.private_key_hex(), "deadbeef");
         assert_eq!(info.public_key_hex(), "cafebabe");
-    }
-
-    // ========================================================================
-    // Session Tests
-    // ========================================================================
-
-    #[test]
-    fn test_session_expired() {
-        let expired_session = Session {
-            session_id: Some("test-session".to_string()),
-            did: "did:willow:test".to_string(),
-            token: Some("token123".to_string()),
-            created_at: Some(1000),
-            expires_at: 1, // Expired long ago
-            permissions: None,
-        };
-
-        assert!(expired_session.is_expired());
-    }
-
-    #[test]
-    fn test_session_not_expired() {
-        let valid_session = Session {
-            session_id: Some("test-session".to_string()),
-            did: "did:willow:test".to_string(),
-            token: Some("token123".to_string()),
-            created_at: Some(1000),
-            expires_at: u64::MAX, // Far in the future
-            permissions: Some(vec!["read".to_string(), "write".to_string()]),
-        };
-
-        assert!(!valid_session.is_expired());
-    }
-
-    #[test]
-    fn test_session_serialization() {
-        let session = Session {
-            session_id: Some("sess-123".to_string()),
-            did: "did:willow:user".to_string(),
-            token: Some("jwt-token".to_string()),
-            created_at: Some(1000),
-            expires_at: 2000,
-            permissions: Some(vec!["admin".to_string()]),
-        };
-
-        let json = serde_json::to_string(&session).unwrap();
-        let deserialized: Session = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(session.did, deserialized.did);
-        assert_eq!(session.expires_at, deserialized.expires_at);
-    }
-
-    // ========================================================================
-    // AuthenticationChallenge Tests
-    // ========================================================================
-
-    #[test]
-    fn test_authentication_challenge_serialization() {
-        let challenge = AuthenticationChallenge {
-            challenge: "random-challenge-string".to_string(),
-            expires_at: 1234567890,
-            did: Some("did:willow:test".to_string()),
-            nonce: Some("nonce123".to_string()),
-        };
-
-        let json = serde_json::to_string(&challenge).unwrap();
-        let deserialized: AuthenticationChallenge = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(challenge.challenge, deserialized.challenge);
-        assert_eq!(challenge.expires_at, deserialized.expires_at);
     }
 
     // ========================================================================

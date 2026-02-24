@@ -40,7 +40,7 @@ impl RegistrationOperations {
     /// If authenticated, returns apps the caller has access to.
     /// If unauthenticated, returns only public apps.
     pub async fn list_apps(&self) -> Result<Vec<AppRegistration>> {
-        let authenticated = self.client.is_authenticated();
+        let authenticated = self.client.has_identity();
 
         let response: ApiResponse<Vec<AppRegistration>> = self
             .client
@@ -72,7 +72,7 @@ impl RegistrationOperations {
     /// If authenticated, returns subgroves the caller has access to.
     /// If unauthenticated, returns only public subgroves.
     pub async fn list_subgroves(&self, app_id: &str) -> Result<Vec<SubgroveRegistration>> {
-        let authenticated = self.client.is_authenticated();
+        let authenticated = self.client.has_identity();
 
         let response: ApiResponse<Vec<SubgroveRegistration>> = self
             .client

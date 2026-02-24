@@ -25,12 +25,12 @@
 //!         .build()
 //!         .await?;
 //!
-//!     // Authenticate with devnet validator 1 (or your own DID)
-//!     client.authenticate(
+//!     // Set identity for per-request signing (or your own DID)
+//!     client.set_identity(
 //!         DEVNET_VALIDATOR_1.did,
 //!         DEVNET_VALIDATOR_1.private_key,
 //!         DEVNET_VALIDATOR_1.public_key_id
-//!     ).await?;
+//!     );
 //!
 //!     // All data operations are automatically verified against consensus
 //!     let data = client.data().get("app_id", "dataset", "key").await?;
@@ -99,7 +99,7 @@ pub use types::{
     DidPermissions, EthereumAnchor, FeeSchedule, GraphQLError, GraphQLRequest, GraphQLResponse,
     HealthStatus, IndexDefinition, IndexerInfo, IndexerStatus, MerkleProof, PathQueryData,
     PublicKey, QueryProof, RegisterAppRequest, RegisterSubgroveRequest, SchemaDefinition,
-    SchemaField, Session, SignatureAlgorithm, StakeRequest, StoreDataRequest,
+    SchemaField, SignatureAlgorithm, SignedRequestHeaders, StakeRequest, StoreDataRequest,
     SubgraphIndexingStatus, SubgraphInfo, SubgraphStatus, SubgroveRegistration, TokenInfo,
     TransferRequest, UnstakeRequest, ValidatorInfo, ValidatorStatus, VerificationStats,
     VerifyProofRequest, VerifyProofResponse,
@@ -123,12 +123,12 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ///     let client = WillowClient::new("http://localhost:3031").await?;
 ///
-///     // Authenticate with devnet validator 1
-///     client.authenticate(
+///     // Set identity for per-request signing
+///     client.set_identity(
 ///         DEVNET_VALIDATOR_1.did,
 ///         DEVNET_VALIDATOR_1.private_key,
 ///         DEVNET_VALIDATOR_1.public_key_id
-///     ).await?;
+///     );
 ///
 ///     Ok(())
 /// }

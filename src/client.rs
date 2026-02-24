@@ -9,26 +9,33 @@ use crate::indexing::IndexingOperations;
 use crate::light_client::{LightClient, LightClientConfig};
 use crate::registration::RegistrationOperations;
 use crate::token::TokenOperations;
-use crate::types::{
-    ApiResponse, AuthenticationChallenge, AuthenticationResponse, HealthStatus, Session,
-};
+use crate::types::{ApiResponse, HealthStatus, SignatureAlgorithm};
 use crate::utils::{parse_api_url, RetryConfig};
 use crate::validators::ValidatorOperations;
 use reqwest::{Client, StatusCode};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 #[cfg(not(feature = "no-light-client"))]
 use tokio::sync::OnceCell;
 use url::Url;
+
+/// Identity for per-request signing
+#[derive(Clone, Debug)]
+struct ClientIdentity {
+    did: String,
+    private_key_hex: String,
+    public_key_id: String,
+    algorithm: SignatureAlgorithm,
+}
 
 /// Main client for interacting with Willow
 #[derive(Clone)]
 pub struct WillowClient {
     http_client: Client,
     base_url: Url,
-    session: Arc<Mutex<Option<Session>>>,
+    identity: Arc<RwLock<Option<ClientIdentity>>>,
     retry_config: RetryConfig,
     #[cfg(not(feature = "no-light-client"))]
     light_client: Option<Arc<LightClient>>,
@@ -50,85 +57,64 @@ impl WillowClient {
         WillowClientBuilder::default()
     }
 
-    /// Authenticate with DID and private key
-    pub async fn authenticate(
-        &self,
-        did: &str,
-        private_key_hex: &str,
-        public_key_id: &str,
-    ) -> Result<Session> {
-        // Get challenge
-        let challenge_response: ApiResponse<AuthenticationChallenge> = self
-            .request_with_retry(
-                "GET",
-                &format!("/auth/challenge/{}", did),
-                None::<&()>,
-                false,
-            )
-            .await?;
-
-        let challenge = challenge_response
-            .data
-            .ok_or_else(|| WillowError::Authentication("No challenge received".to_string()))?;
-
-        // Sign challenge - must match server's expected format
-        let message = format!(
-            "DID Authentication\nChallenge: {}\nNonce: {}\nDID: {}\nExpires: {}",
-            challenge.challenge,
-            challenge.nonce.as_ref().unwrap_or(&"".to_string()),
-            challenge.did.as_ref().unwrap_or(&did.to_string()),
-            challenge.expires_at
-        );
+    /// Set identity for per-request signing.
+    ///
+    /// All subsequent requests will include signature headers automatically.
+    pub fn set_identity(&self, did: &str, private_key_hex: &str, public_key_id: &str) {
         let algorithm = detect_algorithm_from_did(did);
-        let signature = sign_challenge(&message, private_key_hex, algorithm)?;
-
-        // Create auth response
-        let auth_response = AuthenticationResponse {
+        let mut identity_lock = self.identity.write().unwrap();
+        *identity_lock = Some(ClientIdentity {
             did: did.to_string(),
-            challenge: challenge.challenge.clone(),
-            signature,
+            private_key_hex: private_key_hex.to_string(),
             public_key_id: public_key_id.to_string(),
-        };
+            algorithm,
+        });
+    }
 
-        // Verify authentication
-        let body = serde_json::json!([challenge, auth_response]);
-        let session_response: ApiResponse<Session> = self
-            .request_with_retry("POST", "/auth/verify", Some(&body), false)
-            .await?;
+    /// Check if an identity is set for signing.
+    pub fn has_identity(&self) -> bool {
+        self.identity.read().unwrap().is_some()
+    }
 
-        let session = session_response
-            .data
-            .ok_or_else(|| WillowError::Authentication("No session received".to_string()))?;
+    /// Get the current DID, if identity is set.
+    pub fn get_did(&self) -> Option<String> {
+        self.identity.read().unwrap().as_ref().map(|i| i.did.clone())
+    }
 
-        // Store session
-        {
-            let mut session_lock = self.session.lock().unwrap();
-            *session_lock = Some(session.clone());
+    /// Clear the current identity.
+    pub fn clear_identity(&self) {
+        let mut identity_lock = self.identity.write().unwrap();
+        *identity_lock = None;
+    }
+
+    /// Require that an identity is set, returning an error if not.
+    pub fn require_auth(&self) -> Result<()> {
+        if !self.has_identity() {
+            return Err(WillowError::NotAuthenticated);
         }
-
-        Ok(session)
+        Ok(())
     }
 
-    /// Check if authenticated
-    pub fn is_authenticated(&self) -> bool {
-        let session_lock = self.session.lock().unwrap();
-        if let Some(session) = &*session_lock {
-            !session.is_expired()
-        } else {
-            false
-        }
-    }
+    /// Sign a request and return the headers map.
+    fn sign_request(&self, method: &str, path: &str) -> Option<Vec<(String, String)>> {
+        let identity_lock = self.identity.read().unwrap();
+        let identity = identity_lock.as_ref()?;
 
-    /// Get current session
-    pub fn get_session(&self) -> Option<Session> {
-        let session_lock = self.session.lock().unwrap();
-        session_lock.clone()
-    }
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            .to_string();
+        let message = format!("{}:{}:{}", method, path, timestamp);
 
-    /// Clear session (logout)
-    pub fn clear_session(&self) {
-        let mut session_lock = self.session.lock().unwrap();
-        *session_lock = None;
+        let signature = sign_challenge(&message, &identity.private_key_hex, identity.algorithm).ok()?;
+
+        Some(vec![
+            ("X-DID".to_string(), identity.did.clone()),
+            ("X-Public-Key-ID".to_string(), identity.public_key_id.clone()),
+            ("X-Signature".to_string(), signature),
+            ("X-Timestamp".to_string(), timestamp),
+        ])
     }
 
     /// Get data operations
@@ -388,18 +374,13 @@ impl WillowClient {
             url.clone(),
         );
 
-        // Add authentication if required
-        if authenticated {
-            let session = self.get_session().ok_or(WillowError::NotAuthenticated)?;
-
-            if session.is_expired() {
-                return Err(WillowError::SessionExpired);
+        // Add signature headers if identity is set
+        if let Some(headers) = self.sign_request(method, path) {
+            for (key, value) in headers {
+                request = request.header(&key, &value);
             }
-
-            request = request.query(&[("did", &session.did)]).query(&[(
-                "session",
-                &session.session_id.as_ref().unwrap_or(&session.did),
-            )]);
+        } else if authenticated {
+            return Err(WillowError::NotAuthenticated);
         }
 
         // Add body if provided
@@ -565,7 +546,7 @@ impl WillowClientBuilder {
         Ok(WillowClient {
             http_client,
             base_url,
-            session: Arc::new(Mutex::new(None)),
+            identity: Arc::new(RwLock::new(None)),
             retry_config: self.retry_config,
             #[cfg(not(feature = "no-light-client"))]
             light_client,
@@ -587,8 +568,8 @@ mod tests {
     #[tokio::test]
     async fn test_client_new_default_url() {
         let client = WillowClient::new("http://localhost:3031").await.unwrap();
-        assert!(!client.is_authenticated());
-        assert!(client.get_session().is_none());
+        assert!(!client.has_identity());
+        assert!(client.get_did().is_none());
     }
 
     #[tokio::test]
@@ -599,7 +580,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(!client.is_authenticated());
+        assert!(!client.has_identity());
     }
 
     #[tokio::test]
@@ -611,7 +592,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(!client.is_authenticated());
+        assert!(!client.has_identity());
     }
 
     #[tokio::test]
@@ -630,7 +611,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(!client.is_authenticated());
+        assert!(!client.has_identity());
     }
 
     #[tokio::test]
@@ -644,28 +625,53 @@ mod tests {
     async fn test_client_url_normalization() {
         // URL without protocol should work (gets http:// prefix)
         let client = WillowClient::new("localhost:3031").await.unwrap();
-        assert!(!client.is_authenticated());
+        assert!(!client.has_identity());
     }
 
     // ========================================================================
-    // Session Tests
+    // Identity Tests
     // ========================================================================
 
     #[tokio::test]
-    async fn test_session_not_authenticated() {
+    async fn test_no_identity() {
         let client = WillowClient::new("http://localhost:3031").await.unwrap();
 
-        assert!(!client.is_authenticated());
-        assert!(client.get_session().is_none());
+        assert!(!client.has_identity());
+        assert!(client.get_did().is_none());
     }
 
     #[tokio::test]
-    async fn test_clear_session() {
+    async fn test_set_and_clear_identity() {
         let client = WillowClient::new("http://localhost:3031").await.unwrap();
 
-        // Even if not authenticated, clear_session should work
-        client.clear_session();
-        assert!(client.get_session().is_none());
+        client.set_identity(
+            "did:willow:Ed25519:abc123",
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "did:willow:Ed25519:abc123#key-1",
+        );
+        assert!(client.has_identity());
+        assert_eq!(client.get_did(), Some("did:willow:Ed25519:abc123".to_string()));
+
+        client.clear_identity();
+        assert!(!client.has_identity());
+        assert!(client.get_did().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_require_auth_without_identity() {
+        let client = WillowClient::new("http://localhost:3031").await.unwrap();
+        assert!(client.require_auth().is_err());
+    }
+
+    #[tokio::test]
+    async fn test_require_auth_with_identity() {
+        let client = WillowClient::new("http://localhost:3031").await.unwrap();
+        client.set_identity(
+            "did:willow:Ed25519:abc123",
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "did:willow:Ed25519:abc123#key-1",
+        );
+        assert!(client.require_auth().is_ok());
     }
 
     // ========================================================================
