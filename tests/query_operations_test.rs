@@ -201,42 +201,12 @@ async fn query_operations_test() {
     println!("\n⏳ Waiting for network to be ready...");
     println!("  (The test runner may have restarted the network)");
 
-    let mut authenticated = false;
-    for attempt in 1..=30 {
-        match client
-            .authenticate(
-                &funded_did,
-                PRIVATE_KEY_HEX,
-                &format!("{}#key-1", funded_did),
-            )
-            .await
-        {
-            Ok(_) => {
-                println!(
-                    "  ✅ Successfully authenticated with DID (attempt {})",
-                    attempt
-                );
-                authenticated = true;
-                break;
-            }
-            Err(e) => {
-                if attempt == 30 {
-                    panic!("Failed to authenticate after 30 attempts: {}. Network may not have completed initialization.", e);
-                }
-                if attempt == 1 || attempt % 5 == 0 {
-                    println!(
-                        "  ⏳ Waiting for funded DID to be registered... (attempt {}/30)",
-                        attempt
-                    );
-                }
-                sleep(Duration::from_secs(2)).await;
-            }
-        }
-    }
-
-    if !authenticated {
-        panic!("Could not authenticate with funded DID");
-    }
+    client.set_identity(
+        &funded_did,
+        PRIVATE_KEY_HEX,
+        &format!("{}#key-1", funded_did),
+    );
+    println!("  ✅ Identity set");
 
     // Test 1: Simple filter query
     println!("\n🧪 Test 1: Simple filter query (category = 'electronics')");

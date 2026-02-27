@@ -5,7 +5,7 @@ use serde_json::json;
 use std::collections::HashMap;
 use willow_sdk::{
     auth::generate_did,
-    types::{DidInfo, RegisterSubgroveRequest, SchemaDefinition, SchemaField, SignatureAlgorithm},
+    types::{DidInfo, FieldType, RegisterSubgroveRequest, SchemaDefinition, SignatureAlgorithm},
     ConsensusClient, WillowClient, WillowError,
 };
 
@@ -32,14 +32,12 @@ async fn setup_test_environment(
     // Wait for transaction
     consensus_client.wait_for_transaction(&tx_hash, 10).await?;
 
-    // Authenticate
-    client
-        .authenticate(
-            &did_info.did,
-            &did_info.private_key_hex(),
-            &did_info.public_key_id,
-        )
-        .await?;
+    // Set identity
+    client.set_identity(
+        &did_info.did,
+        &did_info.private_key_hex(),
+        &did_info.public_key_id,
+    );
 
     // Create unique app and subgrove IDs
     let app_id = format!(
@@ -65,27 +63,14 @@ async fn setup_test_environment(
             &did_info.public_key_id,
             SignatureAlgorithm::Ed25519,
             2,
+            None,
         )
         .await?;
 
     // Register subgrove
     let mut fields = HashMap::new();
-    fields.insert(
-        "id".to_string(),
-        SchemaField {
-            field_type: "string".to_string(),
-            required: true,
-            indexed: true,
-        },
-    );
-    fields.insert(
-        "value".to_string(),
-        SchemaField {
-            field_type: "number".to_string(),
-            required: true,
-            indexed: false,
-        },
-    );
+    fields.insert("id".to_string(), FieldType::String);
+    fields.insert("value".to_string(), FieldType::Number);
 
     let subgrove_request = RegisterSubgroveRequest {
         subgrove_id: subgrove_id.to_string(),
@@ -94,7 +79,8 @@ async fn setup_test_environment(
         schema: Some(SchemaDefinition {
             version: 1,
             fields,
-            indexes: Some(vec![]),
+            required_fields: vec![],
+            indexes: vec![],
         }),
         owner_did: did_info.did.clone(),
         writers: vec![did_info.did.clone()],

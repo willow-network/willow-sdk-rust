@@ -54,6 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             public_key_id,
             SignatureAlgorithm::Ed25519,
             nonce,
+            None,
         )
         .await
     {

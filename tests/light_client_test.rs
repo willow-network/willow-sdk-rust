@@ -114,6 +114,7 @@ async fn light_client_verification_test() {
             &format!("{}#key-1", funded_did),
             SignatureAlgorithm::Ed25519,
             base_nonce,
+            None,
         )
         .await
     {
@@ -133,38 +134,18 @@ async fn light_client_verification_test() {
 
     // Prepare the schema with proper structure
     use std::collections::HashMap;
-    use willow_sdk::types::{RegisterSubgroveRequest, SchemaDefinition, SchemaField};
+    use willow_sdk::types::{FieldType, RegisterSubgroveRequest, SchemaDefinition};
 
     let mut fields = HashMap::new();
-    fields.insert(
-        "message".to_string(),
-        SchemaField {
-            field_type: "string".to_string(),
-            required: true,
-            indexed: false,
-        },
-    );
-    fields.insert(
-        "timestamp".to_string(),
-        SchemaField {
-            field_type: "number".to_string(),
-            required: true,
-            indexed: false,
-        },
-    );
-    fields.insert(
-        "verified".to_string(),
-        SchemaField {
-            field_type: "boolean".to_string(),
-            required: true,
-            indexed: false,
-        },
-    );
+    fields.insert("message".to_string(), FieldType::String);
+    fields.insert("timestamp".to_string(), FieldType::Number);
+    fields.insert("verified".to_string(), FieldType::Boolean);
 
     let schema = SchemaDefinition {
         version: 1,
         fields,
-        indexes: None,
+        required_fields: vec![],
+        indexes: vec![],
     };
 
     println!("  📋 Registering subgrove...");
@@ -247,14 +228,11 @@ async fn light_client_verification_test() {
     // Step 4: Authenticate and retrieve data (with automatic verification)
     println!("\n🔐 Step 4: Retrieving data with cryptographic verification...");
 
-    client
-        .authenticate(
-            &funded_did,
-            PRIVATE_KEY_HEX,
-            &format!("{}#key-1", funded_did),
-        )
-        .await
-        .expect("Failed to authenticate");
+    client.set_identity(
+        &funded_did,
+        PRIVATE_KEY_HEX,
+        &format!("{}#key-1", funded_did),
+    );
 
     // This will automatically verify cryptographic proofs
     match client

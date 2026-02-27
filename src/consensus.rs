@@ -30,6 +30,8 @@ pub struct RegisterAppTx {
     pub app_type: String,
     pub owner_did: String,
     pub admins: Vec<String>,
+    #[serde(default)]
+    pub initial_funding: Option<u128>,
     pub signature: Vec<u8>,
     pub public_key_id: String,
     pub nonce: u64,
@@ -190,12 +192,18 @@ impl ConsensusClient {
         public_key_id: &str,
         algorithm: SignatureAlgorithm,
         nonce: u64,
+        initial_funding: Option<u128>,
     ) -> Result<String> {
         // Create app registration message to sign
-        let app_message = format!(
+        let mut app_message = format!(
             "RegisterApp\nID: {}\nName: {}\nDescription: {}\nType: {}\nOwner: {}\nAdmins: {}\nNonce: {}",
             app_id, name, description, app_type, owner_did, admins.join(","), nonce
         );
+        if let Some(amount) = initial_funding {
+            if amount > 0 {
+                app_message.push_str(&format!("\nFunding: {}", amount));
+            }
+        }
 
         // Sign the message
         let signature_hex = sign_challenge(&app_message, private_key_hex, algorithm)?;
@@ -209,6 +217,7 @@ impl ConsensusClient {
             app_type: app_type.to_string(),
             owner_did: owner_did.to_string(),
             admins,
+            initial_funding,
             signature: signature_bytes,
             public_key_id: public_key_id.to_string(),
             nonce,
@@ -584,6 +593,7 @@ mod tests {
             app_type: "indexing".to_string(),
             owner_did: "did:willow:owner".to_string(),
             admins: vec!["did:willow:admin".to_string()],
+            initial_funding: None,
             signature: vec![4, 5, 6],
             public_key_id: "did:willow:owner#key-1".to_string(),
             nonce: 2,

@@ -187,15 +187,12 @@ async fn basic_indexing_test() {
     // Step 4: Verify data retrieval
     println!("\n🔍 Step 4: Verifying data retrieval...");
 
-    // Authenticate
-    client
-        .authenticate(
-            &funded_did,
-            PRIVATE_KEY_HEX,
-            &format!("{}#key-1", funded_did),
-        )
-        .await
-        .expect("Failed to authenticate");
+    // Set identity
+    client.set_identity(
+        &funded_did,
+        PRIVATE_KEY_HEX,
+        &format!("{}#key-1", funded_did),
+    );
 
     let mut success_count = 0;
     let mut failure_count = 0;

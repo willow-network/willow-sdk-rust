@@ -110,6 +110,7 @@ async fn light_client_enabled_verification_test() {
                 &format!("{}#key-1", funded_did),
                 SignatureAlgorithm::Ed25519,
                 test_nonce,
+                None,
             )
             .await
         {
@@ -134,38 +135,18 @@ async fn light_client_enabled_verification_test() {
 
     // Register subgrove with proper schema
     use std::collections::HashMap;
-    use willow_sdk::types::{RegisterSubgroveRequest, SchemaDefinition, SchemaField};
+    use willow_sdk::types::{FieldType, RegisterSubgroveRequest, SchemaDefinition};
 
     let mut fields = HashMap::new();
-    fields.insert(
-        "message".to_string(),
-        SchemaField {
-            field_type: "string".to_string(),
-            required: true,
-            indexed: false,
-        },
-    );
-    fields.insert(
-        "timestamp".to_string(),
-        SchemaField {
-            field_type: "number".to_string(),
-            required: true,
-            indexed: false,
-        },
-    );
-    fields.insert(
-        "verified".to_string(),
-        SchemaField {
-            field_type: "boolean".to_string(),
-            required: true,
-            indexed: false,
-        },
-    );
+    fields.insert("message".to_string(), FieldType::String);
+    fields.insert("timestamp".to_string(), FieldType::Number);
+    fields.insert("verified".to_string(), FieldType::Boolean);
 
     let schema = SchemaDefinition {
         version: 1,
         fields,
-        indexes: None,
+        required_fields: vec![],
+        indexes: vec![],
     };
 
     let private_key_bytes = hex::decode(PRIVATE_KEY_HEX).expect("Invalid private key hex");
@@ -221,14 +202,11 @@ async fn light_client_enabled_verification_test() {
     // Step 4: Authenticate and retrieve data with LIGHT CLIENT verification
     println!("\n🔐 Step 4: Retrieving data with LIGHT CLIENT verification...");
 
-    client
-        .authenticate(
-            &funded_did,
-            PRIVATE_KEY_HEX,
-            &format!("{}#key-1", funded_did),
-        )
-        .await
-        .expect("Failed to authenticate");
+    client.set_identity(
+        &funded_did,
+        PRIVATE_KEY_HEX,
+        &format!("{}#key-1", funded_did),
+    );
 
     // This will use light client for verification!
     match client

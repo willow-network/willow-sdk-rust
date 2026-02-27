@@ -206,15 +206,12 @@ async fn fresh_test() {
     // Step 4: Read data
     println!("\nStep 4: Reading data...");
 
-    // Authenticate
-    client
-        .authenticate(
-            &funded_did,
-            PRIVATE_KEY_HEX,
-            &format!("{}#key-1", funded_did),
-        )
-        .await
-        .expect("Failed to authenticate");
+    // Set identity
+    client.set_identity(
+        &funded_did,
+        PRIVATE_KEY_HEX,
+        &format!("{}#key-1", funded_did),
+    );
 
     // Read data
     match client.data().get("test_app", "posts", "post1").await {

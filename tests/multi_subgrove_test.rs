@@ -53,60 +53,44 @@ async fn multi_subgrove_test() {
     let max_app_check_attempts = 30;
     let mut app_exists = false;
 
+    client.set_identity(
+        &funded_did,
+        PRIVATE_KEY_HEX,
+        &format!("{}#key-1", funded_did),
+    );
+
     println!("  ⏳ Checking if test_app exists...");
     while app_check_attempts < max_app_check_attempts {
-        // Try to authenticate first
+        // Try to access the app by attempting to list subgroves or perform a simple operation
         match client
-            .authenticate(
-                &funded_did,
-                PRIVATE_KEY_HEX,
-                &format!("{}#key-1", funded_did),
-            )
+            .data()
+            .query("test_app", "dummy_subgrove", json!({"filters": {}}))
             .await
         {
             Ok(_) => {
-                // Try to access the app by attempting to list subgroves or perform a simple operation
-                match client
-                    .data()
-                    .query("test_app", "dummy_subgrove", json!({"filters": {}}))
-                    .await
-                {
-                    Ok(_) => {
-                        println!("  ✅ test_app exists and is accessible");
-                        app_exists = true;
-                        break;
-                    }
-                    Err(e) => {
-                        if e.to_string().contains("App not found")
-                            || e.to_string().contains("not registered")
-                        {
-                            app_check_attempts += 1;
-                            if app_check_attempts < max_app_check_attempts {
-                                println!(
-                                    "  ⏳ App check attempt {} - app not found yet. Waiting 2s...",
-                                    app_check_attempts
-                                );
-                                sleep(Duration::from_secs(2)).await;
-                            }
-                        } else {
-                            // App exists but subgrove doesn't, which is expected
-                            println!(
-                                "  ✅ test_app exists (subgrove query returned expected error)"
-                            );
-                            app_exists = true;
-                            break;
-                        }
-                    }
-                }
+                println!("  ✅ test_app exists and is accessible");
+                app_exists = true;
+                break;
             }
-            Err(_) => {
-                app_check_attempts += 1;
-                if app_check_attempts < max_app_check_attempts {
+            Err(e) => {
+                if e.to_string().contains("App not found")
+                    || e.to_string().contains("not registered")
+                {
+                    app_check_attempts += 1;
+                    if app_check_attempts < max_app_check_attempts {
+                        println!(
+                            "  ⏳ App check attempt {} - app not found yet. Waiting 2s...",
+                            app_check_attempts
+                        );
+                        sleep(Duration::from_secs(2)).await;
+                    }
+                } else {
+                    // App exists but subgrove doesn't, which is expected
                     println!(
-                        "  ⏳ App check attempt {} - authentication failed. Waiting 2s...",
-                        app_check_attempts
+                        "  ✅ test_app exists (subgrove query returned expected error)"
                     );
-                    sleep(Duration::from_secs(2)).await;
+                    app_exists = true;
+                    break;
                 }
             }
         }
@@ -405,49 +389,13 @@ async fn multi_subgrove_test() {
     // Step 3: Verify data isolation between subgroves
     println!("\n🔍 Step 3: Verifying data isolation between subgroves...");
 
-    // Authenticate with retry logic
-    let mut auth_attempts = 0;
-    let max_auth_attempts = 30;
-    let mut authenticated = false;
-
-    while auth_attempts < max_auth_attempts {
-        match client
-            .authenticate(
-                &funded_did,
-                PRIVATE_KEY_HEX,
-                &format!("{}#key-1", funded_did),
-            )
-            .await
-        {
-            Ok(_) => {
-                println!(
-                    "  ✅ Successfully authenticated after {} attempts",
-                    auth_attempts + 1
-                );
-                authenticated = true;
-                break;
-            }
-            Err(e) => {
-                auth_attempts += 1;
-                if auth_attempts < max_auth_attempts {
-                    println!(
-                        "  ⏳ Authentication attempt {} failed: {}. Retrying in 2s...",
-                        auth_attempts, e
-                    );
-                    sleep(Duration::from_secs(2)).await;
-                } else {
-                    panic!(
-                        "Failed to authenticate after {} attempts: {}",
-                        max_auth_attempts, e
-                    );
-                }
-            }
-        }
-    }
-
-    if !authenticated {
-        panic!("Failed to authenticate within timeout");
-    }
+    // Set identity (already set earlier, but re-affirm)
+    client.set_identity(
+        &funded_did,
+        PRIVATE_KEY_HEX,
+        &format!("{}#key-1", funded_did),
+    );
+    println!("  ✅ Identity set");
 
     // Try to read user data from users subgrove
     match client
