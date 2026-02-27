@@ -459,11 +459,16 @@ impl ConsensusClient {
     pub async fn fund_app(
         &self,
         request: crate::types::FundAppRequest,
-        _signing_key: &SigningKey,
+        signing_key: &SigningKey,
     ) -> Result<String> {
-        // Note: FundApp in server doesn't validate signatures currently
-        // Just create empty signature to match the expected structure
-        let empty_signature: Vec<u8> = vec![];
+        // Construct canonical signing payload
+        let signing_payload = format!(
+            "FundApp:{}:{}:{}:{}",
+            request.app_id, request.amount, request.from_did, request.nonce
+        );
+
+        // Sign with Ed25519 key
+        let signature = signing_key.sign(signing_payload.as_bytes());
 
         // Create transaction matching server structure
         let transaction = json!({
@@ -471,7 +476,9 @@ impl ConsensusClient {
                 "app_id": request.app_id,
                 "amount": request.amount,
                 "from_did": request.from_did,
-                "signature": empty_signature,
+                "signature": signature.to_bytes().to_vec(),
+                "public_key_id": request.public_key_id,
+                "nonce": request.nonce,
             }
         });
 
