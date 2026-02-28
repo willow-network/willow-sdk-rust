@@ -53,7 +53,7 @@ pub enum SubgroveMode {
         #[serde(default = "default_required_verifications")]
         required_verifications: u32,
     },
-    /// Blockchain indexing mode — indexes on-chain data with WASM transformations.
+    /// Blockchain indexing mode — indexes on-chain data with optional WASM transformations for custom logic.
     BlockchainIndexing {
         manifest_ipfs: String,
         #[serde(default)]
