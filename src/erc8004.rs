@@ -166,6 +166,36 @@ pub struct Erc8004ValidationSummary {
     pub dispute_stats: DisputeStats,
 }
 
+/// A single agent in the discovery listing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Erc8004AgentListItem {
+    pub did: String,
+    pub eth_address: Option<String>,
+    pub agent_uri: String,
+    pub chain_id: u64,
+    pub agent_id: u64,
+    pub reputation: AgentReputationBrief,
+    pub validation_count: usize,
+    pub average_validation_score: f64,
+    pub registered_at: u64,
+}
+
+/// Brief reputation info included in agent listings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentReputationBrief {
+    pub score: i64,
+    pub tier: String,
+}
+
+/// Paginated response from the agent discovery endpoint.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Erc8004AgentListResponse {
+    pub agents: Vec<Erc8004AgentListItem>,
+    pub total: usize,
+    pub offset: usize,
+    pub limit: usize,
+}
+
 /// ERC-8004 client for interacting with agent identity endpoints.
 pub struct Erc8004Client {
     api_url: String,
@@ -177,6 +207,59 @@ impl Erc8004Client {
         Self {
             api_url: api_url.trim_end_matches('/').to_string(),
             http: Client::new(),
+        }
+    }
+
+    /// List/search ERC-8004 registered agents with optional filters.
+    pub async fn list_agents(
+        &self,
+        limit: Option<usize>,
+        offset: Option<usize>,
+        min_score: Option<i64>,
+        tier: Option<&str>,
+    ) -> Result<Erc8004AgentListResponse> {
+        let mut params = Vec::new();
+        if let Some(l) = limit {
+            params.push(format!("limit={}", l));
+        }
+        if let Some(o) = offset {
+            params.push(format!("offset={}", o));
+        }
+        if let Some(ms) = min_score {
+            params.push(format!("min_score={}", ms));
+        }
+        if let Some(t) = tier {
+            params.push(format!("tier={}", t));
+        }
+        let qs = if params.is_empty() {
+            String::new()
+        } else {
+            format!("?{}", params.join("&"))
+        };
+
+        let url = format!("{}/agents{}", self.api_url, qs);
+        let resp = self
+            .http
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| WillowError::Network(format!("Request failed: {}", e)))?;
+
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| WillowError::Network(format!("Failed to parse response: {}", e)))?;
+
+        if let Some(data) = body.get("data") {
+            serde_json::from_value(data.clone())
+                .map_err(|e| WillowError::Network(format!("Failed to parse agent list: {}", e)))
+        } else {
+            Err(WillowError::Network(
+                body.get("error")
+                    .and_then(|e| e.as_str())
+                    .unwrap_or("Unknown error")
+                    .to_string(),
+            ))
         }
     }
 

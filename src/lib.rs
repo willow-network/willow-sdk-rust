@@ -107,7 +107,8 @@ pub use types::{
 };
 pub use validators::ValidatorOperations;
 pub use erc8004::{
-    AgentReputationSummary, DisputeStats, Erc8004Client, Erc8004ValidationRecord,
+    AgentReputationBrief, AgentReputationSummary, DisputeStats, Erc8004AgentListItem,
+    Erc8004AgentListResponse, Erc8004Client, Erc8004ValidationRecord,
     Erc8004ValidationStatusResponse, Erc8004ValidationSummary, ReputationAttestation,
     ReputationHistoryEvent, ReputationHistoryResponse, ValidationStatusBreakdown,
 };
