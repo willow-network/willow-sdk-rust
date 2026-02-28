@@ -84,6 +84,7 @@ impl IndexingOperations {
     /// Execute a SQL query against a subgrove.
     pub async fn sql_query(
         &self,
+        app_id: &str,
         subgrove_id: &str,
         query: &str,
         include_proof: Option<bool>,
@@ -95,7 +96,7 @@ impl IndexingOperations {
 
         let response = self
             .client
-            .post(&format!("{}/sql/{}", self.base_url, subgrove_id))
+            .post(&format!("{}/sql/{}/{}", self.base_url, app_id, subgrove_id))
             .json(&request)
             .send()
             .await?;
