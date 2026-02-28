@@ -30,8 +30,8 @@
 use crate::client::WillowClient;
 use crate::errors::{Result, WillowError};
 use crate::types::{
-    ApiResponse, GraphQLRequest, GraphQLResponse, IndexerInfo, SubgroveIndexingStatus,
-    SubgroveInfo, VerificationStats,
+    ApiResponse, GraphQLRequest, GraphQLResponse, IndexerInfo, SqlRequest, SqlResponse,
+    SubgroveIndexingStatus, SubgroveInfo, VerificationStats,
 };
 
 /// Operations for interacting with indexed blockchain data.
@@ -79,6 +79,29 @@ impl IndexingOperations {
         response
             .data
             .ok_or_else(|| WillowError::Custom("No data in GraphQL response".to_string()))
+    }
+
+    /// Execute a SQL query against a subgrove.
+    pub async fn sql_query(
+        &self,
+        subgrove_id: &str,
+        query: &str,
+        include_proof: Option<bool>,
+    ) -> Result<SqlResponse> {
+        let request = SqlRequest {
+            query: query.to_string(),
+            include_proof,
+        };
+
+        let response = self
+            .client
+            .post(&format!("{}/sql/{}", self.base_url, subgrove_id))
+            .json(&request)
+            .send()
+            .await?;
+
+        let sql_response: SqlResponse = response.json().await?;
+        Ok(sql_response)
     }
 
     /// Lists all available subgroves.

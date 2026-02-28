@@ -425,6 +425,27 @@ pub struct GraphQLResponse {
     pub proof: Option<QueryProof>,
 }
 
+/// Request body for SQL queries.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SqlRequest {
+    pub query: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_proof: Option<bool>,
+}
+
+/// Response from a SQL query.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SqlResponse {
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proof: Option<QueryProof>,
+}
+
 /// GraphQL error
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphQLError {
