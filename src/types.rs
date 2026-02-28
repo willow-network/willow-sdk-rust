@@ -511,8 +511,6 @@ pub struct SubgroveInfo {
     pub latest_block: u64,
     /// Indexers currently serving this subgrove
     pub indexers: Vec<String>,
-    /// IPFS hash of the subgrove manifest
-    pub manifest_ipfs: String,
 }
 
 /// Subgrove status

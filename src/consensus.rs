@@ -55,7 +55,6 @@ pub enum SubgroveMode {
     },
     /// Blockchain indexing mode — indexes on-chain data with optional WASM transformations for custom logic.
     BlockchainIndexing {
-        manifest_ipfs: String,
         #[serde(default)]
         manifest_content: Vec<u8>,
         #[serde(default)]
