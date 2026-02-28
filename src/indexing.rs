@@ -94,15 +94,19 @@ impl IndexingOperations {
             include_proof,
         };
 
-        let response = self
+        let response: ApiResponse<SqlResponse> = self
             .client
-            .post(&format!("{}/sql/{}/{}", self.base_url, app_id, subgrove_id))
-            .json(&request)
-            .send()
+            .request(
+                "POST",
+                &format!("/sql/{}/{}", app_id, subgrove_id),
+                Some(&request),
+                false,
+            )
             .await?;
 
-        let sql_response: SqlResponse = response.json().await?;
-        Ok(sql_response)
+        response
+            .data
+            .ok_or_else(|| WillowError::Custom("No data in SQL response".to_string()))
     }
 
     /// Lists all available subgroves.
