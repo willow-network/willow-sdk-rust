@@ -437,6 +437,56 @@ impl ConsensusClient {
         self.submit_transaction(&transaction).await
     }
 
+    /// Register a blockchain indexing subgrove from a definition file.
+    ///
+    /// Loads the subgrove definition, signs it, and submits the transaction.
+    /// This is the simplest way to deploy a predefined subgrove.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use willow_sdk::subgrove_config::SubgroveDefinition;
+    /// use willow_sdk::consensus::ConsensusClient;
+    ///
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = ConsensusClient::new("http://localhost:26657");
+    /// let def = SubgroveDefinition::load("subgrove_definitions/ethereum/aave-v3.toml")?;
+    ///
+    /// let signing_key = ed25519_dalek::SigningKey::from_bytes(&key_bytes);
+    /// let tx_hash = client.register_blockchain_subgrove(
+    ///     &def,
+    ///     "my-app",
+    ///     "did:willow:owner",
+    ///     "did:willow:owner#key-1",
+    ///     &signing_key,
+    ///     1,
+    /// ).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn register_blockchain_subgrove(
+        &self,
+        definition: &crate::subgrove_config::SubgroveDefinition,
+        app_id: &str,
+        owner_did: &str,
+        public_key_id: &str,
+        signing_key: &SigningKey,
+        nonce: u64,
+    ) -> Result<String> {
+        let payload = definition.signing_payload(app_id, owner_did, nonce);
+        let signature = signing_key.sign(payload.as_bytes());
+
+        let transaction = definition.to_register_transaction(
+            app_id,
+            owner_did,
+            public_key_id,
+            signature.to_bytes().to_vec(),
+            nonce,
+        );
+
+        self.submit_transaction(&transaction).await
+    }
+
     /// Store data using SigningKey
     pub async fn store_data(
         &self,

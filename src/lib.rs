@@ -76,6 +76,7 @@ pub mod indexing;
 pub mod light_client;
 pub mod proof;
 pub mod registration;
+pub mod subgrove_config;
 pub mod token;
 pub mod types;
 pub mod utils;
@@ -105,6 +106,7 @@ pub use types::{
     TransferRequest, UnstakeRequest, ValidatorInfo, ValidatorStatus, VerificationStats,
     VerifyProofRequest, VerifyProofResponse,
 };
+pub use subgrove_config::SubgroveDefinition;
 pub use validators::ValidatorOperations;
 pub use erc8004::{
     AgentReputationBrief, AgentReputationSummary, DisputeStats, Erc8004AgentListItem,
