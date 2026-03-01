@@ -50,8 +50,6 @@ pub enum SubgroveMode {
         readers: Vec<String>,
         #[serde(default)]
         read_pricing: Option<serde_json::Value>,
-        #[serde(default = "default_required_verifications")]
-        required_verifications: u32,
     },
     /// Blockchain indexing mode — indexes on-chain data with optional WASM transformations for custom logic.
     BlockchainIndexing {
@@ -66,10 +64,6 @@ pub enum SubgroveMode {
     },
 }
 
-fn default_required_verifications() -> u32 {
-    3
-}
-
 impl Default for SubgroveMode {
     fn default() -> Self {
         SubgroveMode::DataStorage {
@@ -77,7 +71,6 @@ impl Default for SubgroveMode {
             writers: Vec::new(),
             readers: Vec::new(),
             read_pricing: None,
-            required_verifications: 3,
         }
     }
 }
@@ -424,8 +417,7 @@ impl ConsensusClient {
                         "name": request.name,
                         "writers": request.writers,
                         "free_readers": request.readers,
-                        "read_pricing": null,
-                        "required_verifications": 3
+                        "read_pricing": null
                     }
                 },
                 "signature": request.signature,
@@ -668,7 +660,6 @@ mod tests {
                 writers: vec!["did:willow:writer".to_string()],
                 readers: vec!["did:willow:reader".to_string()],
                 read_pricing: None,
-                required_verifications: 3,
             },
             signature: vec![7, 8, 9],
             public_key_id: "did:willow:owner#key-1".to_string(),

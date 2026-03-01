@@ -91,10 +91,6 @@ pub struct SubgroveDefinition {
     #[serde(default = "default_checkpoint_verification")]
     pub checkpoint_verification: String,
 
-    /// Required verifications for MultiIndexer mode.
-    #[serde(default = "default_required_verifications")]
-    pub required_verifications: u32,
-
     /// Indexer configuration.
     #[serde(default)]
     pub indexer_config: IndexerConfigDef,
@@ -182,10 +178,6 @@ fn default_checkpoint_verification() -> String {
     "MultiIndexer".to_string()
 }
 
-fn default_required_verifications() -> u32 {
-    3
-}
-
 fn default_min_indexers() -> u8 {
     1
 }
@@ -244,9 +236,7 @@ impl SubgroveDefinition {
             "TeeAttestation" => serde_json::json!({
                 "TeeAttestation": { "tee_type": "AwsNitro" }
             }),
-            _ => serde_json::json!({
-                "MultiIndexer": { "required_verifications": self.required_verifications }
-            }),
+            _ => serde_json::json!("MultiIndexer"),
         }
     }
 
@@ -311,7 +301,6 @@ subgrove_id = "test-swaps"
 description = "Test swap events"
 execution_mode = "ConsensusExecution"
 checkpoint_verification = "MultiIndexer"
-required_verifications = 3
 
 schema = """
 type Swap @entity {
@@ -352,7 +341,6 @@ handler = "handleSwap"
         assert_eq!(def.subgrove_id, "test-swaps");
         assert_eq!(def.description, "Test swap events");
         assert_eq!(def.execution_mode, "ConsensusExecution");
-        assert_eq!(def.required_verifications, 3);
         assert_eq!(def.manifest.data_sources.len(), 1);
         assert_eq!(def.manifest.data_sources[0].name, "TestPool");
         assert_eq!(
@@ -421,7 +409,6 @@ handler = "handle"
         let def = SubgroveDefinition::from_toml(minimal_toml).unwrap();
         assert_eq!(def.execution_mode, "ConsensusExecution");
         assert_eq!(def.checkpoint_verification, "MultiIndexer");
-        assert_eq!(def.required_verifications, 3);
         assert_eq!(def.indexer_config.min_indexers, 1);
         assert_eq!(def.indexer_config.max_indexers, 3);
     }
