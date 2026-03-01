@@ -79,7 +79,7 @@ pub struct SubgroveDefinition {
     /// Human-readable description.
     pub description: String,
 
-    /// Execution mode: "ConsensusExecution", "IndexerExecution", or "TeeExecution".
+    /// Execution mode: "ConsensusExecution", "IndexerExecution", "TeeExecution", or "GkrExecution".
     #[serde(default = "default_execution_mode")]
     pub execution_mode: String,
 
@@ -224,6 +224,7 @@ impl SubgroveDefinition {
                     "tee_type": "AwsNitro"
                 }
             }),
+            "GkrExecution" => serde_json::json!("GkrExecution"),
             _ => serde_json::json!("ConsensusExecution"),
         }
     }
