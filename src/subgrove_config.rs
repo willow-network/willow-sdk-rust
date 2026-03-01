@@ -87,9 +87,11 @@ pub struct SubgroveDefinition {
     #[serde(default)]
     pub sampling_rate_percent: Option<u8>,
 
-    /// Checkpoint verification: "MultiIndexer" or "TeeAttestation".
-    #[serde(default = "default_checkpoint_verification")]
-    pub checkpoint_verification: String,
+    /// TEE requirement for checkpoint verification.
+    /// Absent or empty means no TEE required (optimistic-only).
+    /// Set to "AwsNitro" or "IntelSgx" to require TEE attestation.
+    #[serde(default)]
+    pub required_tee: Option<String>,
 
     /// Indexer configuration.
     #[serde(default)]
@@ -174,10 +176,6 @@ fn default_execution_mode() -> String {
     "ConsensusExecution".to_string()
 }
 
-fn default_checkpoint_verification() -> String {
-    "MultiIndexer".to_string()
-}
-
 fn default_min_indexers() -> u8 {
     1
 }
@@ -230,13 +228,15 @@ impl SubgroveDefinition {
         }
     }
 
-    /// Build the checkpoint verification mode JSON value.
+    /// Build the checkpoint verification config JSON value.
     pub fn checkpoint_verification_json(&self) -> serde_json::Value {
-        match self.checkpoint_verification.as_str() {
-            "TeeAttestation" => serde_json::json!({
-                "TeeAttestation": { "tee_type": "AwsNitro" }
+        match &self.required_tee {
+            Some(tee_type) => serde_json::json!({
+                "required_tee": tee_type
             }),
-            _ => serde_json::json!("MultiIndexer"),
+            None => serde_json::json!({
+                "required_tee": null
+            }),
         }
     }
 
@@ -260,7 +260,7 @@ impl SubgroveDefinition {
                 "app_id": app_id,
                 "schema": self.schema,
                 "owner_did": owner_did,
-                "checkpoint_verification_mode": self.checkpoint_verification_json(),
+                "checkpoint_verification": self.checkpoint_verification_json(),
                 "mode": {
                     "BlockchainIndexing": {
                         "manifest_content": manifest_json,
@@ -300,7 +300,6 @@ mod tests {
 subgrove_id = "test-swaps"
 description = "Test swap events"
 execution_mode = "ConsensusExecution"
-checkpoint_verification = "MultiIndexer"
 
 schema = """
 type Swap @entity {
@@ -408,7 +407,7 @@ handler = "handle"
 "#;
         let def = SubgroveDefinition::from_toml(minimal_toml).unwrap();
         assert_eq!(def.execution_mode, "ConsensusExecution");
-        assert_eq!(def.checkpoint_verification, "MultiIndexer");
+        assert!(def.required_tee.is_none());
         assert_eq!(def.indexer_config.min_indexers, 1);
         assert_eq!(def.indexer_config.max_indexers, 3);
     }
