@@ -111,8 +111,12 @@ pub struct IndexerConfigDef {
     pub min_indexers: u8,
     #[serde(default = "default_max_indexers")]
     pub max_indexers: u8,
-    #[serde(default = "default_reward_per_block", deserialize_with = "deserialize_u128")]
-    pub reward_per_block: u128,
+    #[serde(
+        default = "default_reward_per_epoch",
+        alias = "reward_per_block",
+        deserialize_with = "deserialize_u128"
+    )]
+    pub reward_per_epoch: u128,
     #[serde(
         default = "default_min_indexer_stake",
         deserialize_with = "deserialize_u128"
@@ -125,7 +129,7 @@ impl Default for IndexerConfigDef {
         Self {
             min_indexers: default_min_indexers(),
             max_indexers: default_max_indexers(),
-            reward_per_block: default_reward_per_block(),
+            reward_per_epoch: default_reward_per_epoch(),
             min_indexer_stake: default_min_indexer_stake(),
         }
     }
@@ -184,8 +188,8 @@ fn default_max_indexers() -> u8 {
     3
 }
 
-fn default_reward_per_block() -> u128 {
-    1_000_000_000_000_000 // 0.001 WILL
+fn default_reward_per_epoch() -> u128 {
+    100_000_000_000_000_000 // 0.1 WILL
 }
 
 fn default_min_indexer_stake() -> u128 {
@@ -270,7 +274,7 @@ impl SubgroveDefinition {
                         "indexer_config": {
                             "min_indexers": self.indexer_config.min_indexers,
                             "max_indexers": self.indexer_config.max_indexers,
-                            "reward_per_block": self.indexer_config.reward_per_block.to_string(),
+                            "reward_per_epoch": self.indexer_config.reward_per_epoch.to_string(),
                             "min_indexer_stake": self.indexer_config.min_indexer_stake.to_string(),
                         }
                     }
@@ -313,7 +317,7 @@ type Swap @entity {
 [indexer_config]
 min_indexers = 1
 max_indexers = 3
-reward_per_block = "1000000000000000"
+reward_per_epoch = "100000000000000000"
 min_indexer_stake = "100000000000000000000000"
 
 [manifest]
