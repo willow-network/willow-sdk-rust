@@ -111,11 +111,7 @@ pub struct IndexerConfigDef {
     pub min_indexers: u8,
     #[serde(default = "default_max_indexers")]
     pub max_indexers: u8,
-    #[serde(
-        default = "default_reward_per_epoch",
-        alias = "reward_per_block",
-        deserialize_with = "deserialize_u128"
-    )]
+    #[serde(default = "default_reward_per_epoch", deserialize_with = "deserialize_u128")]
     pub reward_per_epoch: u128,
     #[serde(
         default = "default_min_indexer_stake",
