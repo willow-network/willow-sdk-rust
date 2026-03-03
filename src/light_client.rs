@@ -862,7 +862,7 @@ impl LightClient {
         // Use GroveDB's verify_query to verify the proof
         // We need to construct a minimal query - the proof contains the query info
         let empty_path: Vec<Vec<u8>> = vec![];
-        let query = Query::new();
+        let query = Query::new_range_full();
         let path_query = PathQuery::new_unsized(empty_path, query);
 
         let grove_version = grovedb_version::version::GroveVersion::default();
