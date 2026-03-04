@@ -1,0 +1,301 @@
+//! Privacy operations for private subgroves.
+//!
+//! This module provides client-side operations for managing private subgroves:
+//!
+//! - **Subgrove registration** with privacy configuration
+//! - **Key grant management** — grant, revoke, and rotate encryption keys
+//! - **Direct provider queries** — query private subgrove data with proof verification
+//!
+//! # Example
+//!
+//! ```rust,no_run
+//! use willow_sdk::WillowClient;
+//! use willow_sdk::privacy::{PrivacyConfig, CommitmentFrequency};
+//!
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let client = WillowClient::new("http://localhost:3031").await?;
+//!
+//! // Register a private subgrove
+//! let privacy = PrivacyConfig {
+//!     allowed_indexers: Some(vec!["did:willow:my-indexer".to_string()]),
+//!     commitment_frequency: CommitmentFrequency::EveryNBlocks(10),
+//! };
+//! # Ok(())
+//! # }
+//! ```
+
+use crate::errors::{Result, WillowError};
+use crate::WillowClient;
+use serde::{Deserialize, Serialize};
+
+/// Privacy configuration for a private subgrove.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrivacyConfig {
+    /// Optional whitelist of indexer DIDs allowed to index this subgrove.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed_indexers: Option<Vec<String>>,
+    /// How often the provider must commit state roots to consensus.
+    pub commitment_frequency: CommitmentFrequency,
+}
+
+/// How often the provider must publish state root commitments on-chain.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum CommitmentFrequency {
+    /// Commit after every write/block update.
+    EveryUpdate,
+    /// Commit every N blocks processed.
+    EveryNBlocks(u64),
+    /// Commit at least every N seconds.
+    EveryNSeconds(u64),
+    /// No on-chain commitments.
+    Never,
+}
+
+/// An encrypted key grant for a subgrove.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EncryptedKeyGrant {
+    pub grantee_did: String,
+    pub key_epoch: u32,
+    pub grantee_public_key_id: String,
+    pub ephemeral_public_key: Vec<u8>,
+    pub encrypted_key: Vec<u8>,
+    pub granted_by: String,
+    pub granted_at: u64,
+}
+
+/// Privacy-related operations for private subgroves.
+pub struct PrivacyOperations<'a> {
+    client: &'a WillowClient,
+}
+
+impl<'a> PrivacyOperations<'a> {
+    pub(crate) fn new(client: &'a WillowClient) -> Self {
+        Self { client }
+    }
+
+    /// Get the encryption key grant for the authenticated DID.
+    ///
+    /// Returns the encrypted key grant that allows this DID to decrypt
+    /// the subgrove's data.
+    pub async fn get_my_key_grant(
+        &self,
+        app_id: &str,
+        subgrove_id: &str,
+    ) -> Result<EncryptedKeyGrant> {
+        let identity = self
+            .client
+            .identity()
+            .ok_or_else(|| WillowError::Auth("Identity not set".into()))?;
+
+        let url = format!(
+            "{}/key-grants/{}/{}/{}",
+            self.client.api_url(),
+            app_id,
+            subgrove_id,
+            identity.did
+        );
+
+        let response = self
+            .client
+            .http_client()
+            .get(&url)
+            .headers(self.client.auth_headers()?)
+            .send()
+            .await
+            .map_err(|e| WillowError::Network(e.to_string()))?;
+
+        let api_response: crate::types::ApiResponse<EncryptedKeyGrant> = response
+            .json()
+            .await
+            .map_err(|e| WillowError::Deserialization(e.to_string()))?;
+
+        api_response
+            .data
+            .ok_or_else(|| WillowError::NotFound("Key grant not found".into()))
+    }
+
+    /// List all grantee DIDs for a subgrove.
+    ///
+    /// Only the subgrove owner or admin can call this.
+    pub async fn list_key_grantees(
+        &self,
+        app_id: &str,
+        subgrove_id: &str,
+    ) -> Result<Vec<String>> {
+        let url = format!(
+            "{}/key-grants/{}/{}",
+            self.client.api_url(),
+            app_id,
+            subgrove_id
+        );
+
+        let response = self
+            .client
+            .http_client()
+            .get(&url)
+            .headers(self.client.auth_headers()?)
+            .send()
+            .await
+            .map_err(|e| WillowError::Network(e.to_string()))?;
+
+        let api_response: crate::types::ApiResponse<Vec<String>> = response
+            .json()
+            .await
+            .map_err(|e| WillowError::Deserialization(e.to_string()))?;
+
+        api_response
+            .data
+            .ok_or_else(|| WillowError::NotFound("No grantees found".into()))
+    }
+
+    /// Get the GroveDB Merkle proof for a key grant.
+    ///
+    /// Public endpoint — proofs are non-sensitive.
+    pub async fn get_key_grant_proof(
+        &self,
+        app_id: &str,
+        subgrove_id: &str,
+        did: &str,
+    ) -> Result<serde_json::Value> {
+        let url = format!(
+            "{}/proof/key-grant/{}/{}/{}",
+            self.client.api_url(),
+            app_id,
+            subgrove_id,
+            did
+        );
+
+        let response = self
+            .client
+            .http_client()
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| WillowError::Network(e.to_string()))?;
+
+        let api_response: crate::types::ApiResponse<serde_json::Value> = response
+            .json()
+            .await
+            .map_err(|e| WillowError::Deserialization(e.to_string()))?;
+
+        api_response
+            .data
+            .ok_or_else(|| WillowError::NotFound("Proof not found".into()))
+    }
+
+    /// Submit a GrantSubgroveKey transaction via consensus.
+    ///
+    /// Grants the specified DID access to the subgrove's encryption key.
+    pub async fn grant_subgrove_key(
+        &self,
+        app_id: &str,
+        subgrove_id: &str,
+        grant: EncryptedKeyGrant,
+    ) -> Result<()> {
+        let identity = self
+            .client
+            .identity()
+            .ok_or_else(|| WillowError::Auth("Identity not set".into()))?;
+
+        let nonce = self.client.get_next_nonce().await?;
+
+        let message = format!(
+            "GrantSubgroveKey:{}:{}:{}:{}:{}",
+            app_id, subgrove_id, grant.grantee_did, identity.did, nonce
+        );
+
+        let signature = self.client.sign_message(&message)?;
+
+        let tx = serde_json::json!({
+            "GrantSubgroveKey": {
+                "app_id": app_id,
+                "subgrove_id": subgrove_id,
+                "encrypted_key_grant": grant,
+                "sender_did": identity.did,
+                "signature": signature,
+                "public_key_id": identity.public_key_id,
+                "nonce": nonce,
+            }
+        });
+
+        self.client.consensus().broadcast_tx(tx).await
+    }
+
+    /// Submit a RevokeSubgroveKey transaction via consensus.
+    ///
+    /// Revokes the specified DID's access to the subgrove's encryption key.
+    pub async fn revoke_subgrove_key(
+        &self,
+        app_id: &str,
+        subgrove_id: &str,
+        revokee_did: &str,
+    ) -> Result<()> {
+        let identity = self
+            .client
+            .identity()
+            .ok_or_else(|| WillowError::Auth("Identity not set".into()))?;
+
+        let nonce = self.client.get_next_nonce().await?;
+
+        let message = format!(
+            "RevokeSubgroveKey:{}:{}:{}:{}:{}",
+            app_id, subgrove_id, revokee_did, identity.did, nonce
+        );
+
+        let signature = self.client.sign_message(&message)?;
+
+        let tx = serde_json::json!({
+            "RevokeSubgroveKey": {
+                "app_id": app_id,
+                "subgrove_id": subgrove_id,
+                "revokee_did": revokee_did,
+                "sender_did": identity.did,
+                "signature": signature,
+                "public_key_id": identity.public_key_id,
+                "nonce": nonce,
+            }
+        });
+
+        self.client.consensus().broadcast_tx(tx).await
+    }
+
+    /// Submit a RotateSubgroveKey transaction via consensus.
+    ///
+    /// Rotates the subgrove encryption key to a new epoch with new grants.
+    pub async fn rotate_subgrove_key(
+        &self,
+        app_id: &str,
+        subgrove_id: &str,
+        new_epoch: u32,
+        new_grants: Vec<EncryptedKeyGrant>,
+    ) -> Result<()> {
+        let identity = self
+            .client
+            .identity()
+            .ok_or_else(|| WillowError::Auth("Identity not set".into()))?;
+
+        let nonce = self.client.get_next_nonce().await?;
+
+        let message = format!(
+            "RotateSubgroveKey:{}:{}:{}:{}:{}",
+            app_id, subgrove_id, new_epoch, identity.did, nonce
+        );
+
+        let signature = self.client.sign_message(&message)?;
+
+        let tx = serde_json::json!({
+            "RotateSubgroveKey": {
+                "app_id": app_id,
+                "subgrove_id": subgrove_id,
+                "new_epoch": new_epoch,
+                "new_grants": new_grants,
+                "sender_did": identity.did,
+                "signature": signature,
+                "public_key_id": identity.public_key_id,
+                "nonce": nonce,
+            }
+        });
+
+        self.client.consensus().broadcast_tx(tx).await
+    }
+}

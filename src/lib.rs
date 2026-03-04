@@ -74,6 +74,7 @@ pub mod erc8004;
 pub mod errors;
 pub mod indexing;
 pub mod light_client;
+pub mod privacy;
 pub mod proof;
 pub mod registration;
 pub mod subgrove_config;
@@ -106,6 +107,7 @@ pub use types::{
     TransferRequest, UnstakeRequest, ValidatorInfo, ValidatorStatus, VerificationStats,
     VerifyProofRequest, VerifyProofResponse,
 };
+pub use privacy::{PrivacyOperations, PrivacyConfig, CommitmentFrequency, EncryptedKeyGrant};
 pub use subgrove_config::SubgroveDefinition;
 pub use validators::ValidatorOperations;
 pub use erc8004::{
