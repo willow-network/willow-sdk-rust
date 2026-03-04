@@ -1,7 +1,7 @@
 //! Validator query operations.
 //!
 //! This module provides access to validator information including
-//! stake amounts, commission rates, and status.
+//! stake amounts and status.
 //!
 //! # Example
 //!

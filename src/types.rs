@@ -354,15 +354,10 @@ pub struct ValidatorInfo {
     pub name: Option<String>,
     /// Total staked amount
     pub stake_amount: u128,
-    /// Commission rate (basis points, e.g., 500 = 5%)
-    pub commission_rate: u32,
     /// Validator status
     pub status: ValidatorStatus,
     /// Voting power
     pub voting_power: u64,
-    /// Number of delegators
-    #[serde(default)]
-    pub delegator_count: u32,
     /// Consensus public key (hex)
     #[serde(default)]
     pub consensus_pubkey: Option<String>,
@@ -387,7 +382,6 @@ pub enum ValidatorStatus {
 pub struct StakeRequest {
     pub validator_did: String,
     pub amount: u128,
-    pub commission_rate: u32,
     pub consensus_pubkey: String,
 }
 
