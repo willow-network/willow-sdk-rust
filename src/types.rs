@@ -272,10 +272,14 @@ pub struct TokenInfo {
     pub symbol: String,
     /// Number of decimal places
     pub decimals: u8,
-    /// Total supply cap
-    pub total_supply: u128,
-    /// Currently minted supply
+    /// Genesis allocation (pre-mined supply)
+    pub genesis_supply: u128,
+    /// Tokens minted via block rewards
     pub minted_supply: u128,
+    /// Hard cap on total supply
+    pub max_supply: u128,
+    /// Current circulating supply (genesis + minted)
+    pub circulating_supply: u128,
 }
 
 /// Balance information for a DID or app

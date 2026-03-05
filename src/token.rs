@@ -12,7 +12,7 @@
 //!
 //! // Get token info
 //! let info = client.token().get_info().await?;
-//! println!("Total supply: {} {}", info.total_supply, info.symbol);
+//! println!("Max supply: {} {}", info.max_supply, info.symbol);
 //!
 //! // Check balance
 //! let balance = client.token().get_balance("did:willow:abc123").await?;

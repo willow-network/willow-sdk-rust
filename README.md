@@ -224,7 +224,7 @@ let indexers = client.indexing().list_indexers().await?;
 ```rust
 // Get WILL token info
 let info = client.token().get_info().await?;
-println!("Symbol: {}, Total Supply: {}", info.symbol, info.total_supply);
+println!("Symbol: {}, Max Supply: {}", info.symbol, info.max_supply);
 
 // Check DID balance
 let balance = client.token().get_balance("did:willow:abc123").await?;

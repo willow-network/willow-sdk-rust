@@ -24,8 +24,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("   Name: {}", info.name);
             println!("   Symbol: {}", info.symbol);
             println!("   Decimals: {}", info.decimals);
-            println!("   Total Supply: {}", info.total_supply);
-            println!("   Minted Supply: {}\n", info.minted_supply);
+            println!("   Genesis Supply: {}", info.genesis_supply);
+            println!("   Minted Supply: {}", info.minted_supply);
+            println!("   Max Supply: {}", info.max_supply);
+            println!("   Circulating Supply: {}\n", info.circulating_supply);
         }
         Err(e) => println!("   Note: {}\n", e),
     }
