@@ -235,7 +235,8 @@ let app_balance = client.token().get_app_balance("my-app").await?;
 
 // Get fee schedule
 let fees = client.token().get_fee_schedule().await?;
-println!("Storage fee: {} per byte", fees.storage_fee_per_byte);
+println!("Base TX cost: {} wei", fees.base_tx_cost);
+println!("Cost per byte: {} wei", fees.cost_per_byte);
 ```
 
 ## Registration

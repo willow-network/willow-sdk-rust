@@ -334,14 +334,18 @@ pub struct FeeSchedule {
     pub app_registration: u128,
     /// Fee to register a subgrove
     pub subgrove_registration: u128,
-    /// Fee per KB of data written
-    pub data_write_per_kb: u128,
-    /// Fee to generate a proof
-    pub proof_generation: u128,
-    /// Fee per query after rate limit
-    pub query_after_limit: u128,
+    /// Base cost per transaction
+    pub base_tx_cost: u128,
+    /// Cost per byte of data
+    pub cost_per_byte: u128,
+    /// Fee per query
+    pub query_fee: u128,
     /// Transfer fee in basis points (1/10000)
     pub transfer_fee_percentage: u32,
+    /// Maximum transaction size in bytes
+    pub max_tx_size_bytes: u64,
+    /// Maximum data payload size in bytes
+    pub max_data_payload_bytes: u64,
 }
 
 // ============================================================================

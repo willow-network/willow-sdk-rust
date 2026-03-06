@@ -64,10 +64,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("   DID Registration: {} WILL", fees.did_registration);
             println!("   App Registration: {} WILL", fees.app_registration);
             println!("   Subgrove Registration: {} WILL", fees.subgrove_registration);
-            println!("   Data Write: {} WILL/KB", fees.data_write_per_kb);
-            println!("   Proof Generation: {} WILL", fees.proof_generation);
-            println!("   Query (after limit): {} WILL", fees.query_after_limit);
-            println!("   Transfer Fee: {} bps\n", fees.transfer_fee_percentage);
+            println!("   Base TX Cost: {} wei", fees.base_tx_cost);
+            println!("   Cost Per Byte: {} wei", fees.cost_per_byte);
+            println!("   Query Fee: {} wei", fees.query_fee);
+            println!("   Transfer Fee: {} bps", fees.transfer_fee_percentage);
+            println!("   Max TX Size: {} bytes", fees.max_tx_size_bytes);
+            println!("   Max Data Payload: {} bytes\n", fees.max_data_payload_bytes);
         }
         Err(e) => println!("   Note: {}\n", e),
     }
