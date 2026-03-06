@@ -292,7 +292,7 @@ pub struct BalanceInfo {
     /// Staked balance (for validators)
     #[serde(default)]
     pub staked: u128,
-    /// Locked balance (unbonding or bridge)
+    /// Locked balance (unbonding)
     #[serde(default)]
     pub locked: u128,
 }

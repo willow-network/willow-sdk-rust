@@ -7,7 +7,7 @@
 //! Prerequisites:
 //! - Local Willow network running (./scripts/start_network.sh)
 //! - The DID must have a balance to pay the registration fee (1 WILL)
-//!   (fund via bridge or transfer from another account first)
+//!   (fund via transfer from another account first)
 
 use willow_sdk::{auth::generate_did, types::SignatureAlgorithm, WillowClient};
 
