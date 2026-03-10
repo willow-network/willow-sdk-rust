@@ -37,6 +37,23 @@ pub struct RegisterAppTx {
     pub nonce: u64,
 }
 
+/// How long real-time indexed data is retained on consensus nodes.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum RetentionWindow {
+    /// Retain for N consensus blocks.
+    Blocks(u64),
+    /// Retain for N seconds.
+    Seconds(u64),
+    /// Never prune (default).
+    Indefinite,
+}
+
+impl Default for RetentionWindow {
+    fn default() -> Self {
+        RetentionWindow::Indefinite
+    }
+}
+
 /// The mode of a subgrove: either data storage or blockchain indexing.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -61,6 +78,8 @@ pub enum SubgroveMode {
         execution_mode: serde_json::Value,
         #[serde(default)]
         indexer_config: serde_json::Value,
+        #[serde(default)]
+        retention_window: RetentionWindow,
     },
 }
 
