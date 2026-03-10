@@ -49,8 +49,6 @@ pub struct AgentRegistrationJson {
 /// Summary of an agent's reputation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentReputationSummary {
-    pub score: u32,
-    pub tier: String,
     pub checkpoint_success_rate: f64,
     pub verification_accuracy: f64,
     pub active_days: u32,
@@ -61,8 +59,6 @@ pub struct AgentReputationSummary {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReputationAttestation {
     pub did: String,
-    pub score: u32,
-    pub tier: String,
     pub metrics: serde_json::Value,
     pub proof: String,
     pub block_height: u64,
@@ -73,8 +69,6 @@ pub struct ReputationAttestation {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReputationHistoryEvent {
     pub event_type: String,
-    pub score_delta: i32,
-    pub new_score: u32,
     pub block_height: u64,
     pub timestamp: u64,
     pub reference: Option<String>,
@@ -174,17 +168,8 @@ pub struct Erc8004AgentListItem {
     pub agent_uri: String,
     pub chain_id: u64,
     pub agent_id: u64,
-    pub reputation: AgentReputationBrief,
     pub validation_count: usize,
-    pub average_validation_score: f64,
     pub registered_at: u64,
-}
-
-/// Brief reputation info included in agent listings.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentReputationBrief {
-    pub score: i64,
-    pub tier: String,
 }
 
 /// Paginated response from the agent discovery endpoint.
@@ -215,8 +200,6 @@ impl Erc8004Client {
         &self,
         limit: Option<usize>,
         offset: Option<usize>,
-        min_score: Option<i64>,
-        tier: Option<&str>,
     ) -> Result<Erc8004AgentListResponse> {
         let mut params = Vec::new();
         if let Some(l) = limit {
@@ -224,12 +207,6 @@ impl Erc8004Client {
         }
         if let Some(o) = offset {
             params.push(format!("offset={}", o));
-        }
-        if let Some(ms) = min_score {
-            params.push(format!("min_score={}", ms));
-        }
-        if let Some(t) = tier {
-            params.push(format!("tier={}", t));
         }
         let qs = if params.is_empty() {
             String::new()

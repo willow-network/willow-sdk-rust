@@ -111,7 +111,7 @@ pub use privacy::{PrivacyOperations, PrivacyConfig, CommitmentFrequency, Encrypt
 pub use subgrove_config::SubgroveDefinition;
 pub use validators::ValidatorOperations;
 pub use erc8004::{
-    AgentReputationBrief, AgentReputationSummary, DisputeStats, Erc8004AgentListItem,
+    AgentReputationSummary, DisputeStats, Erc8004AgentListItem,
     Erc8004AgentListResponse, Erc8004Client, Erc8004ValidationRecord,
     Erc8004ValidationStatusResponse, Erc8004ValidationSummary, ReputationAttestation,
     ReputationHistoryEvent, ReputationHistoryResponse, ValidationStatusBreakdown,
