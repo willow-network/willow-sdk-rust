@@ -46,6 +46,9 @@ pub enum RetentionWindow {
     Seconds(u64),
     /// Never prune (default).
     Indefinite,
+    /// Verify and discard: consensus verifies but does not store raw data.
+    /// Queries always route to indexer nodes. Cheapest tier (base_tx_cost only).
+    VerifyOnly,
 }
 
 impl Default for RetentionWindow {
