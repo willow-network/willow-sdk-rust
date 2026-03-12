@@ -71,6 +71,22 @@ pub enum SubgroveMode {
         #[serde(default)]
         read_pricing: Option<serde_json::Value>,
     },
+    /// File storage mode — stores files with cryptographic verification.
+    FileStorage {
+        name: String,
+        #[serde(default)]
+        max_file_size: u64,
+        #[serde(default = "default_replication_factor")]
+        replication_factor: u8,
+        #[serde(default)]
+        writers: Vec<String>,
+        #[serde(default)]
+        free_readers: Vec<String>,
+        #[serde(default)]
+        read_pricing: Option<serde_json::Value>,
+        #[serde(default)]
+        retention_period: u64,
+    },
     /// Blockchain indexing mode — indexes on-chain data with optional WASM transformations for custom logic.
     BlockchainIndexing {
         #[serde(default)]
@@ -84,6 +100,10 @@ pub enum SubgroveMode {
         #[serde(default)]
         retention_window: RetentionWindow,
     },
+}
+
+fn default_replication_factor() -> u8 {
+    1
 }
 
 impl Default for SubgroveMode {

@@ -122,6 +122,11 @@ impl WillowClient {
         DataOperations::new(self.clone())
     }
 
+    /// Get file storage operations
+    pub fn files(&self) -> crate::files::FileOperations {
+        crate::files::FileOperations::new(self.clone())
+    }
+
     /// Get the light client if configured.
     ///
     /// Returns `None` if `no-light-client` feature is enabled.

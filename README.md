@@ -8,6 +8,8 @@ A Rust SDK for interacting with the Willow decentralized data infrastructure pro
 - **GroveDB Proof Verification**: Merkle proofs verified locally using lightweight verify-only mode
 - **DID Authentication**: Ed25519 and secp256k1 signature support
 - **Automatic Proof Verification**: All `get()` and `query()` operations verify proofs automatically
+- **File Storage**: Upload, download, list, and delete files with chunk Merkle verification
+- **File Encryption**: XChaCha20-Poly1305 encryption/decryption for private files
 - **GraphQL Indexing**: Query indexed blockchain data with cryptographic proofs
 - **Token Operations**: Check balances, fees, and token information
 - **Async/Await**: Built on Tokio for high performance

@@ -72,6 +72,7 @@ pub mod consensus;
 pub mod data;
 pub mod erc8004;
 pub mod errors;
+pub mod files;
 pub mod indexing;
 pub mod light_client;
 pub mod privacy;
