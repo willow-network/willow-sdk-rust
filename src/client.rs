@@ -127,6 +127,11 @@ impl WillowClient {
         crate::files::FileOperations::new(self.clone())
     }
 
+    /// Get privacy operations for private subgroves
+    pub fn privacy(&self) -> crate::privacy::PrivacyOperations {
+        crate::privacy::PrivacyOperations::new(self.clone())
+    }
+
     /// Get the light client if configured.
     ///
     /// Returns `None` if `no-light-client` feature is enabled.

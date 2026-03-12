@@ -2,9 +2,8 @@
 //!
 //! This module provides client-side operations for managing private subgroves:
 //!
-//! - **Subgrove registration** with privacy configuration
 //! - **Key grant management** — grant, revoke, and rotate encryption keys
-//! - **Direct provider queries** — query private subgrove data with proof verification
+//! - **Key grant queries** — retrieve grants and proofs via the REST API
 //!
 //! # Example
 //!
@@ -25,7 +24,9 @@
 //! ```
 
 use crate::errors::{Result, WillowError};
+use crate::types::ApiResponse;
 use crate::WillowClient;
+use ed25519_dalek::{Signer, SigningKey};
 use serde::{Deserialize, Serialize};
 
 /// Privacy configuration for a private subgrove.
@@ -64,12 +65,12 @@ pub struct EncryptedKeyGrant {
 }
 
 /// Privacy-related operations for private subgroves.
-pub struct PrivacyOperations<'a> {
-    client: &'a WillowClient,
+pub struct PrivacyOperations {
+    client: WillowClient,
 }
 
-impl<'a> PrivacyOperations<'a> {
-    pub(crate) fn new(client: &'a WillowClient) -> Self {
+impl PrivacyOperations {
+    pub(crate) fn new(client: WillowClient) -> Self {
         Self { client }
     }
 
@@ -82,34 +83,22 @@ impl<'a> PrivacyOperations<'a> {
         app_id: &str,
         subgrove_id: &str,
     ) -> Result<EncryptedKeyGrant> {
-        let identity = self
+        let did = self
             .client
-            .identity()
-            .ok_or_else(|| WillowError::Auth("Identity not set".into()))?;
+            .get_did()
+            .ok_or_else(|| WillowError::Authentication("Identity not set".into()))?;
 
-        let url = format!(
-            "{}/key-grants/{}/{}/{}",
-            self.client.api_url(),
-            app_id,
-            subgrove_id,
-            identity.did
-        );
-
-        let response = self
+        let response: ApiResponse<EncryptedKeyGrant> = self
             .client
-            .http_client()
-            .get(&url)
-            .headers(self.client.auth_headers()?)
-            .send()
-            .await
-            .map_err(|e| WillowError::Network(e.to_string()))?;
+            .request(
+                "GET",
+                &format!("/key-grants/{}/{}/{}", app_id, subgrove_id, did),
+                None::<&()>,
+                true,
+            )
+            .await?;
 
-        let api_response: crate::types::ApiResponse<EncryptedKeyGrant> = response
-            .json()
-            .await
-            .map_err(|e| WillowError::Deserialization(e.to_string()))?;
-
-        api_response
+        response
             .data
             .ok_or_else(|| WillowError::NotFound("Key grant not found".into()))
     }
@@ -122,28 +111,17 @@ impl<'a> PrivacyOperations<'a> {
         app_id: &str,
         subgrove_id: &str,
     ) -> Result<Vec<String>> {
-        let url = format!(
-            "{}/key-grants/{}/{}",
-            self.client.api_url(),
-            app_id,
-            subgrove_id
-        );
-
-        let response = self
+        let response: ApiResponse<Vec<String>> = self
             .client
-            .http_client()
-            .get(&url)
-            .headers(self.client.auth_headers()?)
-            .send()
-            .await
-            .map_err(|e| WillowError::Network(e.to_string()))?;
+            .request(
+                "GET",
+                &format!("/key-grants/{}/{}", app_id, subgrove_id),
+                None::<&()>,
+                true,
+            )
+            .await?;
 
-        let api_response: crate::types::ApiResponse<Vec<String>> = response
-            .json()
-            .await
-            .map_err(|e| WillowError::Deserialization(e.to_string()))?;
-
-        api_response
+        response
             .data
             .ok_or_else(|| WillowError::NotFound("No grantees found".into()))
     }
@@ -157,28 +135,17 @@ impl<'a> PrivacyOperations<'a> {
         subgrove_id: &str,
         did: &str,
     ) -> Result<serde_json::Value> {
-        let url = format!(
-            "{}/proof/key-grant/{}/{}/{}",
-            self.client.api_url(),
-            app_id,
-            subgrove_id,
-            did
-        );
-
-        let response = self
+        let response: ApiResponse<serde_json::Value> = self
             .client
-            .http_client()
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| WillowError::Network(e.to_string()))?;
+            .request(
+                "GET",
+                &format!("/proof/key-grant/{}/{}/{}", app_id, subgrove_id, did),
+                None::<&()>,
+                false,
+            )
+            .await?;
 
-        let api_response: crate::types::ApiResponse<serde_json::Value> = response
-            .json()
-            .await
-            .map_err(|e| WillowError::Deserialization(e.to_string()))?;
-
-        api_response
+        response
             .data
             .ok_or_else(|| WillowError::NotFound("Proof not found".into()))
     }
@@ -191,34 +158,34 @@ impl<'a> PrivacyOperations<'a> {
         app_id: &str,
         subgrove_id: &str,
         grant: EncryptedKeyGrant,
-    ) -> Result<()> {
-        let identity = self
-            .client
-            .identity()
-            .ok_or_else(|| WillowError::Auth("Identity not set".into()))?;
-
-        let nonce = self.client.get_next_nonce().await?;
-
+        sender_did: &str,
+        signing_key: &SigningKey,
+        public_key_id: &str,
+        nonce: u64,
+    ) -> Result<String> {
         let message = format!(
             "GrantSubgroveKey:{}:{}:{}:{}:{}",
-            app_id, subgrove_id, grant.grantee_did, identity.did, nonce
+            app_id, subgrove_id, grant.grantee_did, sender_did, nonce
         );
 
-        let signature = self.client.sign_message(&message)?;
+        let signature = signing_key.sign(message.as_bytes());
 
         let tx = serde_json::json!({
             "GrantSubgroveKey": {
                 "app_id": app_id,
                 "subgrove_id": subgrove_id,
                 "encrypted_key_grant": grant,
-                "sender_did": identity.did,
-                "signature": signature,
-                "public_key_id": identity.public_key_id,
+                "sender_did": sender_did,
+                "signature": signature.to_bytes().to_vec(),
+                "public_key_id": public_key_id,
                 "nonce": nonce,
             }
         });
 
-        self.client.consensus().broadcast_tx(tx).await
+        self.client
+            .consensus()
+            .submit_raw_transaction(tx)
+            .await
     }
 
     /// Submit a RevokeSubgroveKey transaction via consensus.
@@ -229,34 +196,34 @@ impl<'a> PrivacyOperations<'a> {
         app_id: &str,
         subgrove_id: &str,
         revokee_did: &str,
-    ) -> Result<()> {
-        let identity = self
-            .client
-            .identity()
-            .ok_or_else(|| WillowError::Auth("Identity not set".into()))?;
-
-        let nonce = self.client.get_next_nonce().await?;
-
+        sender_did: &str,
+        signing_key: &SigningKey,
+        public_key_id: &str,
+        nonce: u64,
+    ) -> Result<String> {
         let message = format!(
             "RevokeSubgroveKey:{}:{}:{}:{}:{}",
-            app_id, subgrove_id, revokee_did, identity.did, nonce
+            app_id, subgrove_id, revokee_did, sender_did, nonce
         );
 
-        let signature = self.client.sign_message(&message)?;
+        let signature = signing_key.sign(message.as_bytes());
 
         let tx = serde_json::json!({
             "RevokeSubgroveKey": {
                 "app_id": app_id,
                 "subgrove_id": subgrove_id,
                 "revokee_did": revokee_did,
-                "sender_did": identity.did,
-                "signature": signature,
-                "public_key_id": identity.public_key_id,
+                "sender_did": sender_did,
+                "signature": signature.to_bytes().to_vec(),
+                "public_key_id": public_key_id,
                 "nonce": nonce,
             }
         });
 
-        self.client.consensus().broadcast_tx(tx).await
+        self.client
+            .consensus()
+            .submit_raw_transaction(tx)
+            .await
     }
 
     /// Submit a RotateSubgroveKey transaction via consensus.
@@ -268,20 +235,17 @@ impl<'a> PrivacyOperations<'a> {
         subgrove_id: &str,
         new_epoch: u32,
         new_grants: Vec<EncryptedKeyGrant>,
-    ) -> Result<()> {
-        let identity = self
-            .client
-            .identity()
-            .ok_or_else(|| WillowError::Auth("Identity not set".into()))?;
-
-        let nonce = self.client.get_next_nonce().await?;
-
+        sender_did: &str,
+        signing_key: &SigningKey,
+        public_key_id: &str,
+        nonce: u64,
+    ) -> Result<String> {
         let message = format!(
             "RotateSubgroveKey:{}:{}:{}:{}:{}",
-            app_id, subgrove_id, new_epoch, identity.did, nonce
+            app_id, subgrove_id, new_epoch, sender_did, nonce
         );
 
-        let signature = self.client.sign_message(&message)?;
+        let signature = signing_key.sign(message.as_bytes());
 
         let tx = serde_json::json!({
             "RotateSubgroveKey": {
@@ -289,13 +253,16 @@ impl<'a> PrivacyOperations<'a> {
                 "subgrove_id": subgrove_id,
                 "new_epoch": new_epoch,
                 "new_grants": new_grants,
-                "sender_did": identity.did,
-                "signature": signature,
-                "public_key_id": identity.public_key_id,
+                "sender_did": sender_did,
+                "signature": signature.to_bytes().to_vec(),
+                "public_key_id": public_key_id,
                 "nonce": nonce,
             }
         });
 
-        self.client.consensus().broadcast_tx(tx).await
+        self.client
+            .consensus()
+            .submit_raw_transaction(tx)
+            .await
     }
 }
