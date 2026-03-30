@@ -13,7 +13,7 @@
 //! // List all validators
 //! let validators = client.validators().list().await?;
 //! for v in validators {
-//!     println!("{}: {} staked", v.validator_did, v.stake_amount);
+//!     println!("{}: {} staked", v.did, v.total_stake);
 //! }
 //!
 //! // Get specific validator
@@ -66,15 +66,12 @@ impl ValidatorOperations {
     /// Gets the total staked amount across all validators.
     pub async fn get_total_staked(&self) -> Result<u128> {
         let validators = self.list().await?;
-        Ok(validators.iter().map(|v| v.stake_amount).sum())
+        Ok(validators.iter().map(|v| v.total_stake).sum())
     }
 
     /// Gets the number of active validators.
     pub async fn get_active_count(&self) -> Result<usize> {
         let validators = self.list().await?;
-        Ok(validators
-            .iter()
-            .filter(|v| v.status == crate::types::ValidatorStatus::Active)
-            .count())
+        Ok(validators.iter().filter(|v| v.active).count())
     }
 }

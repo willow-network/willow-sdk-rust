@@ -356,33 +356,21 @@ pub struct FeeSchedule {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidatorInfo {
     /// Validator DID
-    pub validator_did: String,
-    /// Validator's display name
+    pub did: String,
+    /// Total staked amount (self + delegated)
+    pub total_stake: u128,
+    /// Self-staked amount
+    pub self_stake: u128,
+    /// Whether the validator is active
+    pub active: bool,
+    /// Whether the validator is jailed
+    pub jailed: bool,
+    /// Jail end time (Unix timestamp), if jailed
     #[serde(default)]
-    pub name: Option<String>,
-    /// Total staked amount
-    pub stake_amount: u128,
-    /// Validator status
-    pub status: ValidatorStatus,
-    /// Voting power
-    pub voting_power: u64,
+    pub jail_end_time: Option<u64>,
     /// Consensus public key (hex)
     #[serde(default)]
     pub consensus_pubkey: Option<String>,
-}
-
-/// Validator status
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ValidatorStatus {
-    /// Active and participating in consensus
-    Active,
-    /// Jailed for misbehavior
-    Jailed,
-    /// Unbonding from active set
-    Unbonding,
-    /// Inactive
-    Inactive,
 }
 
 /// Stake request

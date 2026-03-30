@@ -105,7 +105,7 @@ pub use types::{
     PublicKey, QueryProof, RegisterAppRequest, RegisterSubgroveRequest, SchemaDefinition,
     SchemaField, SignatureAlgorithm, SignedRequestHeaders, StakeRequest, StoreDataRequest,
     SubgroveIndexingStatus, SubgroveInfo, SubgroveRegistration, SubgroveStatus, TokenInfo,
-    TransferRequest, UnstakeRequest, ValidatorInfo, ValidatorStatus, VerificationStats,
+    TransferRequest, UnstakeRequest, ValidatorInfo, VerificationStats,
     VerifyProofRequest, VerifyProofResponse,
 };
 pub use privacy::{PrivacyOperations, PrivacyConfig, CommitmentFrequency, EncryptedKeyGrant};
