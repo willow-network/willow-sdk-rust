@@ -58,8 +58,9 @@ impl Default for RetentionWindow {
 }
 
 /// The mode of a subgrove: either data storage or blockchain indexing.
+///
+/// Serialization format matches the server's externally-tagged enum.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
 pub enum SubgroveMode {
     /// Data storage mode — stores arbitrary off-chain data with verification.
     DataStorage {
@@ -67,7 +68,7 @@ pub enum SubgroveMode {
         #[serde(default)]
         writers: Vec<String>,
         #[serde(default)]
-        readers: Vec<String>,
+        free_readers: Vec<String>,
         #[serde(default)]
         read_pricing: Option<serde_json::Value>,
     },
@@ -111,7 +112,7 @@ impl Default for SubgroveMode {
         SubgroveMode::DataStorage {
             name: String::new(),
             writers: Vec::new(),
-            readers: Vec::new(),
+            free_readers: Vec::new(),
             read_pricing: None,
         }
     }
@@ -138,6 +139,17 @@ pub struct TransferTx {
     pub to_did: String,
     pub amount: u128,
     pub memo: Option<String>,
+    pub signature: Vec<u8>,
+    pub public_key_id: String,
+    pub nonce: u64,
+}
+
+/// Fund App transaction
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FundAppTx {
+    pub app_id: String,
+    pub amount: u128,
+    pub from_did: String,
     pub signature: Vec<u8>,
     pub public_key_id: String,
     pub nonce: u64,
@@ -204,13 +216,8 @@ impl ConsensusClient {
             nonce,
         };
 
-        // Create transaction in the exact format that works
-        let transaction = json!({
-            "RegisterDid": register_tx
-        });
-
-        // Submit transaction
-        self.submit_transaction(&transaction).await
+        let tx_json = Self::serialize_tx("RegisterDid", &register_tx)?;
+        self.submit_transaction(&tx_json).await
     }
 
     /// Register an app through consensus
@@ -257,11 +264,8 @@ impl ConsensusClient {
             nonce,
         };
 
-        let transaction = json!({
-            "RegisterApp": register_tx
-        });
-
-        self.submit_transaction(&transaction).await
+        let tx_json = Self::serialize_tx("RegisterApp", &register_tx)?;
+        self.submit_transaction(&tx_json).await
     }
 
     /// Transfer tokens through consensus
@@ -301,24 +305,30 @@ impl ConsensusClient {
             nonce,
         };
 
-        let transaction = json!({
-            "Transfer": transfer_tx
-        });
-
-        self.submit_transaction(&transaction).await
+        let tx_json = Self::serialize_tx("Transfer", &transfer_tx)?;
+        self.submit_transaction(&tx_json).await
     }
 
     /// Submit a raw JSON transaction to CometBFT.
     ///
     /// This is a public wrapper around submit_transaction for CLI/external use.
     pub async fn submit_raw_transaction(&self, transaction: serde_json::Value) -> Result<String> {
-        self.submit_transaction(&transaction).await
+        let tx_json = serde_json::to_string(&transaction)?;
+        self.submit_transaction(&tx_json).await
+    }
+
+    /// Serialize a transaction variant for submission.
+    ///
+    /// Uses `serde_json::to_string` directly (not `json!()` or `to_value()`)
+    /// to correctly handle u128 fields (token amounts, funding).
+    fn serialize_tx<T: Serialize>(variant_name: &str, tx: &T) -> Result<String> {
+        let inner = serde_json::to_string(tx)?;
+        Ok(format!(r#"{{"{}":{}}}"#, variant_name, inner))
     }
 
     /// Submit a transaction to CometBFT
-    async fn submit_transaction(&self, transaction: &serde_json::Value) -> Result<String> {
-        // Serialize transaction and base64 encode
-        let tx_json = serde_json::to_string(transaction)?;
+    async fn submit_transaction(&self, tx_json: &str) -> Result<String> {
+        // Base64 encode the serialized transaction
         let tx_base64 = base64::engine::general_purpose::STANDARD.encode(tx_json.as_bytes());
 
         // Create JSON-RPC request
@@ -448,27 +458,23 @@ impl ConsensusClient {
         request.signature = signature.to_bytes().to_vec();
 
         // Create transaction with DataStorage mode (SDK default)
-        let transaction = json!({
-            "RegisterSubgrove": {
-                "subgrove_id": request.subgrove_id,
-                "app_id": request.app_id,
-                "schema": schema_json,
-                "owner_did": request.owner_did,
-                "mode": {
-                    "DataStorage": {
-                        "name": request.name,
-                        "writers": request.writers,
-                        "free_readers": request.readers,
-                        "read_pricing": null
-                    }
-                },
-                "signature": request.signature,
-                "public_key_id": request.public_key_id,
-                "nonce": request.nonce,
-            }
-        });
-
-        self.submit_transaction(&transaction).await
+        let register_tx = RegisterSubgroveTx {
+            subgrove_id: request.subgrove_id.clone(),
+            app_id: request.app_id.clone(),
+            schema: schema_json,
+            owner_did: request.owner_did.clone(),
+            mode: SubgroveMode::DataStorage {
+                name: request.name.clone(),
+                writers: request.writers.clone(),
+                free_readers: request.readers.clone(),
+                read_pricing: None,
+            },
+            signature: request.signature.clone(),
+            public_key_id: request.public_key_id.clone(),
+            nonce: request.nonce,
+        };
+        let tx_json = Self::serialize_tx("RegisterSubgrove", &register_tx)?;
+        self.submit_transaction(&tx_json).await
     }
 
     /// Register a blockchain indexing subgrove from a definition file.
@@ -518,7 +524,8 @@ impl ConsensusClient {
             nonce,
         );
 
-        self.submit_transaction(&transaction).await
+        let tx_json = serde_json::to_string(&transaction)?;
+        self.submit_transaction(&tx_json).await
     }
 
     /// Store data using SigningKey
@@ -539,12 +546,8 @@ impl ConsensusClient {
         let signature = signing_key.sign(message.as_bytes());
         request.signature = signature.to_bytes().to_vec();
 
-        // Create transaction
-        let transaction = json!({
-            "StoreData": request
-        });
-
-        self.submit_transaction(&transaction).await
+        let tx_json = Self::serialize_tx("StoreData", &request)?;
+        self.submit_transaction(&tx_json).await
     }
 
     /// Fund an app using SigningKey
@@ -562,19 +565,16 @@ impl ConsensusClient {
         // Sign with Ed25519 key
         let signature = signing_key.sign(signing_payload.as_bytes());
 
-        // Create transaction matching server structure
-        let transaction = json!({
-            "FundApp": {
-                "app_id": request.app_id,
-                "amount": request.amount,
-                "from_did": request.from_did,
-                "signature": signature.to_bytes().to_vec(),
-                "public_key_id": request.public_key_id,
-                "nonce": request.nonce,
-            }
-        });
-
-        self.submit_transaction(&transaction).await
+        let fund_tx = FundAppTx {
+            app_id: request.app_id,
+            amount: request.amount,
+            from_did: request.from_did,
+            signature: signature.to_bytes().to_vec(),
+            public_key_id: request.public_key_id,
+            nonce: request.nonce,
+        };
+        let tx_json = Self::serialize_tx("FundApp", &fund_tx)?;
+        self.submit_transaction(&tx_json).await
     }
 
     /// Get transaction result
@@ -700,7 +700,7 @@ mod tests {
             mode: SubgroveMode::DataStorage {
                 name: "Test Subgrove".to_string(),
                 writers: vec!["did:willow:writer".to_string()],
-                readers: vec!["did:willow:reader".to_string()],
+                free_readers: vec!["did:willow:reader".to_string()],
                 read_pricing: None,
             },
             signature: vec![7, 8, 9],
