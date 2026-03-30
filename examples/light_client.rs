@@ -61,25 +61,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     println!("   Authenticated as: {}", DEVNET_VALIDATOR_1.did);
 
-    // 4. Store test data
-    println!("\n4. Storing test data...");
-    let test_data = json!({
-        "message": "This data will be cryptographically verified",
-        "timestamp": chrono::Utc::now().timestamp(),
-        "verified": true
-    });
-
-    match client
-        .data()
-        .store_item("test-app", "secure-data", "entry-1", test_data)
-        .await
-    {
-        Ok(_) => println!("   Data stored"),
-        Err(e) => println!("   Note: {}", e),
-    }
-
-    // 5. Retrieve with full trustless verification
-    println!("\n5. Retrieving data with trustless verification...");
+    // 4. Retrieve with full trustless verification
+    // Note: Data must first be stored via consensus transactions
+    println!("\n4. Retrieving data with trustless verification...");
     println!("   This verifies:");
     println!("   - 2/3+ validator signatures on block headers");
     println!("   - GroveDB Merkle proof against consensus app_hash");
@@ -97,8 +81,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => println!("   Note: {}", e),
     }
 
-    // 6. Query with verification
-    println!("\n6. Querying with trustless verification...");
+    // 5. Query with verification
+    println!("\n5. Querying with trustless verification...");
     let query = json!({ "limit": 10 });
 
     match client.data().query("test-app", "secure-data", query).await {
@@ -114,8 +98,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => println!("   Note: {}", e),
     }
 
-    // 7. Export trusted state for persistence
-    println!("\n7. Exporting trusted state...");
+    // 6. Export trusted state for persistence
+    println!("\n6. Exporting trusted state...");
     if let Some(lc) = client.light_client() {
         let state = lc.export_trusted_state().await;
         println!("   Exported {} trusted headers", state.headers.len());
@@ -127,8 +111,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("   State can be persisted and restored later");
     }
 
-    // 8. Show verification comparison
-    println!("\n8. Verification comparison...");
+    // 7. Show verification comparison
+    println!("\n7. Verification comparison...");
     println!("\n   LIGHT CLIENT (trustless):");
     println!("   + Verifies validator signatures (2/3+ threshold)");
     println!("   + Validates block header chain");

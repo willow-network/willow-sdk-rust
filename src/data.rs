@@ -7,8 +7,6 @@ use crate::proof::{ProofVerifier, QueryResponseExt};
 use crate::types::ApiResponse;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
-
 /// Response from a query operation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueryResponse {
@@ -93,41 +91,6 @@ pub struct DataOperations {
 impl DataOperations {
     pub(crate) fn new(client: WillowClient) -> Self {
         Self { client }
-    }
-
-    /// Store data in a subgrove
-    pub async fn store(
-        &self,
-        app_id: &str,
-        subgrove_id: &str,
-        data: HashMap<String, Value>,
-    ) -> Result<()> {
-        self.ensure_authenticated()?;
-
-        let _response: ApiResponse<Value> = self
-            .client
-            .request(
-                "POST",
-                &format!("/data/{}/{}", app_id, subgrove_id),
-                Some(&data),
-                true,
-            )
-            .await?;
-
-        Ok(())
-    }
-
-    /// Store a single item
-    pub async fn store_item(
-        &self,
-        app_id: &str,
-        subgrove_id: &str,
-        key: &str,
-        value: Value,
-    ) -> Result<()> {
-        let mut data = HashMap::new();
-        data.insert(key.to_string(), value);
-        self.store(app_id, subgrove_id, data).await
     }
 
     /// Get a single item from a subgrove with automatic proof verification
@@ -220,60 +183,6 @@ impl DataOperations {
         response
             .data
             .ok_or_else(|| WillowError::NotFound(format!("Key not found: {}", key)))
-    }
-
-    /// Update an item in a subgrove
-    pub async fn update(
-        &self,
-        app_id: &str,
-        subgrove_id: &str,
-        key: &str,
-        value: Value,
-    ) -> Result<()> {
-        self.ensure_authenticated()?;
-
-        let _response: ApiResponse<Value> = self
-            .client
-            .request(
-                "PUT",
-                &format!("/data/{}/{}/{}", app_id, subgrove_id, key),
-                Some(&value),
-                true,
-            )
-            .await?;
-
-        Ok(())
-    }
-
-    /// Delete an item from a subgrove
-    pub async fn delete(&self, app_id: &str, subgrove_id: &str, key: &str) -> Result<()> {
-        self.ensure_authenticated()?;
-
-        let _response: ApiResponse<Value> = self
-            .client
-            .request(
-                "DELETE",
-                &format!("/data/{}/{}/{}", app_id, subgrove_id, key),
-                None::<&()>,
-                true,
-            )
-            .await?;
-
-        Ok(())
-    }
-
-    /// Batch store multiple items
-    pub async fn batch_store(
-        &self,
-        app_id: &str,
-        subgrove_id: &str,
-        items: Vec<(String, Value)>,
-    ) -> Result<()> {
-        let mut data = HashMap::new();
-        for (key, value) in items {
-            data.insert(key, value);
-        }
-        self.store(app_id, subgrove_id, data).await
     }
 
     /// Query items using the indexing query API with automatic proof verification

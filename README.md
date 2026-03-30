@@ -134,32 +134,24 @@ let data = client.data().get_unverified("app_id", "dataset_id", "key").await?;
 let response = client.data().query_unverified("app_id", "dataset_id", query).await?;
 ```
 
-### Store Data
+### Store, Update, and Delete Data
+
+All data writes go through consensus transactions to ensure all nodes maintain consistent state:
 
 ```rust
-use serde_json::json;
+use willow_sdk::types::StoreDataRequest;
 
-// Store single item
-client.data().store_item(
-    "app_id",
-    "dataset_id",
-    "key",
-    json!({ "name": "Alice", "score": 100 })
-).await?;
-
-// Batch store
-let items = vec![
-    ("key1".to_string(), json!({ "name": "Item 1" })),
-    ("key2".to_string(), json!({ "name": "Item 2" })),
-];
-client.data().batch_store("app_id", "dataset_id", items).await?;
-```
-
-### Update and Delete
-
-```rust
-client.data().update("app_id", "dataset_id", "key", json!({ "updated": true })).await?;
-client.data().delete("app_id", "dataset_id", "key").await?;
+let request = StoreDataRequest {
+    app_id: "app_id".to_string(),
+    subgrove_id: "dataset_id".to_string(),
+    key: "key".to_string(),
+    data: json!({ "name": "Alice", "score": 100 }),
+    owner_did: did_info.did.clone(),
+    signature: vec![],
+    public_key_id: did_info.public_key_id.clone(),
+    nonce: 1,
+};
+let tx_hash = consensus_client.store_data(request, &signing_key).await?;
 ```
 
 ## DID Operations

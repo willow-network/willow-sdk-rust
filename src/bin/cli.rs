@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio;
 use willow_sdk::{
-    Client, ClientOptions, ConsensusClient, ConsensusClientOptions, DataOperations, Identity,
+    Client, ClientOptions, ConsensusClient, ConsensusClientOptions, Identity,
     RegistrationOperations,
 };
 
@@ -205,27 +205,6 @@ enum SubgroveCommands {
 
 #[derive(Subcommand)]
 enum DataCommands {
-    #[command(about = "Store data in a subgrove")]
-    Store {
-        #[arg(short, long)]
-        app_id: String,
-
-        #[arg(short, long)]
-        subgrove: String,
-
-        #[arg(short, long)]
-        key: String,
-
-        #[arg(short, long)]
-        data: String,
-
-        #[arg(short = 'i', long)]
-        identity_id: String,
-
-        #[arg(short, long)]
-        private_key: String,
-    },
-
     #[command(about = "Get a single item")]
     Get {
         #[arg(short, long)]
@@ -256,62 +235,6 @@ enum DataCommands {
         no_verify: bool,
     },
 
-    #[command(about = "Update an existing item")]
-    Update {
-        #[arg(short, long)]
-        app_id: String,
-
-        #[arg(short, long)]
-        subgrove: String,
-
-        #[arg(short, long)]
-        key: String,
-
-        #[arg(short, long)]
-        data: String,
-
-        #[arg(short = 'i', long)]
-        identity_id: String,
-
-        #[arg(short, long)]
-        private_key: String,
-    },
-
-    #[command(about = "Delete an item")]
-    Delete {
-        #[arg(short, long)]
-        app_id: String,
-
-        #[arg(short, long)]
-        subgrove: String,
-
-        #[arg(short, long)]
-        key: String,
-
-        #[arg(short = 'i', long)]
-        identity_id: String,
-
-        #[arg(short, long)]
-        private_key: String,
-    },
-
-    #[command(about = "Batch store multiple items")]
-    Batch {
-        #[arg(short, long)]
-        app_id: String,
-
-        #[arg(short, long)]
-        subgrove: String,
-
-        #[arg(short, long)]
-        data_file: PathBuf,
-
-        #[arg(short = 'i', long)]
-        identity_id: String,
-
-        #[arg(short, long)]
-        private_key: String,
-    },
 }
 
 #[derive(Subcommand)]
@@ -810,38 +733,6 @@ async fn handle_data_command(
     format: OutputFormat,
 ) -> Result<()> {
     match command {
-        DataCommands::Store {
-            app_id,
-            subgrove,
-            key,
-            data,
-            identity_id,
-            private_key,
-        } => {
-            let mut client = create_client(node_url.to_string()).await?;
-
-            // Create and authenticate identity
-            let pub_key_bytes =
-                hex::decode("0000000000000000000000000000000000000000000000000000000000000000")?; // Placeholder
-            let identity =
-                create_identity(&identity_id, &hex::encode(&pub_key_bytes), &private_key)?;
-            client.authenticate(identity)?;
-
-            let data_json: Value = serde_json::from_str(&data)?;
-
-            client
-                .store_item(&app_id, &subgrove, &key, data_json.clone())
-                .await?;
-
-            let result = json!({
-                "app_id": app_id,
-                "subgrove": subgrove,
-                "key": key,
-                "message": "Data stored successfully"
-            });
-
-            output_result(result, format);
-        }
         DataCommands::Get {
             app_id,
             subgrove,
@@ -897,96 +788,6 @@ async fn handle_data_command(
                 "results": results,
                 "count": results.len(),
                 "verified": !no_verify
-            });
-
-            output_result(result, format);
-        }
-        DataCommands::Update {
-            app_id,
-            subgrove,
-            key,
-            data,
-            identity_id,
-            private_key,
-        } => {
-            let mut client = create_client(node_url.to_string()).await?;
-
-            // Create and authenticate identity
-            let pub_key_bytes =
-                hex::decode("0000000000000000000000000000000000000000000000000000000000000000")?; // Placeholder
-            let identity =
-                create_identity(&identity_id, &hex::encode(&pub_key_bytes), &private_key)?;
-            client.authenticate(identity)?;
-
-            let data_json: Value = serde_json::from_str(&data)?;
-
-            client.update(&app_id, &subgrove, &key, data_json).await?;
-
-            let result = json!({
-                "app_id": app_id,
-                "subgrove": subgrove,
-                "key": key,
-                "message": "Data updated successfully"
-            });
-
-            output_result(result, format);
-        }
-        DataCommands::Delete {
-            app_id,
-            subgrove,
-            key,
-            identity_id,
-            private_key,
-        } => {
-            let mut client = create_client(node_url.to_string()).await?;
-
-            // Create and authenticate identity
-            let pub_key_bytes =
-                hex::decode("0000000000000000000000000000000000000000000000000000000000000000")?; // Placeholder
-            let identity =
-                create_identity(&identity_id, &hex::encode(&pub_key_bytes), &private_key)?;
-            client.authenticate(identity)?;
-
-            client.delete(&app_id, &subgrove, &key).await?;
-
-            let result = json!({
-                "app_id": app_id,
-                "subgrove": subgrove,
-                "key": key,
-                "message": "Data deleted successfully"
-            });
-
-            output_result(result, format);
-        }
-        DataCommands::Batch {
-            app_id,
-            subgrove,
-            data_file,
-            identity_id,
-            private_key,
-        } => {
-            let mut client = create_client(node_url.to_string()).await?;
-
-            // Create and authenticate identity
-            let pub_key_bytes =
-                hex::decode("0000000000000000000000000000000000000000000000000000000000000000")?; // Placeholder
-            let identity =
-                create_identity(&identity_id, &hex::encode(&pub_key_bytes), &private_key)?;
-            client.authenticate(identity)?;
-
-            // Read batch data from file
-            let batch_content = fs::read_to_string(data_file)?;
-            let batch_data: HashMap<String, Value> = serde_json::from_str(&batch_content)?;
-
-            client
-                .batch_store(&app_id, &subgrove, batch_data.clone())
-                .await?;
-
-            let result = json!({
-                "app_id": app_id,
-                "subgrove": subgrove,
-                "items_stored": batch_data.len(),
-                "message": "Batch data stored successfully"
             });
 
             output_result(result, format);

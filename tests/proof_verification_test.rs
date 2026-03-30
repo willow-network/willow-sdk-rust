@@ -5,12 +5,15 @@ use serde_json::json;
 use std::collections::HashMap;
 use willow_sdk::{
     auth::generate_did,
-    types::{DidInfo, FieldType, RegisterSubgroveRequest, SchemaDefinition, SignatureAlgorithm},
+    types::{
+        DidInfo, FieldType, RegisterSubgroveRequest, SchemaDefinition, SignatureAlgorithm,
+        StoreDataRequest,
+    },
     ConsensusClient, WillowClient, WillowError,
 };
 
 async fn setup_test_environment(
-) -> Result<(WillowClient, ConsensusClient, DidInfo, String, String), Box<dyn std::error::Error>> {
+) -> Result<(WillowClient, ConsensusClient, DidInfo, SigningKey, String, String), Box<dyn std::error::Error>> {
     // Initialize clients
     let client = WillowClient::new("http://localhost:3031").await?;
     let consensus_client = ConsensusClient::new("http://localhost:26657");
@@ -101,37 +104,73 @@ async fn setup_test_environment(
         client,
         consensus_client,
         did_info,
+        signing_key,
         app_id,
         subgrove_id.to_string(),
     ))
 }
 
+/// Store data via consensus transaction (the correct write path)
+async fn store_test_data(
+    consensus: &ConsensusClient,
+    signing_key: &SigningKey,
+    app_id: &str,
+    subgrove_id: &str,
+    key: &str,
+    data: serde_json::Value,
+    did: &str,
+    public_key_id: &str,
+    nonce: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let request = StoreDataRequest {
+        app_id: app_id.to_string(),
+        subgrove_id: subgrove_id.to_string(),
+        key: key.to_string(),
+        data,
+        owner_did: did.to_string(),
+        signature: vec![],
+        public_key_id: public_key_id.to_string(),
+        nonce,
+    };
+    let tx_hash = consensus.store_data(request, signing_key).await?;
+    consensus.wait_for_transaction(&tx_hash, 10).await?;
+    Ok(())
+}
+
 #[tokio::test]
 async fn test_get_with_automatic_proof_verification() {
-    let (client, _consensus, _did_info, app_id, subgrove_id) = match setup_test_environment().await
-    {
-        Ok(setup) => setup,
-        Err(e) => {
-            eprintln!(
-                "Test setup failed: {}. Make sure Willow and CometBFT are running.",
-                e
-            );
-            return;
-        }
-    };
+    let (client, consensus, did_info, signing_key, app_id, subgrove_id) =
+        match setup_test_environment().await {
+            Ok(setup) => setup,
+            Err(e) => {
+                eprintln!(
+                    "Test setup failed: {}. Make sure Willow and CometBFT are running.",
+                    e
+                );
+                return;
+            }
+        };
 
-    // Store test data
+    // Store test data via consensus
     let test_data = json!({
         "id": "test-001",
         "value": 42,
         "description": "Test item for proof verification"
     });
 
-    client
-        .data()
-        .store_item(&app_id, &subgrove_id, "test-key", test_data.clone())
-        .await
-        .expect("Failed to store test data");
+    store_test_data(
+        &consensus,
+        &signing_key,
+        &app_id,
+        &subgrove_id,
+        "test-key",
+        test_data.clone(),
+        &did_info.did,
+        &did_info.public_key_id,
+        4,
+    )
+    .await
+    .expect("Failed to store test data");
 
     // Test automatic proof verification on GET
     let retrieved_data = client
@@ -147,29 +186,37 @@ async fn test_get_with_automatic_proof_verification() {
 
 #[tokio::test]
 async fn test_get_unverified_skips_proof_check() {
-    let (client, _consensus, _did_info, app_id, subgrove_id) = match setup_test_environment().await
-    {
-        Ok(setup) => setup,
-        Err(e) => {
-            eprintln!(
-                "Test setup failed: {}. Make sure Willow and CometBFT are running.",
-                e
-            );
-            return;
-        }
-    };
+    let (client, consensus, did_info, signing_key, app_id, subgrove_id) =
+        match setup_test_environment().await {
+            Ok(setup) => setup,
+            Err(e) => {
+                eprintln!(
+                    "Test setup failed: {}. Make sure Willow and CometBFT are running.",
+                    e
+                );
+                return;
+            }
+        };
 
-    // Store test data
+    // Store test data via consensus
     let test_data = json!({
         "id": "test-002",
         "value": 100
     });
 
-    client
-        .data()
-        .store_item(&app_id, &subgrove_id, "test-key-2", test_data.clone())
-        .await
-        .expect("Failed to store test data");
+    store_test_data(
+        &consensus,
+        &signing_key,
+        &app_id,
+        &subgrove_id,
+        "test-key-2",
+        test_data.clone(),
+        &did_info.did,
+        &did_info.public_key_id,
+        4,
+    )
+    .await
+    .expect("Failed to store test data");
 
     // Test unverified GET (should not request or verify proof)
     let retrieved_data = client
@@ -185,31 +232,39 @@ async fn test_get_unverified_skips_proof_check() {
 
 #[tokio::test]
 async fn test_query_with_automatic_proof_verification() {
-    let (client, _consensus, _did_info, app_id, subgrove_id) = match setup_test_environment().await
-    {
-        Ok(setup) => setup,
-        Err(e) => {
-            eprintln!(
-                "Test setup failed: {}. Make sure Willow and CometBFT are running.",
-                e
-            );
-            return;
-        }
-    };
+    let (client, consensus, did_info, signing_key, app_id, subgrove_id) =
+        match setup_test_environment().await {
+            Ok(setup) => setup,
+            Err(e) => {
+                eprintln!(
+                    "Test setup failed: {}. Make sure Willow and CometBFT are running.",
+                    e
+                );
+                return;
+            }
+        };
 
-    // Store multiple test items
+    // Store multiple test items via consensus
     let items = vec![
         ("item-1", json!({"id": "item-1", "value": 10})),
         ("item-2", json!({"id": "item-2", "value": 20})),
         ("item-3", json!({"id": "item-3", "value": 30})),
     ];
 
-    for (key, data) in items {
-        client
-            .data()
-            .store_item(&app_id, &subgrove_id, key, data)
-            .await
-            .expect("Failed to store test data");
+    for (i, (key, data)) in items.into_iter().enumerate() {
+        store_test_data(
+            &consensus,
+            &signing_key,
+            &app_id,
+            &subgrove_id,
+            key,
+            data,
+            &did_info.did,
+            &did_info.public_key_id,
+            4 + i as u64,
+        )
+        .await
+        .expect("Failed to store test data");
     }
 
     // Wait for data to be indexed
@@ -241,29 +296,37 @@ async fn test_query_with_automatic_proof_verification() {
 
 #[tokio::test]
 async fn test_query_unverified_skips_proof_check() {
-    let (client, _consensus, _did_info, app_id, subgrove_id) = match setup_test_environment().await
-    {
-        Ok(setup) => setup,
-        Err(e) => {
-            eprintln!(
-                "Test setup failed: {}. Make sure Willow and CometBFT are running.",
-                e
-            );
-            return;
-        }
-    };
+    let (client, consensus, did_info, signing_key, app_id, subgrove_id) =
+        match setup_test_environment().await {
+            Ok(setup) => setup,
+            Err(e) => {
+                eprintln!(
+                    "Test setup failed: {}. Make sure Willow and CometBFT are running.",
+                    e
+                );
+                return;
+            }
+        };
 
-    // Store test data
+    // Store test data via consensus
     let test_data = json!({
         "id": "test-unverified",
         "value": 999
     });
 
-    client
-        .data()
-        .store_item(&app_id, &subgrove_id, "unverified-key", test_data)
-        .await
-        .expect("Failed to store test data");
+    store_test_data(
+        &consensus,
+        &signing_key,
+        &app_id,
+        &subgrove_id,
+        "unverified-key",
+        test_data,
+        &did_info.did,
+        &did_info.public_key_id,
+        4,
+    )
+    .await
+    .expect("Failed to store test data");
 
     // Wait for indexing
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
@@ -293,17 +356,17 @@ async fn test_query_unverified_skips_proof_check() {
 
 #[tokio::test]
 async fn test_proof_verification_error_handling() {
-    let (client, _consensus, _did_info, app_id, subgrove_id) = match setup_test_environment().await
-    {
-        Ok(setup) => setup,
-        Err(e) => {
-            eprintln!(
-                "Test setup failed: {}. Make sure Willow and CometBFT are running.",
-                e
-            );
-            return;
-        }
-    };
+    let (client, _consensus, _did_info, _signing_key, app_id, subgrove_id) =
+        match setup_test_environment().await {
+            Ok(setup) => setup,
+            Err(e) => {
+                eprintln!(
+                    "Test setup failed: {}. Make sure Willow and CometBFT are running.",
+                    e
+                );
+                return;
+            }
+        };
 
     // Test retrieving non-existent key
     match client

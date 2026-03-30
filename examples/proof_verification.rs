@@ -28,24 +28,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app_id = "proof-demo";
     let subgrove_id = "test-data";
 
-    // 1. Store test data
-    println!("1. Storing test data...");
-    let test_data = json!({
-        "message": "This data has a cryptographic proof",
-        "value": 42
-    });
-
-    match client
-        .data()
-        .store_item(app_id, subgrove_id, "test-key", test_data)
-        .await
-    {
-        Ok(_) => println!("   Data stored\n"),
-        Err(e) => println!("   Note: {}\n", e),
-    }
-
-    // 2. Get with automatic verification (default)
-    println!("2. Get with automatic verification...");
+    // 1. Get with automatic verification (default)
+    // Note: Data must first be stored via consensus transactions
+    println!("1. Get with automatic verification...");
     println!("   The SDK automatically:");
     println!("   - Requests the data from the API");
     println!("   - Fetches the proof for that item");
@@ -61,8 +46,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => println!("   Note: {}\n", e),
     }
 
-    // 3. Get without verification (faster)
-    println!("3. Get without verification (unverified)...");
+    // 2. Get without verification (faster)
+    println!("2. Get without verification (unverified)...");
     println!("   Skips all proof verification for maximum performance");
     println!("   Use only when you trust the node\n");
 
@@ -78,8 +63,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => println!("   Note: {}\n", e),
     }
 
-    // 4. Query with verification
-    println!("4. Query with automatic verification...");
+    // 3. Query with verification
+    println!("3. Query with automatic verification...");
     let query = json!({ "limit": 5 });
 
     match client
@@ -102,8 +87,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => println!("   Note: {}\n", e),
     }
 
-    // 5. Query without verification (for comparison)
-    println!("5. Query without verification (unverified)...");
+    // 4. Query without verification (for comparison)
+    println!("4. Query without verification (unverified)...");
     match client
         .data()
         .query_unverified(app_id, subgrove_id, query)
@@ -117,8 +102,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => println!("   Note: {}\n", e),
     }
 
-    // 6. Root hash comparison
-    println!("6. Root hash comparison...");
+    // 5. Root hash comparison
+    println!("5. Root hash comparison...");
     let verified_root = client.get_root_hash().await.ok();
     let local_root = client.get_root_hash_local().await.ok();
 
@@ -135,8 +120,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => println!("   Could not retrieve root hashes\n"),
     }
 
-    // 7. Summary
-    println!("7. Proof verification summary...");
+    // 6. Summary
+    println!("6. Proof verification summary...");
     println!("\n   AUTOMATIC VERIFICATION (recommended):");
     println!("   - Use get() and query() methods");
     println!("   - Proofs verified against consensus root hash");
