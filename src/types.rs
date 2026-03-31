@@ -103,16 +103,7 @@ pub struct SignedRequestHeaders {
 }
 
 /// Supported field types for schema definitions
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum FieldType {
-    String,
-    Number,
-    Boolean,
-    Array,
-    Object,
-    Bytes,
-}
+pub use willow_types::storage::types::FieldType;
 
 /// Schema field definition (convenience wrapper used in some APIs)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -178,18 +169,7 @@ pub struct RegisterSubgroveRequest {
     pub nonce: u64,
 }
 
-/// App registration info
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AppRegistration {
-    pub app_id: String,
-    pub name: String,
-    pub description: String,
-    pub app_type: String,
-    pub owner_did: String,
-    pub admins: Vec<String>,
-    pub created_at: u64,
-    pub updated_at: u64,
-}
+pub use willow_types::storage::types::AppRegistration;
 
 /// Subgrove registration info
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -325,28 +305,7 @@ pub struct TransferRequest {
 // Fee Types
 // ============================================================================
 
-/// Fee schedule defining costs for various operations
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FeeSchedule {
-    /// Fee to register a DID (identity)
-    pub did_registration: u128,
-    /// Fee to register an application
-    pub app_registration: u128,
-    /// Fee to register a subgrove
-    pub subgrove_registration: u128,
-    /// Base cost per transaction
-    pub base_tx_cost: u128,
-    /// Cost per byte of data
-    pub cost_per_byte: u128,
-    /// Fee per query
-    pub query_fee: u128,
-    /// Transfer fee in basis points (1/10000)
-    pub transfer_fee_percentage: u32,
-    /// Maximum transaction size in bytes
-    pub max_tx_size_bytes: u64,
-    /// Maximum data payload size in bytes
-    pub max_data_payload_bytes: u64,
-}
+pub use willow_types::FeeSchedule;
 
 // ============================================================================
 // Validator Types

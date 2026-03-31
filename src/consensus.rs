@@ -21,41 +21,9 @@ pub struct RegisterDidTx {
     pub nonce: u64,
 }
 
-/// Register App transaction
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RegisterAppTx {
-    pub app_id: String,
-    pub name: String,
-    pub description: String,
-    pub app_type: String,
-    pub owner_did: String,
-    pub admins: Vec<String>,
-    #[serde(default)]
-    pub initial_funding: Option<u128>,
-    pub signature: Vec<u8>,
-    pub public_key_id: String,
-    pub nonce: u64,
-}
+pub use willow_types::consensus::transactions::RegisterAppTx;
 
-/// How long real-time indexed data is retained on consensus nodes.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum RetentionWindow {
-    /// Retain for N consensus blocks.
-    Blocks(u64),
-    /// Retain for N seconds.
-    Seconds(u64),
-    /// Never prune (default).
-    Indefinite,
-    /// Verify and discard: consensus verifies but does not store raw data.
-    /// Queries always route to indexer nodes. Cheapest tier (base_tx_cost only).
-    VerifyOnly,
-}
-
-impl Default for RetentionWindow {
-    fn default() -> Self {
-        RetentionWindow::Indefinite
-    }
-}
+pub use willow_types::consensus::indexing_transactions::RetentionWindow;
 
 /// The mode of a subgrove: either data storage or blockchain indexing.
 ///
@@ -132,40 +100,7 @@ pub struct RegisterSubgroveTx {
     pub nonce: u64,
 }
 
-/// Transfer transaction
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TransferTx {
-    pub from_did: String,
-    pub to_did: String,
-    pub amount: u128,
-    pub memo: Option<String>,
-    pub signature: Vec<u8>,
-    pub public_key_id: String,
-    pub nonce: u64,
-}
-
-/// Delete Data transaction
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DeleteDataTx {
-    pub app_id: String,
-    pub subgrove_id: String,
-    pub key: String,
-    pub owner_did: String,
-    pub signature: Vec<u8>,
-    pub public_key_id: String,
-    pub nonce: u64,
-}
-
-/// Fund App transaction
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FundAppTx {
-    pub app_id: String,
-    pub amount: u128,
-    pub from_did: String,
-    pub signature: Vec<u8>,
-    pub public_key_id: String,
-    pub nonce: u64,
-}
+pub use willow_types::consensus::transactions::{TransferTx, DeleteDataTx, FundAppTx};
 
 /// CometBFT RPC response
 #[derive(Debug, Clone, Serialize, Deserialize)]
