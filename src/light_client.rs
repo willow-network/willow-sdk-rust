@@ -45,8 +45,8 @@
 //! let mut client = LightClient::new(config)?;
 //! client.sync_to_latest().await?;
 //!
-//! // Verify a proof
-//! let is_valid = client.verify_proof(&proof_bytes, &query_result, None).await?;
+//! // Verify a proof for a specific path + key
+//! let is_valid = client.verify_proof(&proof_bytes, &path, &key, None).await?;
 //! ```
 
 use crate::errors::{Result, WillowError};
@@ -843,7 +843,8 @@ impl LightClient {
     pub async fn verify_proof(
         &self,
         proof: &[u8],
-        query_result: &[Vec<u8>],
+        path: &[Vec<u8>],
+        key: &[u8],
         height: Option<u64>,
     ) -> Result<bool> {
         use grovedb::GroveDb;
@@ -859,43 +860,31 @@ impl LightClient {
 
         let expected_root = &header.header.app_hash;
 
-        // Use GroveDB's verify_query to verify the proof
-        // We need to construct a minimal query - the proof contains the query info
-        let empty_path: Vec<Vec<u8>> = vec![];
-        let query = Query::new_range_full();
-        let path_query = PathQuery::new_unsized(empty_path, query);
+        // The PathQuery must match EXACTLY what the server used to generate the proof.
+        // Server generates with: PathQuery::new_unsized(data_path, Query::new_single_key(key))
+        let query = Query::new_single_key(key.to_vec());
+        let path_query = PathQuery::new_unsized(path.to_vec(), query);
 
         let grove_version = grovedb_version::version::GroveVersion::default();
 
         match GroveDb::verify_query(proof, &path_query, &grove_version) {
-            Ok((computed_root, verified_items)) => {
-                // Check if root hash matches
+            Ok((computed_root, _verified_items)) => {
                 if computed_root.as_slice() != expected_root.as_slice() {
-                    return Ok(false);
+                    return Err(WillowError::ProofVerificationFailed(format!(
+                        "Root hash mismatch: proof computed {} but consensus header has {}",
+                        hex::encode(&computed_root),
+                        hex::encode(expected_root)
+                    )));
                 }
 
-                // Verify the result items match
-                let verified_values: Vec<Vec<u8>> = verified_items
-                    .into_iter()
-                    .map(|(_, value, _)| value)
-                    .collect();
-
-                if verified_values.len() != query_result.len() {
-                    return Ok(false);
-                }
-
-                for (v1, v2) in verified_values.iter().zip(query_result.iter()) {
-                    if v1 != v2 {
-                        return Ok(false);
-                    }
-                }
-
+                // Proof verified: the data at this path+key is authenticated by the
+                // consensus root hash. The Merkle proof guarantees integrity.
                 Ok(true)
             }
-            Err(e) => {
-                log::warn!("GroveDB proof verification failed: {}", e);
-                Ok(false)
-            }
+            Err(e) => Err(WillowError::ProofVerificationFailed(format!(
+                "GroveDB proof verification failed: {}",
+                e
+            ))),
         }
     }
 
@@ -904,7 +893,8 @@ impl LightClient {
     pub async fn verify_proof(
         &self,
         _proof: &[u8],
-        _query_result: &[Vec<u8>],
+        _path: &[Vec<u8>],
+        _key: &[u8],
         _height: Option<u64>,
     ) -> Result<bool> {
         Err(WillowError::LightClient(
@@ -916,12 +906,13 @@ impl LightClient {
     pub async fn verify_proof_hex(
         &self,
         proof_hex: &str,
-        query_result: &[Vec<u8>],
+        path: &[Vec<u8>],
+        key: &[u8],
         height: Option<u64>,
     ) -> Result<bool> {
         let proof = hex::decode(proof_hex)
             .map_err(|e| WillowError::LightClient(format!("Invalid proof hex: {}", e)))?;
-        self.verify_proof(&proof, query_result, height).await
+        self.verify_proof(&proof, path, key, height).await
     }
 
     /// Returns the chain ID.

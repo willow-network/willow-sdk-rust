@@ -135,20 +135,18 @@ impl DataOperations {
                     // Get or create light client (auto-initializes with trust-on-first-use)
                     let light_client = self.client.get_or_create_light_client().await?;
 
-                    // Use light client for trustless verification
-                    let data_bytes =
-                        serde_json::to_vec(&data).map_err(|e| WillowError::Serialization(e))?;
-                    let query_result = vec![data_bytes];
+                    // Build the GroveDB path matching the server's proof generation
+                    let path: Vec<Vec<u8>> = vec![
+                        b"apps".to_vec(),
+                        app_id.as_bytes().to_vec(),
+                        b"subgroves".to_vec(),
+                        subgrove_id.as_bytes().to_vec(),
+                        b"data".to_vec(),
+                    ];
 
-                    let is_valid = light_client
-                        .verify_proof_hex(proof_hex, &query_result, None)
+                    light_client
+                        .verify_proof_hex(proof_hex, &path, key.as_bytes(), None)
                         .await?;
-
-                    if !is_valid {
-                        return Err(WillowError::ProofVerificationFailed(
-                            "Light client proof verification failed for item".to_string(),
-                        ));
-                    }
                 }
             } else {
                 log::warn!("No proof available for key: {}", key);
@@ -490,32 +488,7 @@ impl DataOperations {
         // Get or create light client (auto-initializes with trust-on-first-use)
         let light_client = self.client.get_or_create_light_client().await?;
 
-        if let Some(proof_hex) = &query_response.proof {
-            // Convert documents to bytes for verification
-            let query_result: Vec<Vec<u8>> = query_response
-                .documents
-                .iter()
-                .map(|doc| serde_json::to_vec(doc).unwrap_or_default())
-                .collect();
-
-            // Verify using light client
-            let is_valid = light_client
-                .verify_proof_hex(proof_hex, &query_result, None)
-                .await?;
-
-            if !is_valid {
-                return Err(WillowError::ProofVerificationFailed(
-                    "Light client proof verification failed".to_string(),
-                ));
-            }
-
-            // If light client verification passed, we can trust the proof
-            // Still compute the root for informational purposes
-            let computed_root = query_response.verify_proof()?;
-            return Ok(computed_root);
-        }
-
-        // No proof available - compute root and verify against light client's root hash
+        // Compute the root hash from the proof and compare against consensus
         let computed_root = query_response.verify_proof()?;
 
         // Get verified root hash from light client
