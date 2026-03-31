@@ -144,6 +144,18 @@ pub struct TransferTx {
     pub nonce: u64,
 }
 
+/// Delete Data transaction
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeleteDataTx {
+    pub app_id: String,
+    pub subgrove_id: String,
+    pub key: String,
+    pub owner_did: String,
+    pub signature: Vec<u8>,
+    pub public_key_id: String,
+    pub nonce: u64,
+}
+
 /// Fund App transaction
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FundAppTx {
@@ -547,6 +559,33 @@ impl ConsensusClient {
         request.signature = signature.to_bytes().to_vec();
 
         let tx_json = Self::serialize_tx("StoreData", &request)?;
+        self.submit_transaction(&tx_json).await
+    }
+
+    /// Delete data using SigningKey
+    pub async fn delete_data(
+        &self,
+        app_id: &str,
+        subgrove_id: &str,
+        key: &str,
+        owner_did: &str,
+        public_key_id: &str,
+        signing_key: &SigningKey,
+        nonce: u64,
+    ) -> Result<String> {
+        let message = format!("DeleteData:{}:{}:{}", app_id, subgrove_id, key);
+        let signature = signing_key.sign(message.as_bytes());
+
+        let delete_tx = DeleteDataTx {
+            app_id: app_id.to_string(),
+            subgrove_id: subgrove_id.to_string(),
+            key: key.to_string(),
+            owner_did: owner_did.to_string(),
+            signature: signature.to_bytes().to_vec(),
+            public_key_id: public_key_id.to_string(),
+            nonce,
+        };
+        let tx_json = Self::serialize_tx("DeleteData", &delete_tx)?;
         self.submit_transaction(&tx_json).await
     }
 
