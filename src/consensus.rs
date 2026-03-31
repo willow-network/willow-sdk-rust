@@ -393,15 +393,20 @@ impl ConsensusClient {
         }
     }
 
-    /// Normalize a tx hash to the `0xHEX` format CometBFT expects.
-    fn normalize_tx_hash(tx_hash: &str) -> String {
+    /// Convert a hex tx hash to base64 for CometBFT's JSON-RPC `tx` method.
+    ///
+    /// CometBFT's HTTP URI API accepts `0x`-prefixed hex, but the JSON-RPC
+    /// `tx` method expects the hash as base64-encoded bytes.
+    fn tx_hash_to_base64(tx_hash: &str) -> Result<String> {
         let bare = tx_hash.strip_prefix("0x").unwrap_or(tx_hash);
-        format!("0x{}", bare)
+        let bytes = hex::decode(bare)
+            .map_err(|e| WillowError::Custom(format!("Invalid tx hash hex: {}", e)))?;
+        Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
     }
 
     /// Wait for transaction to be included in a block
     pub async fn wait_for_transaction(&self, tx_hash: &str, max_attempts: u32) -> Result<bool> {
-        let hash = Self::normalize_tx_hash(tx_hash);
+        let hash = Self::tx_hash_to_base64(tx_hash)?;
         for _ in 0..max_attempts {
             // Query transaction status
             let query_request = json!({
@@ -626,7 +631,7 @@ impl ConsensusClient {
 
     /// Get transaction result
     pub async fn get_transaction(&self, tx_hash: &str) -> Result<TransactionResult> {
-        let hash = Self::normalize_tx_hash(tx_hash);
+        let hash = Self::tx_hash_to_base64(tx_hash)?;
         let query_request = json!({
             "jsonrpc": "2.0",
             "id": 1,
