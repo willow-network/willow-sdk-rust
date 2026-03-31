@@ -847,7 +847,7 @@ impl LightClient {
     /// Block headers have a 1-block lag (block H's header contains the
     /// app_hash from block H-1), so `/block_results` is the only reliable
     /// way to get the hash matching a proof from the current state.
-    async fn fetch_current_app_hash(&self) -> Result<Vec<u8>> {
+    pub async fn fetch_current_app_hash(&self) -> Result<Vec<u8>> {
         use base64::Engine;
 
         for endpoint in &self.config.validator_endpoints {

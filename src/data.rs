@@ -220,7 +220,7 @@ impl DataOperations {
         // Verify proof if present and light client is available
         #[cfg(not(feature = "no-light-client"))]
         if query_response.proof.is_some() {
-            match self.verify_and_compare_root(&query_response).await {
+            match self.verify_and_compare_root(app_id, subgrove_id, &query_response).await {
                 Ok(verified_root) => {
                     query_response.verified_root_hash = Some(verified_root);
                 }
@@ -484,15 +484,60 @@ impl DataOperations {
     ///
     /// Only available when light client verification is enabled.
     #[cfg(not(feature = "no-light-client"))]
-    async fn verify_and_compare_root(&self, query_response: &QueryResponse) -> Result<String> {
-        // Get or create light client (auto-initializes with trust-on-first-use)
+    async fn verify_and_compare_root(
+        &self,
+        app_id: &str,
+        subgrove_id: &str,
+        query_response: &QueryResponse,
+    ) -> Result<String> {
+        use grovedb::{GroveDb, PathQuery, Query};
+
         let light_client = self.client.get_or_create_light_client().await?;
 
-        // Compute the root hash from the proof and compare against consensus
-        let computed_root = query_response.verify_proof()?;
+        let proof_hex = query_response.proof.as_ref().ok_or_else(|| {
+            WillowError::ProofVerificationFailed("No proof in query response".to_string())
+        })?;
 
-        // Get verified root hash from light client
-        let consensus_root = light_client.get_verified_root_hash().await?;
+        let proof_bytes = hex::decode(proof_hex).map_err(|e| {
+            WillowError::ProofVerificationFailed(format!("Invalid proof hex: {}", e))
+        })?;
+        if proof_bytes.is_empty() {
+            return Err(WillowError::ProofVerificationFailed(
+                "Empty proof".to_string(),
+            ));
+        }
+
+        // Build the same PathQuery the server used to generate the proof:
+        // path: [apps, app_id, subgroves, subgrove_id, data], query: range_full
+        // The server always generates proofs with range_full (matching full_scan),
+        // so the SDK reconstructs the identical PathQuery for strict verification.
+        let path: Vec<Vec<u8>> = vec![
+            b"apps".to_vec(),
+            app_id.as_bytes().to_vec(),
+            b"subgroves".to_vec(),
+            subgrove_id.as_bytes().to_vec(),
+            b"data".to_vec(),
+        ];
+
+        let query = Query::new_range_full();
+        let path_query = PathQuery::new_unsized(path, query);
+        let grove_version = grovedb_version::version::GroveVersion::default();
+
+        // Strict verify_query — proves completeness: the server returned ALL
+        // data in the subgrove. If any item was omitted or fabricated, this fails.
+        let (computed_root_bytes, _verified_items) =
+            GroveDb::verify_query(&proof_bytes, &path_query, &grove_version).map_err(|e| {
+                WillowError::ProofVerificationFailed(format!(
+                    "GroveDB proof verification failed: {}",
+                    e
+                ))
+            })?;
+
+        let computed_root = hex::encode(&computed_root_bytes);
+
+        // Compare against current consensus app_hash from /block_results
+        let consensus_root = hex::encode(light_client.fetch_current_app_hash().await?);
+
 
         // Compare roots
         if computed_root != consensus_root {
