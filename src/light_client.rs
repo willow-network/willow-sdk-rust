@@ -851,6 +851,16 @@ impl LightClient {
         use grovedb::PathQuery;
         use grovedb::Query;
 
+        // Sync to the latest block before verifying. The proof reflects the
+        // current committed GroveDB state, whose app_hash appears in the NEXT
+        // block header. Even empty blocks change the state (block rewards), so
+        // a stale cached header will almost always have a different app_hash.
+        if height.is_none() {
+            if let Err(e) = self.sync_to_latest().await {
+                log::warn!("Light client sync failed, using cached header: {}", e);
+            }
+        }
+
         // Get the header to verify against
         let header = match height {
             Some(h) => self.get_header_by_height(h).await,
