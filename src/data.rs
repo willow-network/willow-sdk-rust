@@ -466,7 +466,7 @@ impl DataOperations {
         {
             // Without light client, we can't verify proofs
             // Just warn and return the result
-            tracing::warn!("Proof verification disabled with 'no-light-client' feature");
+            eprintln!("Warning: proof verification disabled with 'no-light-client' feature");
         }
 
         Ok(result)
