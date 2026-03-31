@@ -223,7 +223,7 @@ impl WillowClient {
     ///
     /// # Example
     /// ```rust,no_run
-    /// use willow_sdk::{WillowClient, types::SignatureAlgorithm};
+    /// use willow_sdk::WillowClient;
     ///
     /// #[tokio::main]
     /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -234,7 +234,8 @@ impl WillowClient {
     ///         .await?;
     ///
     ///     // Submit transactions through consensus
-    ///     let tx_hash = client.consensus().register_did(...).await?;
+    ///     let consensus = client.consensus();
+    ///     // consensus.register_did(...).await?;
     ///     Ok(())
     /// }
     /// ```

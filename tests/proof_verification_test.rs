@@ -383,6 +383,7 @@ async fn test_proof_verification_error_handling() {
 }
 
 #[tokio::test]
+#[ignore] // Requires a running node
 async fn test_verified_root_hash_endpoint() {
     let client = match WillowClient::new("http://localhost:3031").await {
         Ok(c) => c,

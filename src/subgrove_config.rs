@@ -14,6 +14,8 @@
 //!
 //! // Register using the consensus client
 //! let consensus = willow_sdk::consensus::ConsensusClient::new("http://localhost:26657");
+//! let key_bytes = [0u8; 32];
+//! let signing_key = ed25519_dalek::SigningKey::from_bytes(&key_bytes);
 //! let tx_hash = consensus.register_blockchain_subgrove(
 //!     &def,
 //!     "my-app",

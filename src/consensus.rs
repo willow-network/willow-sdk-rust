@@ -511,6 +511,7 @@ impl ConsensusClient {
     /// let client = ConsensusClient::new("http://localhost:26657");
     /// let def = SubgroveDefinition::load("subgrove_definitions/ethereum/aave-v3.toml")?;
     ///
+    /// let key_bytes = [0u8; 32];
     /// let signing_key = ed25519_dalek::SigningKey::from_bytes(&key_bytes);
     /// let tx_hash = client.register_blockchain_subgrove(
     ///     &def,
