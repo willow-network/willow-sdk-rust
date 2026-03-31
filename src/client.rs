@@ -254,12 +254,7 @@ impl WillowClient {
 
     /// Check the health of the Willow node
     pub async fn health(&self) -> Result<HealthStatus> {
-        let response: ApiResponse<HealthStatus> =
-            self.request("GET", "/health", None::<&()>, false).await?;
-
-        response
-            .data
-            .ok_or_else(|| WillowError::Custom("No health data in response".to_string()))
+        self.request("GET", "/health", None::<&()>, false).await
     }
 
     /// Get the verified root hash from the blockchain consensus.

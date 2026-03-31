@@ -673,24 +673,28 @@ pub struct DidPermissions {
 pub struct HealthStatus {
     /// Overall health status
     pub status: String,
-    /// Current timestamp
-    pub timestamp: u64,
+    /// Current timestamp (RFC3339 string)
+    pub timestamp: String,
     /// Version information
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
-    /// Individual component health
-    #[serde(default)]
-    pub components: HashMap<String, ComponentHealth>,
+    /// Individual component health checks
+    #[serde(default, alias = "components")]
+    pub checks: HashMap<String, ComponentHealth>,
 }
 
 /// Individual component health
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComponentHealth {
-    /// Component status
-    pub status: String,
+    /// Component status (absent for info-only checks like "system")
+    #[serde(default)]
+    pub status: Option<String>,
     /// Optional message
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// Additional fields (e.g. uptime_seconds for system check)
+    #[serde(flatten)]
+    pub extra: HashMap<String, serde_json::Value>,
 }
 
 #[cfg(test)]
@@ -837,29 +841,31 @@ mod tests {
         components.insert(
             "database".to_string(),
             ComponentHealth {
-                status: "healthy".to_string(),
+                status: Some("healthy".to_string()),
                 message: None,
+                extra: HashMap::new(),
             },
         );
         components.insert(
             "consensus".to_string(),
             ComponentHealth {
-                status: "healthy".to_string(),
+                status: Some("healthy".to_string()),
                 message: Some("Synced to height 100".to_string()),
+                extra: HashMap::new(),
             },
         );
 
         let health = HealthStatus {
             status: "healthy".to_string(),
-            timestamp: 1234567890,
+            timestamp: "2026-03-31T16:20:07Z".to_string(),
             version: Some("1.0.0".to_string()),
-            components,
+            checks: components,
         };
 
         let json = serde_json::to_string(&health).unwrap();
         let deserialized: HealthStatus = serde_json::from_str(&json).unwrap();
 
         assert_eq!(health.status, deserialized.status);
-        assert_eq!(health.components.len(), deserialized.components.len());
+        assert_eq!(health.checks.len(), deserialized.checks.len());
     }
 }
