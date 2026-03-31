@@ -840,6 +840,47 @@ impl LightClient {
     ///
     /// `Ok(true)` if the proof is valid, `Ok(false)` if invalid.
     #[cfg(not(feature = "no-light-client"))]
+    /// Fetches the current app_hash from CometBFT's `/block_results` endpoint.
+    ///
+    /// `/block_results` returns the `app_hash` from `ResponseFinalizeBlock`,
+    /// which is the GroveDB root hash AFTER the latest block was executed.
+    /// Block headers have a 1-block lag (block H's header contains the
+    /// app_hash from block H-1), so `/block_results` is the only reliable
+    /// way to get the hash matching a proof from the current state.
+    async fn fetch_current_app_hash(&self) -> Result<Vec<u8>> {
+        use base64::Engine;
+
+        for endpoint in &self.config.validator_endpoints {
+            let url = format!("{}/block_results", endpoint);
+            match self.http_client.get(&url).send().await {
+                Ok(resp) => {
+                    if let Ok(json) = resp.json::<serde_json::Value>().await {
+                        if let Some(hash_b64) = json
+                            .get("result")
+                            .and_then(|r| r.get("app_hash"))
+                            .and_then(|h| h.as_str())
+                        {
+                            return base64::engine::general_purpose::STANDARD
+                                .decode(hash_b64)
+                                .map_err(|e| {
+                                    WillowError::LightClient(format!(
+                                        "Invalid app_hash base64 from block_results: {}",
+                                        e
+                                    ))
+                                });
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Failed to fetch block_results from {}: {}", endpoint, e);
+                }
+            }
+        }
+        Err(WillowError::LightClient(
+            "Could not fetch current app_hash from any validator endpoint".to_string(),
+        ))
+    }
+
     pub async fn verify_proof(
         &self,
         proof: &[u8],
@@ -851,24 +892,22 @@ impl LightClient {
         use grovedb::PathQuery;
         use grovedb::Query;
 
-        // Sync to the latest block before verifying. The proof reflects the
-        // current committed GroveDB state, whose app_hash appears in the NEXT
-        // block header. Even empty blocks change the state (block rewards), so
-        // a stale cached header will almost always have a different app_hash.
-        if height.is_none() {
-            if let Err(e) = self.sync_to_latest().await {
-                log::warn!("Light client sync failed, using cached header: {}", e);
-            }
-        }
-
-        // Get the header to verify against
-        let header = match height {
-            Some(h) => self.get_header_by_height(h).await,
-            None => self.get_latest_header().await,
-        }
-        .ok_or_else(|| WillowError::LightClient("No verified header available".to_string()))?;
-
-        let expected_root = &header.header.app_hash;
+        // Get the expected root hash.
+        // For a specific height, use the cached header. For "latest" (the common
+        // case), fetch the current app_hash directly from abci_info — block
+        // headers have a 1-block lag so the latest header's app_hash is always
+        // one block behind the current GroveDB state.
+        let expected_root = if let Some(h) = height {
+            let header = self
+                .get_header_by_height(h)
+                .await
+                .ok_or_else(|| {
+                    WillowError::LightClient(format!("No verified header at height {}", h))
+                })?;
+            header.header.app_hash
+        } else {
+            self.fetch_current_app_hash().await?
+        };
 
         // The PathQuery must match EXACTLY what the server used to generate the proof.
         // Server generates with: PathQuery::new_unsized(data_path, Query::new_single_key(key))
