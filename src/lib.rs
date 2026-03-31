@@ -98,6 +98,7 @@ pub use light_client::{
 pub use proof::{ProofVerifier, QueryResponseExt};
 pub use registration::RegistrationOperations;
 pub use token::TokenOperations;
+pub use willow_types::token::units as token_units;
 pub use types::{
     ApiResponse, AppBalanceInfo, AppRegistration, BalanceInfo, BlockVerificationStatus, DidDocument,
     DidPermissions, EthereumAnchor, FeeSchedule, GraphQLError, GraphQLRequest, GraphQLResponse,
