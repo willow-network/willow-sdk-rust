@@ -136,7 +136,7 @@ async fn light_client_verification_test() {
     use std::collections::HashMap;
     use willow_sdk::types::{FieldType, RegisterSubgroveRequest, SchemaDefinition};
 
-    let mut fields = HashMap::new();
+    let mut fields = std::collections::BTreeMap::new();
     fields.insert("message".to_string(), FieldType::String);
     fields.insert("timestamp".to_string(), FieldType::Number);
     fields.insert("verified".to_string(), FieldType::Boolean);

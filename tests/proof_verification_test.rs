@@ -71,7 +71,7 @@ async fn setup_test_environment(
         .await?;
 
     // Register subgrove
-    let mut fields = HashMap::new();
+    let mut fields = std::collections::BTreeMap::new();
     fields.insert("id".to_string(), FieldType::String);
     fields.insert("value".to_string(), FieldType::Number);
 

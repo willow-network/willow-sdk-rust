@@ -25,82 +25,10 @@ pub use willow_types::consensus::transactions::RegisterAppTx;
 
 pub use willow_types::consensus::indexing_transactions::RetentionWindow;
 
-/// The mode of a subgrove: either data storage or blockchain indexing.
-///
-/// Serialization format matches the server's externally-tagged enum.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum SubgroveMode {
-    /// Data storage mode — stores arbitrary off-chain data with verification.
-    DataStorage {
-        name: String,
-        #[serde(default)]
-        writers: Vec<String>,
-        #[serde(default)]
-        free_readers: Vec<String>,
-        #[serde(default)]
-        read_pricing: Option<serde_json::Value>,
-    },
-    /// File storage mode — stores files with cryptographic verification.
-    FileStorage {
-        name: String,
-        #[serde(default)]
-        max_file_size: u64,
-        #[serde(default = "default_replication_factor")]
-        replication_factor: u8,
-        #[serde(default)]
-        writers: Vec<String>,
-        #[serde(default)]
-        free_readers: Vec<String>,
-        #[serde(default)]
-        read_pricing: Option<serde_json::Value>,
-        #[serde(default)]
-        retention_period: u64,
-    },
-    /// Blockchain indexing mode — indexes on-chain data with optional WASM transformations for custom logic.
-    BlockchainIndexing {
-        #[serde(default)]
-        manifest_content: Vec<u8>,
-        #[serde(default)]
-        wasm_modules: Vec<serde_json::Value>,
-        #[serde(default)]
-        execution_mode: serde_json::Value,
-        #[serde(default)]
-        indexer_config: serde_json::Value,
-        #[serde(default)]
-        retention_window: RetentionWindow,
-    },
-}
-
-fn default_replication_factor() -> u8 {
-    1
-}
-
-impl Default for SubgroveMode {
-    fn default() -> Self {
-        SubgroveMode::DataStorage {
-            name: String::new(),
-            writers: Vec::new(),
-            free_readers: Vec::new(),
-            read_pricing: None,
-        }
-    }
-}
-
-/// Register Subgrove transaction
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RegisterSubgroveTx {
-    pub subgrove_id: String,
-    pub app_id: String,
-    pub schema: String, // JSON schema
-    pub owner_did: String,
-    #[serde(default)]
-    pub mode: SubgroveMode,
-    pub signature: Vec<u8>,
-    pub public_key_id: String,
-    pub nonce: u64,
-}
-
-pub use willow_types::consensus::transactions::{TransferTx, DeleteDataTx, FundAppTx};
+pub use willow_types::consensus::indexing_transactions::SubgroveMode;
+pub use willow_types::consensus::transactions::{
+    DeleteDataTx, FundAppTx, RegisterSubgroveTx, TransferTx,
+};
 
 /// CometBFT RPC response
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -428,6 +356,9 @@ impl ConsensusClient {
                 free_readers: request.readers.clone(),
                 read_pricing: None,
             },
+            checkpoint_verification: Default::default(),
+            privacy: None,
+            initial_owner_key_grant: None,
             signature: request.signature.clone(),
             public_key_id: request.public_key_id.clone(),
             nonce: request.nonce,
@@ -691,6 +622,9 @@ mod tests {
                 free_readers: vec!["did:willow:reader".to_string()],
                 read_pricing: None,
             },
+            checkpoint_verification: Default::default(),
+            privacy: None,
+            initial_owner_key_grant: None,
             signature: vec![7, 8, 9],
             public_key_id: "did:willow:owner#key-1".to_string(),
             nonce: 3,

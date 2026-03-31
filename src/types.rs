@@ -25,43 +25,9 @@ impl SignatureAlgorithm {
     }
 }
 
-/// Public key in a DID document
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PublicKey {
-    pub id: String,
-    #[serde(rename = "type")]
-    pub key_type: String,
-    pub controller: String,
-    #[serde(rename = "public_key_hex", skip_serializing_if = "Option::is_none")]
-    pub public_key_hex: Option<String>,
-    #[serde(rename = "public_key_base58", skip_serializing_if = "Option::is_none")]
-    pub public_key_base58: Option<String>,
-}
-
-/// DID Document
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DidDocument {
-    pub id: String,
-    #[serde(rename = "public_keys")]
-    pub public_keys: Vec<PublicKey>,
-    pub authentication: Vec<String>,
-    #[serde(default)]
-    pub service: Vec<ServiceEndpoint>,
-    pub created: u64,
-    pub updated: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub proof: Option<serde_json::Value>,
-}
-
-/// Service endpoint in DID document
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServiceEndpoint {
-    pub id: String,
-    #[serde(rename = "type")]
-    pub service_type: String,
-    #[serde(rename = "service_endpoint")]
-    pub endpoint: String,
-}
+pub use willow_types::consensus::transactions::{
+    DidDocument, PublicKey, ServiceEndpoint,
+};
 
 /// DID information including keys
 #[derive(Debug, Clone)]
@@ -115,26 +81,7 @@ pub struct SchemaField {
     pub indexed: bool,
 }
 
-/// Index definition
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IndexDefinition {
-    pub name: String,
-    pub fields: Vec<String>,
-    pub unique: bool,
-    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
-    pub index_type: Option<String>,
-}
-
-/// Schema definition for datasets (matches backend storage format)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SchemaDefinition {
-    pub version: u32,
-    pub fields: HashMap<String, FieldType>,
-    #[serde(default)]
-    pub required_fields: Vec<String>,
-    #[serde(default)]
-    pub indexes: Vec<IndexDefinition>,
-}
+pub use willow_types::storage::types::{IndexDefinition, SchemaDefinition};
 
 /// App registration request
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -171,24 +118,7 @@ pub struct RegisterSubgroveRequest {
 
 pub use willow_types::storage::types::AppRegistration;
 
-/// Subgrove registration info
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SubgroveRegistration {
-    pub subgrove_id: String,
-    pub app_id: String,
-    pub name: String,
-    pub schema: SchemaDefinition,
-    pub owner_did: String,
-    pub writers: Vec<String>,
-    #[serde(alias = "readers")]
-    pub free_readers: Vec<String>,
-    #[serde(default)]
-    pub subgrove_path: Vec<String>,
-    #[serde(default)]
-    pub created_at: u64,
-    #[serde(default)]
-    pub updated_at: u64,
-}
+pub use willow_types::storage::types::SubgroveRegistration;
 
 /// Generic API response
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -729,7 +659,7 @@ mod tests {
             service: vec![ServiceEndpoint {
                 id: "did:willow:test#api".to_string(),
                 service_type: "WillowAPI".to_string(),
-                endpoint: "https://api.example.com".to_string(),
+                service_endpoint: "https://api.example.com".to_string(),
             }],
             created: 1000,
             updated: 2000,
@@ -740,7 +670,10 @@ mod tests {
         let deserialized: DidDocument = serde_json::from_str(&json).unwrap();
 
         assert_eq!(deserialized.service.len(), 1);
-        assert_eq!(deserialized.service[0].endpoint, "https://api.example.com");
+        assert_eq!(
+            deserialized.service[0].service_endpoint,
+            "https://api.example.com"
+        );
     }
 
     // ========================================================================
