@@ -393,8 +393,15 @@ impl ConsensusClient {
         }
     }
 
+    /// Normalize a tx hash to the `0xHEX` format CometBFT expects.
+    fn normalize_tx_hash(tx_hash: &str) -> String {
+        let bare = tx_hash.strip_prefix("0x").unwrap_or(tx_hash);
+        format!("0x{}", bare)
+    }
+
     /// Wait for transaction to be included in a block
     pub async fn wait_for_transaction(&self, tx_hash: &str, max_attempts: u32) -> Result<bool> {
+        let hash = Self::normalize_tx_hash(tx_hash);
         for _ in 0..max_attempts {
             // Query transaction status
             let query_request = json!({
@@ -402,7 +409,7 @@ impl ConsensusClient {
                 "id": 1,
                 "method": "tx",
                 "params": {
-                    "hash": tx_hash,
+                    "hash": hash,
                     "prove": false
                 }
             });
@@ -618,12 +625,13 @@ impl ConsensusClient {
 
     /// Get transaction result
     pub async fn get_transaction(&self, tx_hash: &str) -> Result<TransactionResult> {
+        let hash = Self::normalize_tx_hash(tx_hash);
         let query_request = json!({
             "jsonrpc": "2.0",
             "id": 1,
             "method": "tx",
             "params": {
-                "hash": format!("0x{}", tx_hash),
+                "hash": hash,
                 "prove": false
             }
         });
