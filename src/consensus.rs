@@ -58,6 +58,7 @@ pub struct CometBftError {
 pub struct ConsensusClient {
     http_client: Client,
     consensus_rpc_url: String,
+    api_url: Option<String>,
 }
 
 impl ConsensusClient {
@@ -66,7 +67,39 @@ impl ConsensusClient {
         Self {
             http_client: Client::new(),
             consensus_rpc_url: consensus_rpc_url.to_string(),
+            api_url: None,
         }
+    }
+
+    /// Create a new consensus client with API URL for nonce auto-management
+    pub fn new_with_api(consensus_rpc_url: &str, api_url: &str) -> Self {
+        Self {
+            http_client: Client::new(),
+            consensus_rpc_url: consensus_rpc_url.to_string(),
+            api_url: Some(api_url.to_string()),
+        }
+    }
+
+    /// Fetch the next valid nonce for a DID from the API server.
+    pub async fn get_next_nonce(&self, did: &str) -> Result<u64> {
+        let api_url = self.api_url.as_ref().ok_or_else(|| {
+            WillowError::Config("API URL not configured — needed for nonce auto-management".to_string())
+        })?;
+
+        let url = format!("{}/account/{}/nonce", api_url.trim_end_matches('/'), did);
+        let resp = self.http_client.get(&url).send().await
+            .map_err(|e| WillowError::Network(format!("Failed to fetch nonce: {}", e)))?;
+        let body: serde_json::Value = resp.json().await
+            .map_err(|e| WillowError::Network(format!("Failed to parse nonce response: {}", e)))?;
+
+        // Response format: {"success": true, "data": {"did": "...", "nonce": N}}
+        let base_nonce = body
+            .get("data")
+            .and_then(|d| d.get("nonce"))
+            .and_then(|n| n.as_u64())
+            .unwrap_or(0);
+
+        Ok(base_nonce + 1)
     }
 
     /// Register a DID through consensus
@@ -76,9 +109,8 @@ impl ConsensusClient {
         private_key_hex: &str,
         public_key_id: &str,
         algorithm: SignatureAlgorithm,
-        nonce: u64,
     ) -> Result<String> {
-        // Sign the DID document
+        let nonce = self.get_next_nonce(&did_document.id).await?;
         let did_doc_json = serde_json::to_string(did_document)?;
         let signature_hex = sign_challenge(&did_doc_json, private_key_hex, algorithm)?;
         let signature_bytes = hex::decode(signature_hex)?;
@@ -107,10 +139,9 @@ impl ConsensusClient {
         private_key_hex: &str,
         public_key_id: &str,
         algorithm: SignatureAlgorithm,
-        nonce: u64,
         initial_funding: Option<u128>,
     ) -> Result<String> {
-        // Create app registration message to sign
+        let nonce = self.get_next_nonce(owner_did).await?;
         let mut app_message = format!(
             "RegisterApp\nID: {}\nName: {}\nDescription: {}\nType: {}\nOwner: {}\nAdmins: {}\nNonce: {}",
             app_id, name, description, app_type, owner_did, admins.join(","), nonce
@@ -153,9 +184,8 @@ impl ConsensusClient {
         private_key_hex: &str,
         public_key_id: &str,
         algorithm: SignatureAlgorithm,
-        nonce: u64,
     ) -> Result<String> {
-        // Create transfer message to sign
+        let nonce = self.get_next_nonce(from_did).await?;
         let transfer_message = format!(
             "Transfer\nFrom: {}\nTo: {}\nAmount: {}\nMemo: {}\nNonce: {}",
             from_did,
@@ -319,7 +349,8 @@ impl ConsensusClient {
     ) -> Result<String> {
         use sha3::{Digest, Keccak256};
 
-        // Create message to sign
+        request.nonce = self.get_next_nonce(&request.owner_did).await?;
+
         let schema_json = request
             .schema
             .as_ref()
@@ -388,8 +419,8 @@ impl ConsensusClient {
         replication_factor: u8,
         public_key_id: &str,
         signing_key: &SigningKey,
-        nonce: u64,
     ) -> Result<String> {
+        let nonce = self.get_next_nonce(owner_did).await?;
         use sha3::{Digest, Keccak256};
 
         let schema_json = "{}";
@@ -465,8 +496,8 @@ impl ConsensusClient {
         owner_did: &str,
         public_key_id: &str,
         signing_key: &SigningKey,
-        nonce: u64,
     ) -> Result<String> {
+        let nonce = self.get_next_nonce(owner_did).await?;
         let payload = definition.signing_payload(app_id, owner_did, nonce);
         let signature = signing_key.sign(payload.as_bytes());
 
@@ -488,7 +519,7 @@ impl ConsensusClient {
         mut request: StoreDataRequest,
         signing_key: &SigningKey,
     ) -> Result<String> {
-        // Create the message to sign in the format expected by consensus
+        request.nonce = self.get_next_nonce(&request.owner_did).await?;
         let data_json =
             serde_json::to_string(&request.data).map_err(|e| WillowError::Serialization(e))?;
         let message = format!(
@@ -513,8 +544,8 @@ impl ConsensusClient {
         owner_did: &str,
         public_key_id: &str,
         signing_key: &SigningKey,
-        nonce: u64,
     ) -> Result<String> {
+        let nonce = self.get_next_nonce(owner_did).await?;
         let message = format!("DeleteData:{}:{}:{}", app_id, subgrove_id, key);
         let signature = signing_key.sign(message.as_bytes());
 
@@ -534,10 +565,10 @@ impl ConsensusClient {
     /// Fund an app using SigningKey
     pub async fn fund_app(
         &self,
-        request: crate::types::FundAppRequest,
+        mut request: crate::types::FundAppRequest,
         signing_key: &SigningKey,
     ) -> Result<String> {
-        // Construct canonical signing payload
+        request.nonce = self.get_next_nonce(&request.from_did).await?;
         let signing_payload = format!(
             "FundApp:{}:{}:{}:{}",
             request.app_id, request.amount, request.from_did, request.nonce

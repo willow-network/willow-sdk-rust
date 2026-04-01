@@ -547,7 +547,7 @@ impl WillowClientBuilder {
         // Create consensus client if configured
         let consensus_client = self
             .consensus_url
-            .map(|url| Arc::new(ConsensusClient::new(&url)));
+            .map(|url| Arc::new(ConsensusClient::new_with_api(&url, base_url.as_str())));
 
         Ok(WillowClient {
             http_client,

@@ -69,7 +69,6 @@ impl FileOperations {
         storage_node_endpoint: &str,
         signing_key: Option<&SigningKey>,
         public_key_id: Option<&str>,
-        nonce: Option<u64>,
     ) -> Result<FileManifest> {
         self.ensure_authenticated()?;
 
@@ -91,7 +90,8 @@ impl FileOperations {
         let content_type = guess_content_type(filename);
 
         // Sign the transaction if a signing key is provided
-        let (signature_bytes, pub_key_id, tx_nonce) = if let Some(key) = signing_key {
+        let tx_nonce = self.client.consensus().get_next_nonce(&owner_did).await?;
+        let (signature_bytes, pub_key_id) = if let Some(key) = signing_key {
             let message = format!(
                 "store_file:{}:{}:{}:{}:{}",
                 app_id, subgrove_id, file_key, content_hash_hex, data.len()
@@ -100,10 +100,9 @@ impl FileOperations {
             (
                 signature.to_bytes().to_vec(),
                 public_key_id.unwrap_or("").to_string(),
-                nonce.unwrap_or(0),
             )
         } else {
-            (vec![], String::new(), 0)
+            (vec![], String::new())
         };
 
         // Submit manifest to consensus via CometBFT RPC.
@@ -292,14 +291,14 @@ impl FileOperations {
         file_key: &str,
         signing_key: Option<&SigningKey>,
         public_key_id: Option<&str>,
-        nonce: Option<u64>,
     ) -> Result<()> {
         self.ensure_authenticated()?;
 
         let owner_did = self.client.get_did()
             .ok_or_else(|| WillowError::Authentication("Set identity before file operations".to_string()))?;
 
-        let (signature_bytes, pub_key_id, tx_nonce) = if let Some(key) = signing_key {
+        let tx_nonce = self.client.consensus().get_next_nonce(&owner_did).await?;
+        let (signature_bytes, pub_key_id) = if let Some(key) = signing_key {
             let message = format!(
                 "delete_file:{}:{}:{}",
                 app_id, subgrove_id, file_key
@@ -308,27 +307,25 @@ impl FileOperations {
             (
                 signature.to_bytes().to_vec(),
                 public_key_id.unwrap_or("").to_string(),
-                nonce.unwrap_or(0),
             )
         } else {
-            (vec![], String::new(), 0)
+            (vec![], String::new())
         };
 
-        let delete_tx = serde_json::json!({
-            "DeleteFileManifest": {
-                "app_id": app_id,
-                "subgrove_id": subgrove_id,
-                "file_key": file_key,
-                "owner_did": &owner_did,
-                "signature": signature_bytes,
-                "public_key_id": pub_key_id,
-                "nonce": tx_nonce
-            }
-        });
+        use willow_types::consensus::transactions::DeleteFileManifestTx;
+        use crate::consensus::ConsensusClient;
 
-        self.client
-            .request::<Value, _>("POST", "/broadcast_tx", Some(&delete_tx), true)
-            .await?;
+        let delete_tx = DeleteFileManifestTx {
+            app_id: app_id.to_string(),
+            subgrove_id: subgrove_id.to_string(),
+            file_key: file_key.to_string(),
+            owner_did: owner_did.clone(),
+            signature: signature_bytes,
+            public_key_id: pub_key_id,
+            nonce: tx_nonce,
+        };
+        let tx_json = ConsensusClient::serialize_tx("DeleteFileManifest", &delete_tx)?;
+        self.client.consensus().submit_transaction_json(&tx_json).await?;
 
         Ok(())
     }
@@ -341,23 +338,29 @@ impl FileOperations {
         node_did: &str,
         signing_key: &SigningKey,
         public_key_id: &str,
-        nonce: u64,
     ) -> Result<()> {
+        use crate::consensus::ConsensusClient;
+
+        let nonce = self.client.consensus().get_next_nonce(node_did).await?;
         let message = format!("unregister_storage_node:{}", node_did);
         let signature = signing_key.sign(message.as_bytes());
 
-        let tx = serde_json::json!({
-            "UnregisterStorageNode": {
-                "node_did": node_did,
-                "signature": signature.to_bytes().to_vec(),
-                "public_key_id": public_key_id,
-                "nonce": nonce
-            }
-        });
+        #[derive(serde::Serialize)]
+        struct UnregisterStorageNodeTx {
+            node_did: String,
+            signature: Vec<u8>,
+            public_key_id: String,
+            nonce: u64,
+        }
 
-        self.client
-            .request::<Value, _>("POST", "/broadcast_tx", Some(&tx), true)
-            .await?;
+        let tx = UnregisterStorageNodeTx {
+            node_did: node_did.to_string(),
+            signature: signature.to_bytes().to_vec(),
+            public_key_id: public_key_id.to_string(),
+            nonce,
+        };
+        let tx_json = ConsensusClient::serialize_tx("UnregisterStorageNode", &tx)?;
+        self.client.consensus().submit_transaction_json(&tx_json).await?;
 
         Ok(())
     }
