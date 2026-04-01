@@ -107,7 +107,7 @@ pub use types::{
     SchemaField, SignatureAlgorithm, SignedRequestHeaders, StakeRequest, StoreDataRequest,
     SubgroveIndexingStatus, SubgroveInfo, SubgroveRegistration, SubgroveStatus, TokenInfo,
     TransferRequest, UnstakeRequest, ValidatorInfo, VerificationStats,
-    VerifyProofRequest, VerifyProofResponse,
+    SqlRequest, SqlResponse, VerifyProofRequest, VerifyProofResponse,
 };
 pub use privacy::{PrivacyOperations, PrivacyConfig, CommitmentFrequency, EncryptedKeyGrant};
 pub use subgrove_config::SubgroveDefinition;

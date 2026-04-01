@@ -367,6 +367,64 @@ impl ConsensusClient {
         self.submit_transaction(&tx_json).await
     }
 
+    /// Register a file storage subgrove using SigningKey.
+    ///
+    /// File storage subgroves store files with chunk-level Merkle verification
+    /// via dedicated storage nodes.
+    pub async fn register_file_subgrove(
+        &self,
+        subgrove_id: &str,
+        app_id: &str,
+        name: &str,
+        owner_did: &str,
+        writers: Vec<String>,
+        readers: Vec<String>,
+        max_file_size: u64,
+        replication_factor: u8,
+        public_key_id: &str,
+        signing_key: &SigningKey,
+        nonce: u64,
+    ) -> Result<String> {
+        use sha3::{Digest, Keccak256};
+
+        let schema_json = "{}";
+        let mut hasher = Keccak256::new();
+        hasher.update(schema_json.as_bytes());
+        let schema_hash_hex = hex::encode(hasher.finalize());
+
+        let message = format!(
+            "RegisterSubgrove\nID: {}\nApp: {}\nMode: FileStorage\nName: {}\nSchemaHash: {}\nOwner: {}\nWriters: {}\nReaders: {}\nNonce: {}",
+            subgrove_id, app_id, name, schema_hash_hex, owner_did,
+            writers.join(","), readers.join(","), nonce
+        );
+
+        let signature = signing_key.sign(message.as_bytes());
+
+        let register_tx = RegisterSubgroveTx {
+            subgrove_id: subgrove_id.to_string(),
+            app_id: app_id.to_string(),
+            schema: schema_json.to_string(),
+            owner_did: owner_did.to_string(),
+            mode: SubgroveMode::FileStorage {
+                name: name.to_string(),
+                max_file_size,
+                replication_factor,
+                writers,
+                free_readers: readers,
+                read_pricing: None,
+                retention_period: 0,
+            },
+            checkpoint_verification: Default::default(),
+            privacy: None,
+            initial_owner_key_grant: None,
+            signature: signature.to_bytes().to_vec(),
+            public_key_id: public_key_id.to_string(),
+            nonce,
+        };
+        let tx_json = Self::serialize_tx("RegisterSubgrove", &register_tx)?;
+        self.submit_transaction(&tx_json).await
+    }
+
     /// Register a blockchain indexing subgrove from a definition file.
     ///
     /// Loads the subgrove definition, signs it, and submits the transaction.

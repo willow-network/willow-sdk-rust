@@ -81,34 +81,6 @@ impl IndexingOperations {
             .ok_or_else(|| WillowError::Custom("No data in GraphQL response".to_string()))
     }
 
-    /// Execute a SQL query against a subgrove.
-    pub async fn sql_query(
-        &self,
-        app_id: &str,
-        subgrove_id: &str,
-        query: &str,
-        include_proof: Option<bool>,
-    ) -> Result<SqlResponse> {
-        let request = SqlRequest {
-            query: query.to_string(),
-            include_proof,
-        };
-
-        let response: ApiResponse<SqlResponse> = self
-            .client
-            .request(
-                "POST",
-                &format!("/sql/{}/{}", app_id, subgrove_id),
-                Some(&request),
-                false,
-            )
-            .await?;
-
-        response
-            .data
-            .ok_or_else(|| WillowError::Custom("No data in SQL response".to_string()))
-    }
-
     /// Lists all available subgroves.
     pub async fn list_subgroves(&self) -> Result<Vec<SubgroveInfo>> {
         let response: ApiResponse<Vec<SubgroveInfo>> = self

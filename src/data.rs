@@ -236,6 +236,35 @@ impl DataOperations {
         Ok(query_response)
     }
 
+    /// Execute a SQL query against a subgrove.
+    ///
+    /// Works with both DataStorage and BlockchainIndexing subgroves.
+    /// For DataStorage, the table name in FROM is ignored — all documents
+    /// are the dataset. Standard SQL: WHERE, ORDER BY, LIMIT, OFFSET,
+    /// column projection, COUNT(*).
+    pub async fn sql(
+        &self,
+        app_id: &str,
+        subgrove_id: &str,
+        query: &str,
+    ) -> Result<crate::types::SqlResponse> {
+        self.ensure_authenticated()?;
+
+        let request = crate::types::SqlRequest {
+            query: query.to_string(),
+            include_proof: None,
+        };
+
+        self.client
+            .request(
+                "POST",
+                &format!("/sql/{}/{}", app_id, subgrove_id),
+                Some(&request),
+                true,
+            )
+            .await
+    }
+
     /// Query items without proof verification for performance-critical cases
     ///
     /// Use this method when you need maximum performance and are willing to trust
