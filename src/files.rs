@@ -38,6 +38,10 @@ pub struct FileManifest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileListResponse {
     pub files: Vec<FileManifest>,
+    #[serde(default)]
+    pub has_more: bool,
+    #[serde(default)]
+    pub limit: u16,
 }
 
 /// File storage operations.
@@ -102,29 +106,38 @@ impl FileOperations {
             (vec![], String::new(), 0)
         };
 
-        // Submit manifest to consensus via the consensus RPC
-        let manifest_tx = serde_json::json!({
-            "StoreFileManifest": {
-                "app_id": app_id,
-                "subgrove_id": subgrove_id,
-                "file_key": file_key,
-                "filename": filename,
-                "content_type": content_type,
-                "total_size": data.len() as u64,
-                "content_hash": content_hash_hex,
-                "chunk_count": chunk_count,
-                "chunk_size": chunk_size,
-                "chunk_merkle_root": hex::encode(chunk_merkle_root),
-                "owner_did": &owner_did,
-                "signature": signature_bytes,
-                "public_key_id": pub_key_id,
-                "nonce": tx_nonce
-            }
-        });
+        // Submit manifest to consensus via CometBFT RPC.
+        // Use the server's StoreFileManifestTx struct directly for correct
+        // serialization of [u8; 32] fields (content_hash, chunk_merkle_root).
+        use willow_types::consensus::transactions::StoreFileManifestTx;
+        use crate::consensus::ConsensusClient;
 
-        // Broadcast manifest via consensus
+        let manifest_tx = StoreFileManifestTx {
+            app_id: app_id.to_string(),
+            subgrove_id: subgrove_id.to_string(),
+            file_key: file_key.to_string(),
+            filename: filename.to_string(),
+            content_type: content_type.clone(),
+            total_size: data.len() as u64,
+            content_hash,
+            chunk_count,
+            chunk_size: chunk_size as u32,
+            chunk_merkle_root,
+            owner_did: owner_did.clone(),
+            encryption: None,
+            signature: signature_bytes,
+            public_key_id: pub_key_id,
+            nonce: tx_nonce,
+        };
+        let tx_json = ConsensusClient::serialize_tx("StoreFileManifest", &manifest_tx)?;
+        let tx_hash = self.client.consensus().submit_transaction_json(&tx_json).await?;
+
+        // Wait for the manifest to be committed before uploading chunks.
+        // The storage node verifies the on-chain manifest exists before
+        // accepting chunks — without this wait, uploads race finalize_block.
         self.client
-            .request::<Value, _>("POST", "/broadcast_tx", Some(&manifest_tx), true)
+            .consensus()
+            .wait_for_transaction(&tx_hash, 15)
             .await?;
 
         // Upload chunks to storage node
@@ -240,19 +253,14 @@ impl FileOperations {
         subgrove_id: &str,
         file_key: &str,
     ) -> Result<FileManifest> {
-        let response: ApiResponse<FileManifest> = self
-            .client
+        self.client
             .request(
                 "GET",
                 &format!("/files/{}/{}/{}", app_id, subgrove_id, file_key),
                 None::<&()>,
                 false,
             )
-            .await?;
-
-        response
-            .data
-            .ok_or_else(|| WillowError::NotFound(format!("File not found: {}", file_key)))
+            .await
     }
 
     /// List all files in a subgrove.
@@ -261,7 +269,7 @@ impl FileOperations {
         app_id: &str,
         subgrove_id: &str,
     ) -> Result<Vec<FileManifest>> {
-        let response: ApiResponse<FileListResponse> = self
+        let response: FileListResponse = self
             .client
             .request(
                 "GET",
@@ -271,7 +279,7 @@ impl FileOperations {
             )
             .await?;
 
-        Ok(response.data.map(|r| r.files).unwrap_or_default())
+        Ok(response.files)
     }
 
     /// Delete a file (submits DeleteFileManifestTx to consensus).

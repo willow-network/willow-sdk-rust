@@ -196,12 +196,17 @@ impl ConsensusClient {
     ///
     /// Uses `serde_json::to_string` directly (not `json!()` or `to_value()`)
     /// to correctly handle u128 fields (token amounts, funding).
-    fn serialize_tx<T: Serialize>(variant_name: &str, tx: &T) -> Result<String> {
+    pub fn serialize_tx<T: Serialize>(variant_name: &str, tx: &T) -> Result<String> {
         let inner = serde_json::to_string(tx)?;
         Ok(format!(r#"{{"{}":{}}}"#, variant_name, inner))
     }
 
     /// Submit a transaction to CometBFT
+    /// Submit a pre-serialized transaction JSON string to CometBFT.
+    pub async fn submit_transaction_json(&self, tx_json: &str) -> Result<String> {
+        self.submit_transaction(tx_json).await
+    }
+
     async fn submit_transaction(&self, tx_json: &str) -> Result<String> {
         // Base64 encode the serialized transaction
         let tx_base64 = base64::engine::general_purpose::STANDARD.encode(tx_json.as_bytes());
