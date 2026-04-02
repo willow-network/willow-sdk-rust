@@ -37,7 +37,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("  (none)");
             }
             for app in &apps {
-                println!("  - {} ({})", app.app_id, app.app_type);
             }
         }
         Err(e) => println!("  Error: {}", e),

@@ -89,7 +89,6 @@ pub struct RegisterAppRequest {
     pub app_id: String,
     pub name: String,
     pub description: String,
-    pub app_type: String,
     pub owner_did: String,
     #[serde(default)]
     pub admins: Vec<String>,

@@ -27,7 +27,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app_id = "my-app"; // Change this to your app ID
     let app_name = "My Application";
     let app_description = "Description of my application";
-    let app_type = "storage"; // "storage" or "indexing"
 
     let nonce: u64 = 1; // Must be > current nonce (starts at 0), increment for each tx
                         // =========================================================================
@@ -47,7 +46,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             app_id,
             app_name,
             app_description,
-            app_type,
             owner_did,
             vec![owner_did.to_string()], // admins
             private_key,

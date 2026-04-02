@@ -133,7 +133,6 @@ impl ConsensusClient {
         app_id: &str,
         name: &str,
         description: &str,
-        app_type: &str,
         owner_did: &str,
         admins: Vec<String>,
         private_key_hex: &str,
@@ -143,8 +142,8 @@ impl ConsensusClient {
     ) -> Result<String> {
         let nonce = self.get_next_nonce(owner_did).await?;
         let mut app_message = format!(
-            "RegisterApp\nID: {}\nName: {}\nDescription: {}\nType: {}\nOwner: {}\nAdmins: {}\nNonce: {}",
-            app_id, name, description, app_type, owner_did, admins.join(","), nonce
+            "RegisterApp\nID: {}\nName: {}\nDescription: {}\nOwner: {}\nAdmins: {}\nNonce: {}",
+            app_id, name, description, owner_did, admins.join(","), nonce
         );
         if let Some(amount) = initial_funding {
             if amount > 0 {
@@ -161,7 +160,6 @@ impl ConsensusClient {
             app_id: app_id.to_string(),
             name: name.to_string(),
             description: description.to_string(),
-            app_type: app_type.to_string(),
             owner_did: owner_did.to_string(),
             admins,
             initial_funding,
@@ -685,7 +683,6 @@ mod tests {
             app_id: "test-app".to_string(),
             name: "Test App".to_string(),
             description: "A test application".to_string(),
-            app_type: "indexing".to_string(),
             owner_did: "did:willow:owner".to_string(),
             admins: vec!["did:willow:admin".to_string()],
             initial_funding: None,

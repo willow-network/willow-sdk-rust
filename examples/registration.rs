@@ -76,7 +76,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 for app in apps.iter().take(5) {
                     println!("   - {} ({})", app.name, app.app_id);
                     println!("     Owner: {}", app.owner_did);
-                    println!("     Type: {}", app.app_type);
                 }
             }
         }
