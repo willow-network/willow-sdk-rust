@@ -501,7 +501,7 @@ impl ConsensusClient {
         let payload = definition.signing_payload(app_id, owner_did, nonce);
         let signature = signing_key.sign(payload.as_bytes());
 
-        let transaction = definition.to_register_transaction(
+        let tx_json = definition.to_register_transaction(
             app_id,
             owner_did,
             public_key_id,
@@ -509,7 +509,6 @@ impl ConsensusClient {
             nonce,
         );
 
-        let tx_json = serde_json::to_string(&transaction)?;
         self.submit_transaction(&tx_json).await
     }
 

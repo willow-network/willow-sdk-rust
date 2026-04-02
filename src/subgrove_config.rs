@@ -254,34 +254,55 @@ impl SubgroveDefinition {
         public_key_id: &str,
         signature: Vec<u8>,
         nonce: u64,
-    ) -> serde_json::Value {
-        let manifest_json = serde_json::to_vec(&self.manifest).unwrap_or_default();
+    ) -> String {
+        use willow_types::consensus::transactions::RegisterSubgroveTx;
+        use willow_types::consensus::indexing_transactions::{
+            SubgroveMode, ExecutionMode, IndexerConfig, RetentionWindow,
+        };
 
-        serde_json::json!({
-            "RegisterSubgrove": {
-                "subgrove_id": self.subgrove_id,
-                "app_id": app_id,
-                "schema": self.schema,
-                "owner_did": owner_did,
-                "checkpoint_verification": self.checkpoint_verification_json(),
-                "mode": {
-                    "BlockchainIndexing": {
-                        "manifest_content": manifest_json,
-                        "wasm_modules": [],
-                        "execution_mode": self.execution_mode_json(),
-                        "indexer_config": {
-                            "min_indexers": self.indexer_config.min_indexers,
-                            "max_indexers": self.indexer_config.max_indexers,
-                            "reward_per_epoch": self.indexer_config.reward_per_epoch.to_string(),
-                            "min_indexer_stake": self.indexer_config.min_indexer_stake.to_string(),
-                        }
-                    }
-                },
-                "signature": signature,
-                "public_key_id": public_key_id,
-                "nonce": nonce,
-            }
-        })
+        let manifest_content = serde_json::to_vec(&self.manifest).unwrap_or_default();
+
+        let execution_mode = match self.execution_mode.as_str() {
+            "IndexerExecution" => ExecutionMode::IndexerExecution {
+                sampling_rate_percent: self.sampling_rate_percent.unwrap_or(5),
+            },
+            "TeeExecution" => ExecutionMode::TeeExecution {
+                tee_type: willow_types::tee::TeeType::AwsNitro,
+            },
+            "GkrExecution" => ExecutionMode::GkrExecution,
+            _ => ExecutionMode::ConsensusExecution,
+        };
+
+        let indexer_config = IndexerConfig {
+            min_indexers: self.indexer_config.min_indexers,
+            max_indexers: self.indexer_config.max_indexers,
+            reward_per_epoch: self.indexer_config.reward_per_epoch,
+            epoch_length: 100,
+            min_indexer_stake: self.indexer_config.min_indexer_stake,
+        };
+
+        let register_tx = RegisterSubgroveTx {
+            subgrove_id: self.subgrove_id.clone(),
+            app_id: app_id.to_string(),
+            schema: self.schema.clone(),
+            owner_did: owner_did.to_string(),
+            mode: SubgroveMode::BlockchainIndexing {
+                manifest_content,
+                wasm_modules: vec![],
+                execution_mode,
+                indexer_config,
+                retention_window: RetentionWindow::default(),
+            },
+            checkpoint_verification: Default::default(),
+            privacy: None,
+            initial_owner_key_grant: None,
+            signature,
+            public_key_id: public_key_id.to_string(),
+            nonce,
+        };
+
+        crate::consensus::ConsensusClient::serialize_tx("RegisterSubgrove", &register_tx)
+            .unwrap_or_default()
     }
 
     /// Build the canonical signing payload for BlockchainIndexing subgroves.
