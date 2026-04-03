@@ -33,7 +33,7 @@
 //!     );
 //!
 //!     // All data operations are automatically verified against consensus
-//!     let data = client.data().get("app_id", "dataset", "key").await?;
+//!     let data = client.data().get("dataset", "key").await?;
 //!
 //!     // Consensus operations (DID registration, transfers, etc.)
 //!     // client.consensus().register_did(...).await?;
@@ -61,7 +61,7 @@
 //! ```rust,no_run
 //! # use willow_sdk::WillowClient;
 //! # async fn example(client: &WillowClient) -> Result<(), Box<dyn std::error::Error>> {
-//! let data = client.data().get_unverified("app_id", "dataset", "key").await?;
+//! let data = client.data().get_unverified("dataset", "key").await?;
 //! # Ok(())
 //! # }
 //! ```
@@ -100,13 +100,13 @@ pub use registration::RegistrationOperations;
 pub use token::TokenOperations;
 pub use willow_types::token::units as token_units;
 pub use types::{
-    ApiResponse, AppBalanceInfo, AppRegistration, BalanceInfo, BlockVerificationStatus, DidDocument,
+    ApiResponse, BalanceInfo, BlockVerificationStatus, DidDocument,
     DidPermissions, EthereumAnchor, FeeSchedule, GraphQLError, GraphQLRequest, GraphQLResponse,
     HealthStatus, IndexDefinition, IndexerInfo, IndexerStatus, MerkleProof, PathQueryData,
-    PublicKey, QueryProof, RegisterAppRequest, RegisterSubgroveRequest, SchemaDefinition,
+    PublicKey, QueryProof, RegisterSubgroveRequest, SchemaDefinition,
     SchemaField, SignatureAlgorithm, SignedRequestHeaders, StakeRequest, StoreDataRequest,
-    SubgroveIndexingStatus, SubgroveInfo, SubgroveRegistration, SubgroveStatus, TokenInfo,
-    TransferRequest, UnstakeRequest, ValidatorInfo, VerificationStats,
+    SubgroveBalanceInfo, SubgroveIndexingStatus, SubgroveInfo, SubgroveRegistration,
+    SubgroveStatus, TokenInfo, TransferRequest, UnstakeRequest, ValidatorInfo, VerificationStats,
     SqlRequest, SqlResponse, VerifyProofRequest, VerifyProofResponse,
 };
 pub use privacy::{PrivacyOperations, PrivacyConfig, CommitmentFrequency, EncryptedKeyGrant};

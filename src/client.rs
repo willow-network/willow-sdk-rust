@@ -466,7 +466,7 @@ impl WillowClientBuilder {
 
     /// Set the CometBFT consensus RPC URL.
     ///
-    /// Required for consensus operations like DID registration, app registration,
+    /// Required for consensus operations like DID registration, subgrove registration,
     /// token transfers, and data storage through consensus.
     ///
     /// # Example

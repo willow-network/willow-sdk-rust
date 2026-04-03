@@ -47,7 +47,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             &ed25519_did.private_key_hex(),
             &ed25519_did.public_key_id,
             SignatureAlgorithm::Ed25519,
-            0, // nonce
         )
         .await
     {
@@ -65,61 +64,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     println!("   Authenticated successfully\n");
 
-    // 5. List registered apps
-    println!("5. Listing registered apps...");
-    match client.registration().list_apps().await {
-        Ok(apps) => {
-            if apps.is_empty() {
-                println!("   No apps registered yet");
-            } else {
-                println!("   Found {} apps:", apps.len());
-                for app in apps.iter().take(5) {
-                    println!("   - {} ({})", app.name, app.app_id);
-                    println!("     Owner: {}", app.owner_did);
-                }
-            }
-        }
-        Err(e) => println!("   Note: {}", e),
-    }
-
-    // 6. Get a specific app
-    println!("\n6. Getting specific app...");
-    let app_id = "test-app";
-    match client.registration().get_app(app_id).await {
-        Ok(app) => {
-            println!("   App ID: {}", app.app_id);
-            println!("   Name: {}", app.name);
-            println!("   Description: {}", app.description);
-            println!("   Owner: {}", app.owner_did);
-            println!("   Admins: {:?}", app.admins);
-        }
-        Err(e) => println!("   Note: {} (app may not exist)", e),
-    }
-
-    // 7. List subgroves for an app
-    println!("\n7. Listing subgroves for app...");
-    match client.registration().list_subgroves(app_id).await {
+    // 5. List registered subgroves
+    println!("5. Listing registered subgroves...");
+    match client.registration().list_subgroves().await {
         Ok(subgroves) => {
             if subgroves.is_empty() {
-                println!("   No subgroves registered for this app");
+                println!("   No subgroves registered yet");
             } else {
                 println!("   Found {} subgroves:", subgroves.len());
                 for sg in subgroves.iter().take(5) {
                     println!("   - {} ({})", sg.name, sg.subgrove_id);
-                    println!("     Path: {:?}", sg.subgrove_path);
-                    println!("     Writers: {:?}", sg.writers);
+                    println!("     Owner: {}", sg.owner_did);
                 }
             }
         }
         Err(e) => println!("   Note: {}", e),
     }
 
-    // 8. Get a specific subgrove
-    println!("\n8. Getting specific subgrove...");
+    // 6. Get a specific subgrove
+    println!("\n6. Getting specific subgrove...");
     let subgrove_id = "test-subgrove";
     match client
         .registration()
-        .get_subgrove(app_id, subgrove_id)
+        .get_subgrove(subgrove_id)
         .await
     {
         Ok(sg) => {
@@ -134,13 +101,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => println!("   Note: {} (subgrove may not exist)", e),
     }
 
-    // 9. Summary
-    println!("\n9. Registration summary...");
+    // 7. Summary
+    println!("\n7. Registration summary...");
     println!("   DID generation: generate_did(algorithm)");
     println!("   DID registration: client.consensus().register_did(...)");
-    println!("   Query apps: client.registration().list_apps()");
-    println!("   Query subgroves: client.registration().list_subgroves(app_id)");
-    println!("\n   Note: Creating apps and subgroves requires consensus transactions");
+    println!("   Query subgroves: client.registration().list_subgroves()");
+    println!("\n   Note: Creating subgroves requires consensus transactions");
     println!("   Use client.consensus() for registration operations.");
 
     println!("\nRegistration example complete!");

@@ -7,7 +7,6 @@
 
 use ed25519_dalek::SigningKey;
 use serde_json::json;
-use std::fs;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::time::sleep;
 use willow_sdk::types::SignatureAlgorithm;
@@ -23,22 +22,20 @@ async fn light_client_verification_test() {
     println!("This test verifies trustless data verification using the embedded light client");
 
     // Read the funded DID from the setup
-    let funded_did = fs::read_to_string("../../tools/app_registrar/app_owner_did.txt")
-        .expect("Funded DID file not found")
-        .trim()
-        .to_string();
+    let funded_did = std::env::var("WILLOW_TEST_DID")
+        .unwrap_or_else(|_| "did:willow:test-owner".to_string());
 
     // Generate unique app and subgrove names
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    let app_name = format!("light_test_{}", timestamp);
+    let subgrove_name_base = format!("light_test_{}", timestamp);
     let subgrove_name = format!("subgrove_{}", timestamp);
 
     println!("\n📋 Test Configuration:");
     println!("  DID: {}", funded_did);
-    println!("  App: {}", app_name);
+    
     println!("  Subgrove: {}", subgrove_name);
 
     // Step 1: Create client WITHOUT light client first (for baseline)
@@ -92,45 +89,12 @@ async fn light_client_verification_test() {
         println!("  📋 This demonstrates fallback to server-provided proof verification");
     }
 
-    // Step 2: Register app and subgrove (using consensus directly)
-    println!("\n📝 Step 2: Registering app and subgrove...");
+    // Step 2: Register subgrove (using consensus directly)
+    println!("\n📝 Step 2: Registering subgrove...");
 
     let consensus = ConsensusClient::new("http://localhost:26657");
 
-    // For fresh network, start with nonce 3 (after DID registration at 1 and app registration at 2)
     let base_nonce = 3;
-
-    // First, register the app
-    println!("  📱 Registering app: {}...", app_name);
-    match consensus
-        .register_app(
-            &app_name,
-            "Light Client Test App",
-            "App for light client testing",
-            "testing",
-            &funded_did,
-            vec![funded_did.clone()],
-            PRIVATE_KEY_HEX,
-            &format!("{}#key-1", funded_did),
-            SignatureAlgorithm::Ed25519,
-            base_nonce,
-            None,
-        )
-        .await
-    {
-        Ok(tx_hash) => {
-            println!("  ✅ App registration transaction submitted: {}", tx_hash);
-            // Wait for transaction to be processed
-            match consensus.wait_for_transaction(&tx_hash, 10).await {
-                Ok(_) => println!("  ✅ App registered successfully"),
-                Err(e) => println!("  ⚠️  Transaction wait failed: {}", e),
-            }
-        }
-        Err(e) => {
-            println!("  ❌ App registration failed: {}", e);
-            panic!("Cannot continue without app");
-        }
-    }
 
     // Prepare the schema with proper structure
     use std::collections::HashMap;
@@ -155,11 +119,12 @@ async fn light_client_verification_test() {
 
     let subgrove_request = RegisterSubgroveRequest {
         subgrove_id: subgrove_name.clone(),
-        app_id: app_name.clone(),
         name: "Light Client Test".to_string(),
+        description: String::new(),
         schema: Some(schema),
         owner_did: funded_did.clone(),
-        writers: vec![funded_did.clone()],
+        admins: vec![],
+        initial_funding: None,        writers: vec![funded_did.clone()],
         readers: vec![funded_did.clone()],
         signature: vec![],
         public_key_id: format!("{}#key-1", funded_did),
@@ -198,7 +163,6 @@ async fn light_client_verification_test() {
     use willow_sdk::types::StoreDataRequest;
 
     let store_request = StoreDataRequest {
-        app_id: app_name.clone(),
         subgrove_id: subgrove_name.clone(),
         key: "test_entry".to_string(),
         data: test_data.clone(),
@@ -237,7 +201,7 @@ async fn light_client_verification_test() {
     // This will automatically verify cryptographic proofs
     match client
         .data()
-        .get(&app_name, &subgrove_name, "test_entry")
+        .get(&subgrove_name, "test_entry")
         .await
     {
         Ok(data) => {
@@ -266,7 +230,7 @@ async fn light_client_verification_test() {
         "limit": 10
     });
 
-    match client.data().query(&app_name, &subgrove_name, query).await {
+    match client.data().query(&subgrove_name, query).await {
         Ok(response) => {
             println!("  ✅ Query executed and verified!");
             println!("  📊 Found {} documents", response.documents.len());
@@ -284,7 +248,7 @@ async fn light_client_verification_test() {
 
     match client
         .data()
-        .get_unverified(&app_name, &subgrove_name, "test_entry")
+        .get_unverified(&subgrove_name, "test_entry")
         .await
     {
         Ok(_data) => {

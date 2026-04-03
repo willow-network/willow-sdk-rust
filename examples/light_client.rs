@@ -71,7 +71,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match client
         .data()
-        .get("test-app", "secure-data", "entry-1")
+        .get("secure-data", "entry-1")
         .await
     {
         Ok(data) => {
@@ -85,7 +85,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n5. Querying with trustless verification...");
     let query = json!({ "limit": 10 });
 
-    match client.data().query("test-app", "secure-data", query).await {
+    match client.data().query("secure-data", query).await {
         Ok(response) => {
             println!("   Query returned {} documents", response.documents.len());
             if let Some(root_hash) = &response.verified_root_hash {

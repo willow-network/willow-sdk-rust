@@ -45,16 +45,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => println!("   Note: {} (DID may not exist)\n", e),
     }
 
-    // 3. Check app balance
-    println!("3. Checking app balance...");
-    let test_app = "example-app";
-    match client.token().get_app_balance(test_app).await {
+    // 3. Check subgrove balance
+    println!("3. Checking subgrove balance...");
+    let test_subgrove = "example-subgrove";
+    match client.token().get_subgrove_balance(test_subgrove).await {
         Ok(balance) => {
-            println!("   App: {}", balance.app_id);
+            println!("   Subgrove: {}", balance.subgrove_id);
             println!("   Balance: {} WILL", balance.balance);
             println!("   Total Spent: {} WILL\n", balance.total_spent);
         }
-        Err(e) => println!("   Note: {} (App may not exist)\n", e),
+        Err(e) => println!("   Note: {} (Subgrove may not exist)\n", e),
     }
 
     // 4. Get fee schedule
@@ -62,7 +62,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match client.token().get_fee_schedule().await {
         Ok(fees) => {
             println!("   DID Registration: {} WILL", fees.did_registration);
-            println!("   App Registration: {} WILL", fees.app_registration);
+            println!("   Subgrove Registration: {} WILL", fees.subgrove_registration);
             println!("   Subgrove Registration: {} WILL", fees.subgrove_registration);
             println!("   Base TX Cost: {} wei", fees.base_tx_cost);
             println!("   Cost Per Byte: {} wei", fees.cost_per_byte);
@@ -76,7 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 5. Economic model summary
     println!("5. Economic model summary...");
-    println!("   - Apps are funded with WILL tokens");
+    println!("   - Subgroves are funded with WILL tokens");
     println!("   - Storage fees are automatically deducted");
     println!("   - Query fees apply for verified queries");
     println!("   - Indexers are rewarded for indexing work");

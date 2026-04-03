@@ -18,11 +18,9 @@
 //! let signing_key = ed25519_dalek::SigningKey::from_bytes(&key_bytes);
 //! let tx_hash = consensus.register_blockchain_subgrove(
 //!     &def,
-//!     "my-app",
 //!     "did:willow:owner",
 //!     "did:willow:owner#key-1",
 //!     &signing_key,
-//!     1, // nonce
 //! ).await?;
 //! # Ok(())
 //! # }
@@ -72,7 +70,7 @@ where
 /// A subgrove definition loaded from a TOML config file.
 ///
 /// Contains everything needed to register a blockchain indexing subgrove,
-/// except for runtime values (app_id, owner_did, signing credentials, nonce).
+/// except for runtime values (owner_did, signing credentials, nonce).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubgroveDefinition {
     /// Unique identifier for the subgrove (e.g., "aave-v3-lending").
@@ -249,7 +247,6 @@ impl SubgroveDefinition {
     /// `ConsensusClient::submit_raw_transaction()`.
     pub fn to_register_transaction(
         &self,
-        app_id: &str,
         owner_did: &str,
         public_key_id: &str,
         signature: Vec<u8>,
@@ -283,9 +280,12 @@ impl SubgroveDefinition {
 
         let register_tx = RegisterSubgroveTx {
             subgrove_id: self.subgrove_id.clone(),
-            app_id: app_id.to_string(),
+            name: self.subgrove_id.clone(),
+            description: self.description.clone(),
             schema: self.schema.clone(),
             owner_did: owner_did.to_string(),
+            admins: vec![],
+            initial_funding: None,
             mode: SubgroveMode::BlockchainIndexing {
                 manifest_content,
                 wasm_modules: vec![],
@@ -307,11 +307,11 @@ impl SubgroveDefinition {
 
     /// Build the canonical signing payload for BlockchainIndexing subgroves.
     ///
-    /// Format: `RegisterSubgrove:{subgrove_id}:{app_id}:{owner_did}:{nonce}`
-    pub fn signing_payload(&self, app_id: &str, owner_did: &str, nonce: u64) -> String {
+    /// Format: `RegisterSubgrove:{subgrove_id}:{owner_did}:{nonce}`
+    pub fn signing_payload(&self, owner_did: &str, nonce: u64) -> String {
         format!(
-            "RegisterSubgrove:{}:{}:{}:{}",
-            self.subgrove_id, app_id, owner_did, nonce
+            "RegisterSubgrove:{}:{}:{}",
+            self.subgrove_id, owner_did, nonce
         )
     }
 }
@@ -380,10 +380,10 @@ handler = "handleSwap"
     #[test]
     fn test_signing_payload() {
         let def = SubgroveDefinition::from_toml(SAMPLE_TOML).unwrap();
-        let payload = def.signing_payload("my-app", "did:willow:owner", 1);
+        let payload = def.signing_payload("did:willow:owner", 1);
         assert_eq!(
             payload,
-            "RegisterSubgrove:test-swaps:my-app:did:willow:owner:1"
+            "RegisterSubgrove:test-swaps:did:willow:owner:1"
         );
     }
 
@@ -391,15 +391,14 @@ handler = "handleSwap"
     fn test_to_register_transaction() {
         let def = SubgroveDefinition::from_toml(SAMPLE_TOML).unwrap();
         let tx = def.to_register_transaction(
-            "my-app",
             "did:willow:owner",
             "did:willow:owner#key-1",
             vec![1, 2, 3],
             1,
         );
-        let reg = &tx["RegisterSubgrove"];
+        let parsed: serde_json::Value = serde_json::from_str(&tx).unwrap();
+        let reg = &parsed["RegisterSubgrove"];
         assert_eq!(reg["subgrove_id"], "test-swaps");
-        assert_eq!(reg["app_id"], "my-app");
         assert_eq!(reg["owner_did"], "did:willow:owner");
         assert!(reg["mode"]["BlockchainIndexing"].is_object());
     }

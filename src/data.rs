@@ -94,7 +94,7 @@ impl DataOperations {
     }
 
     /// Get a single item from a subgrove with automatic proof verification
-    pub async fn get(&self, app_id: &str, subgrove_id: &str, key: &str) -> Result<Value> {
+    pub async fn get(&self, subgrove_id: &str, key: &str) -> Result<Value> {
         self.ensure_authenticated()?;
 
         // First get the data
@@ -102,7 +102,7 @@ impl DataOperations {
             .client
             .request(
                 "GET",
-                &format!("/data/{}/{}/{}", app_id, subgrove_id, key),
+                &format!("/data/{}/{}", subgrove_id, key),
                 None::<&()>,
                 true,
             )
@@ -124,7 +124,7 @@ impl DataOperations {
                 .client
                 .request(
                     "GET",
-                    &format!("/proof/{}/{}/{}", app_id, subgrove_id, key),
+                    &format!("/proof/{}/{}", subgrove_id, key),
                     None::<&()>,
                     true,
                 )
@@ -137,8 +137,6 @@ impl DataOperations {
 
                     // Build the GroveDB path matching the server's proof generation
                     let path: Vec<Vec<u8>> = vec![
-                        b"apps".to_vec(),
-                        app_id.as_bytes().to_vec(),
                         b"subgroves".to_vec(),
                         subgrove_id.as_bytes().to_vec(),
                         b"data".to_vec(),
@@ -162,7 +160,6 @@ impl DataOperations {
     /// Get a single item without proof verification
     pub async fn get_unverified(
         &self,
-        app_id: &str,
         subgrove_id: &str,
         key: &str,
     ) -> Result<Value> {
@@ -172,7 +169,7 @@ impl DataOperations {
             .client
             .request(
                 "GET",
-                &format!("/data/{}/{}/{}", app_id, subgrove_id, key),
+                &format!("/data/{}/{}", subgrove_id, key),
                 None::<&()>,
                 true,
             )
@@ -191,7 +188,6 @@ impl DataOperations {
     /// When `no-light-client` feature is enabled, this behaves the same as `query_unverified`.
     pub async fn query(
         &self,
-        app_id: &str,
         subgrove_id: &str,
         mut query: Value,
     ) -> Result<QueryResponse> {
@@ -207,7 +203,7 @@ impl DataOperations {
             .client
             .request(
                 "POST",
-                &format!("/query/{}/{}", app_id, subgrove_id),
+                &format!("/query/{}", subgrove_id),
                 Some(&query),
                 true,
             )
@@ -220,7 +216,7 @@ impl DataOperations {
         // Verify proof if present and light client is available
         #[cfg(not(feature = "no-light-client"))]
         if query_response.proof.is_some() {
-            match self.verify_and_compare_root(app_id, subgrove_id, &query_response).await {
+            match self.verify_and_compare_root(subgrove_id, &query_response).await {
                 Ok(verified_root) => {
                     query_response.verified_root_hash = Some(verified_root);
                 }
@@ -244,7 +240,6 @@ impl DataOperations {
     /// column projection, COUNT(*).
     pub async fn sql(
         &self,
-        app_id: &str,
         subgrove_id: &str,
         query: &str,
     ) -> Result<crate::types::SqlResponse> {
@@ -258,7 +253,7 @@ impl DataOperations {
         self.client
             .request(
                 "POST",
-                &format!("/sql/{}/{}", app_id, subgrove_id),
+                &format!("/sql/{}", subgrove_id),
                 Some(&request),
                 true,
             )
@@ -271,7 +266,6 @@ impl DataOperations {
     /// the node without cryptographic verification.
     pub async fn query_unverified(
         &self,
-        app_id: &str,
         subgrove_id: &str,
         mut query: Value,
     ) -> Result<QueryResponse> {
@@ -286,7 +280,7 @@ impl DataOperations {
             .client
             .request(
                 "POST",
-                &format!("/query/{}/{}", app_id, subgrove_id),
+                &format!("/query/{}", subgrove_id),
                 Some(&query),
                 true,
             )
@@ -354,7 +348,7 @@ impl DataOperations {
     ///
     /// async fn example(data_ops: &DataOperations) {
     ///     let query = HistoricalQueryRequest {
-    ///         path: vec![b"apps".to_vec(), b"data".to_vec()],
+    ///         path: vec![b"subgroves".to_vec(), b"data".to_vec()],
     ///         key: Some(b"key123".to_vec()),
     ///         query_type: Some("get".to_string()),
     ///         include_proof: Some(true),
@@ -515,7 +509,6 @@ impl DataOperations {
     #[cfg(not(feature = "no-light-client"))]
     async fn verify_and_compare_root(
         &self,
-        app_id: &str,
         subgrove_id: &str,
         query_response: &QueryResponse,
     ) -> Result<String> {
@@ -537,12 +530,10 @@ impl DataOperations {
         }
 
         // Build the same PathQuery the server used to generate the proof:
-        // path: [apps, app_id, subgroves, subgrove_id, data], query: range_full
+        // path: [subgroves, subgrove_id, data], query: range_full
         // The server always generates proofs with range_full (matching full_scan),
         // so the SDK reconstructs the identical PathQuery for strict verification.
         let path: Vec<Vec<u8>> = vec![
-            b"apps".to_vec(),
-            app_id.as_bytes().to_vec(),
             b"subgroves".to_vec(),
             subgrove_id.as_bytes().to_vec(),
             b"data".to_vec(),
@@ -590,7 +581,7 @@ mod tests {
         let data_ops = client.data();
 
         // Should fail when not authenticated
-        let result = data_ops.get("app", "subgrove", "key").await;
+        let result = data_ops.get("subgrove", "key").await;
         assert!(matches!(result, Err(WillowError::NotAuthenticated)));
     }
 }

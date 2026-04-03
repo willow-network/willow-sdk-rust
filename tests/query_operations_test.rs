@@ -2,7 +2,6 @@
 
 use ed25519_dalek::SigningKey;
 use serde_json::json;
-use std::fs;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::time::sleep;
 use willow_sdk::{ConsensusClient, WillowClient};
@@ -16,10 +15,8 @@ async fn query_operations_test() {
     println!("This test verifies current query capabilities");
 
     // Read the funded DID
-    let funded_did = fs::read_to_string("../../tools/app_registrar/app_owner_did.txt")
-        .expect("Funded DID file not found")
-        .trim()
-        .to_string();
+    let funded_did = std::env::var("WILLOW_TEST_DID")
+        .unwrap_or_else(|_| "did:willow:test-owner".to_string());
 
     // Generate unique subgrove name with timestamp
     let timestamp = SystemTime::now()
@@ -30,7 +27,7 @@ async fn query_operations_test() {
 
     println!("\n📋 Test Configuration:");
     println!("  DID: {}", funded_did);
-    println!("  App: test_app");
+    println!("  Subgrove: test-subgrove");
     println!("  Subgrove: {}", subgrove_name);
 
     let client = WillowClient::new("http://localhost:3031").await.unwrap();
@@ -68,8 +65,8 @@ async fn query_operations_test() {
         "required_fields": ["name", "category", "price", "in_stock"]
     });
 
-    // Check if test_app exists, wait for it if network just restarted
-    println!("  ⏳ Checking for test_app...");
+    // Check if Subgrove exists, wait for it if network just restarted
+    println!("  ⏳ Checking for subgrove...");
     let mut app_exists = false;
     for attempt in 1..=30 {
         // Try to register subgrove - if app doesn't exist, it will fail
@@ -90,10 +87,10 @@ async fn query_operations_test() {
             }
             Err(e) => {
                 let error_str = e.to_string();
-                if error_str.contains("App not found") || error_str.contains("app does not exist") {
+                if error_str.contains("Subgrove not found") || error_str.contains("subgrove does not exist") {
                     if attempt == 1 || attempt % 5 == 0 {
                         println!(
-                            "  ⏳ Waiting for test_app to be registered... (attempt {}/30)",
+                            "  ⏳ Waiting for subgrove to be registered... (attempt {}/30)",
                             attempt
                         );
                     }
@@ -108,13 +105,13 @@ async fn query_operations_test() {
     }
 
     if !app_exists {
-        panic!("test_app was not registered after network restart. Please ensure start_three_nodes_with_funding.sh completes successfully.");
+        panic!("Subgrove was not registered after network restart. Please ensure start_three_nodes_with_funding.sh completes successfully.");
     }
 
     sleep(Duration::from_secs(10)).await;
 
-    // Fund app
-    let _ = fund_app(&consensus, &funded_did).await;
+    // Fund subgrove
+    let _ = fund_subgrove(&consensus, &funded_did).await;
     sleep(Duration::from_secs(10)).await;
 
     // Store test products
@@ -215,7 +212,7 @@ async fn query_operations_test() {
         "filters": { "category": "electronics" }
     });
 
-    match client.data().query("test_app", &subgrove_name, query).await {
+    match client.data().query(&subgrove_name, query).await {
         Ok(results) => {
             println!("  ✅ Query returned {} documents", results.documents.len());
             for doc in &results.documents {
@@ -240,7 +237,7 @@ async fn query_operations_test() {
 
     match client
         .data()
-        .query("test_app", &subgrove_name, query_with_proof)
+        .query(&subgrove_name, query_with_proof)
         .await
     {
         Ok(results) => {
@@ -289,7 +286,7 @@ async fn query_operations_test() {
         "sort": { "field": "price", "order": "asc" }
     });
 
-    match client.data().query("test_app", &subgrove_name, query).await {
+    match client.data().query(&subgrove_name, query).await {
         Ok(results) => {
             println!(
                 "  ✅ Query returned {} documents sorted by price",
@@ -315,7 +312,7 @@ async fn query_operations_test() {
         "offset": 0
     });
 
-    match client.data().query("test_app", &subgrove_name, query).await {
+    match client.data().query(&subgrove_name, query).await {
         Ok(results) => {
             println!(
                 "  ✅ Query returned {} documents (page 1)",
@@ -335,7 +332,7 @@ async fn query_operations_test() {
 
             if let Ok(results2) = client
                 .data()
-                .query("test_app", &subgrove_name, query_page2)
+                .query(&subgrove_name, query_page2)
                 .await
             {
                 println!(
@@ -359,7 +356,7 @@ async fn query_operations_test() {
         "limit": 3
     });
 
-    match client.data().query("test_app", &subgrove_name, query).await {
+    match client.data().query(&subgrove_name, query).await {
         Ok(results) => {
             println!(
                 "  ✅ Query returned {} in-stock products sorted by rating",
@@ -386,7 +383,7 @@ async fn query_operations_test() {
         "filters": { "category": "nonexistent" }
     });
 
-    match client.data().query("test_app", &subgrove_name, query).await {
+    match client.data().query(&subgrove_name, query).await {
         Ok(results) => println!(
             "    ✅ Empty query returned {} documents",
             results.documents.len()
@@ -401,7 +398,7 @@ async fn query_operations_test() {
         "limit": 1000
     });
 
-    match client.data().query("test_app", &subgrove_name, query).await {
+    match client.data().query(&subgrove_name, query).await {
         Ok(results) => println!(
             "    ✅ Large limit query returned {} documents",
             results.documents.len()
@@ -416,7 +413,7 @@ async fn query_operations_test() {
         "offset": 100
     });
 
-    match client.data().query("test_app", &subgrove_name, query).await {
+    match client.data().query(&subgrove_name, query).await {
         Ok(results) => println!(
             "    ✅ High offset query returned {} documents",
             results.documents.len()
@@ -446,7 +443,7 @@ async fn register_subgrove(
     let schema_hash_hex = hex::encode(schema_hash);
 
     let message = format!(
-        "RegisterSubgrove\nID: {}\nApp: test_app\nName: Query Products\nSchemaHash: {}\nOwner: {}\nWriters: \nReaders: \nNonce: {}",
+        "RegisterSubgrove\nID: {}\nName: Query Products\nSchemaHash: {}\nOwner: {}\nWriters: \nReaders: \nNonce: {}",
         subgrove_id, schema_hash_hex, owner_did, nonce
     );
 
@@ -455,7 +452,7 @@ async fn register_subgrove(
     let transaction = json!({
         "RegisterSubgrove": {
             "subgrove_id": subgrove_id,
-            "app_id": "test_app",
+            
             "name": "Query Products",
             "schema": schema_json,
             "owner_did": owner_did,
@@ -470,13 +467,13 @@ async fn register_subgrove(
     submit_transaction(consensus, &transaction).await
 }
 
-async fn fund_app(
+async fn fund_subgrove(
     consensus: &ConsensusClient,
     from_did: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let fund_tx = json!({
-        "FundApp": {
-            "app_id": "test_app",
+        "FundSubgrove": {
+            
             "amount": 10_000_000_000_000_000_000u128,
             "from_did": from_did,
             "signature": []
@@ -498,12 +495,12 @@ async fn store_data(
     use ed25519_dalek::Signer;
 
     let data_json = serde_json::to_string(&data)?;
-    let message = format!("test_app:{}:{}:{}", subgrove_id, key, data_json);
+    let message = format!("{}:{}:{}", subgrove_id, key, data_json);
     let signature = signing_key.sign(message.as_bytes());
 
     let transaction = json!({
         "StoreData": {
-            "app_id": "test_app",
+            
             "subgrove_id": subgrove_id,
             "key": key,
             "data": data,

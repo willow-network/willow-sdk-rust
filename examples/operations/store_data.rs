@@ -26,7 +26,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let public_key_id = DEVNET_VALIDATOR_1.public_key_id;
 
     // Where to store
-    let app_id = "my-app"; // Must exist
     let subgrove_id = "users"; // Must exist
 
     // What to store
@@ -54,7 +53,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let request = StoreDataRequest {
-        app_id: app_id.to_string(),
         subgrove_id: subgrove_id.to_string(),
         key: key.to_string(),
         data: data.clone(),
@@ -64,7 +62,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         nonce,
     };
 
-    println!("Storing data: {}/{}/{}", app_id, subgrove_id, key);
+    println!("Storing data: {}/{}", subgrove_id, key);
     println!("Data: {}", data);
 
     match client.consensus().store_data(request, &signing_key).await {

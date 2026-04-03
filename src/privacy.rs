@@ -80,7 +80,6 @@ impl PrivacyOperations {
     /// the subgrove's data.
     pub async fn get_my_key_grant(
         &self,
-        app_id: &str,
         subgrove_id: &str,
     ) -> Result<EncryptedKeyGrant> {
         let did = self
@@ -92,7 +91,7 @@ impl PrivacyOperations {
             .client
             .request(
                 "GET",
-                &format!("/key-grants/{}/{}/{}", app_id, subgrove_id, did),
+                &format!("/key-grants/{}/{}", subgrove_id, did),
                 None::<&()>,
                 true,
             )
@@ -108,14 +107,13 @@ impl PrivacyOperations {
     /// Only the subgrove owner or admin can call this.
     pub async fn list_key_grantees(
         &self,
-        app_id: &str,
         subgrove_id: &str,
     ) -> Result<Vec<String>> {
         let response: ApiResponse<Vec<String>> = self
             .client
             .request(
                 "GET",
-                &format!("/key-grants/{}/{}", app_id, subgrove_id),
+                &format!("/key-grants/{}", subgrove_id),
                 None::<&()>,
                 true,
             )
@@ -131,7 +129,6 @@ impl PrivacyOperations {
     /// Public endpoint — proofs are non-sensitive.
     pub async fn get_key_grant_proof(
         &self,
-        app_id: &str,
         subgrove_id: &str,
         did: &str,
     ) -> Result<serde_json::Value> {
@@ -139,7 +136,7 @@ impl PrivacyOperations {
             .client
             .request(
                 "GET",
-                &format!("/proof/key-grant/{}/{}/{}", app_id, subgrove_id, did),
+                &format!("/proof/key-grant/{}/{}", subgrove_id, did),
                 None::<&()>,
                 false,
             )
@@ -155,7 +152,6 @@ impl PrivacyOperations {
     /// Grants the specified DID access to the subgrove's encryption key.
     pub async fn grant_subgrove_key(
         &self,
-        app_id: &str,
         subgrove_id: &str,
         grant: EncryptedKeyGrant,
         sender_did: &str,
@@ -164,15 +160,14 @@ impl PrivacyOperations {
         nonce: u64,
     ) -> Result<String> {
         let message = format!(
-            "GrantSubgroveKey:{}:{}:{}:{}:{}",
-            app_id, subgrove_id, grant.grantee_did, sender_did, nonce
+            "GrantSubgroveKey:{}:{}:{}:{}",
+            subgrove_id, grant.grantee_did, sender_did, nonce
         );
 
         let signature = signing_key.sign(message.as_bytes());
 
         let tx = serde_json::json!({
             "GrantSubgroveKey": {
-                "app_id": app_id,
                 "subgrove_id": subgrove_id,
                 "encrypted_key_grant": grant,
                 "sender_did": sender_did,
@@ -193,7 +188,6 @@ impl PrivacyOperations {
     /// Revokes the specified DID's access to the subgrove's encryption key.
     pub async fn revoke_subgrove_key(
         &self,
-        app_id: &str,
         subgrove_id: &str,
         revokee_did: &str,
         sender_did: &str,
@@ -202,15 +196,14 @@ impl PrivacyOperations {
         nonce: u64,
     ) -> Result<String> {
         let message = format!(
-            "RevokeSubgroveKey:{}:{}:{}:{}:{}",
-            app_id, subgrove_id, revokee_did, sender_did, nonce
+            "RevokeSubgroveKey:{}:{}:{}:{}",
+            subgrove_id, revokee_did, sender_did, nonce
         );
 
         let signature = signing_key.sign(message.as_bytes());
 
         let tx = serde_json::json!({
             "RevokeSubgroveKey": {
-                "app_id": app_id,
                 "subgrove_id": subgrove_id,
                 "revokee_did": revokee_did,
                 "sender_did": sender_did,
@@ -231,7 +224,6 @@ impl PrivacyOperations {
     /// Rotates the subgrove encryption key to a new epoch with new grants.
     pub async fn rotate_subgrove_key(
         &self,
-        app_id: &str,
         subgrove_id: &str,
         new_epoch: u32,
         new_grants: Vec<EncryptedKeyGrant>,
@@ -241,15 +233,14 @@ impl PrivacyOperations {
         nonce: u64,
     ) -> Result<String> {
         let message = format!(
-            "RotateSubgroveKey:{}:{}:{}:{}:{}",
-            app_id, subgrove_id, new_epoch, sender_did, nonce
+            "RotateSubgroveKey:{}:{}:{}:{}",
+            subgrove_id, new_epoch, sender_did, nonce
         );
 
         let signature = signing_key.sign(message.as_bytes());
 
         let tx = serde_json::json!({
             "RotateSubgroveKey": {
-                "app_id": app_id,
                 "subgrove_id": subgrove_id,
                 "new_epoch": new_epoch,
                 "new_grants": new_grants,

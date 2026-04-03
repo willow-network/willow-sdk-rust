@@ -61,7 +61,6 @@ impl FileOperations {
     /// signed transactions.
     pub async fn upload(
         &self,
-        app_id: &str,
         subgrove_id: &str,
         file_key: &str,
         filename: &str,
@@ -93,8 +92,8 @@ impl FileOperations {
         let tx_nonce = self.client.consensus().get_next_nonce(&owner_did).await?;
         let (signature_bytes, pub_key_id) = if let Some(key) = signing_key {
             let message = format!(
-                "store_file:{}:{}:{}:{}:{}",
-                app_id, subgrove_id, file_key, content_hash_hex, data.len()
+                "store_file:{}:{}:{}:{}",
+                subgrove_id, file_key, content_hash_hex, data.len()
             );
             let signature = key.sign(message.as_bytes());
             (
@@ -112,7 +111,6 @@ impl FileOperations {
         use crate::consensus::ConsensusClient;
 
         let manifest_tx = StoreFileManifestTx {
-            app_id: app_id.to_string(),
             subgrove_id: subgrove_id.to_string(),
             file_key: file_key.to_string(),
             filename: filename.to_string(),
@@ -143,8 +141,8 @@ impl FileOperations {
         let http = reqwest::Client::new();
         for (i, chunk) in chunks.iter().enumerate() {
             let url = format!(
-                "{}/upload/{}/{}/{}?chunk_index={}&chunk_count={}&content_hash={}",
-                storage_node_endpoint, app_id, subgrove_id, file_key, i, chunk_count, content_hash_hex
+                "{}/upload/{}/{}?chunk_index={}&chunk_count={}&content_hash={}",
+                storage_node_endpoint, subgrove_id, file_key, i, chunk_count, content_hash_hex
             );
             let resp = http.post(&url).body(chunk.to_vec()).send().await
                 .map_err(|e| WillowError::Network(format!("Chunk upload failed: {}", e)))?;
@@ -182,13 +180,12 @@ impl FileOperations {
     /// 4. Verifies the reassembled file against the content hash
     pub async fn download(
         &self,
-        app_id: &str,
         subgrove_id: &str,
         file_key: &str,
         storage_node_endpoint: &str,
     ) -> Result<Vec<u8>> {
         // Get manifest from validator
-        let manifest = self.metadata(app_id, subgrove_id, file_key).await?;
+        let manifest = self.metadata(subgrove_id, file_key).await?;
 
         let content_hash_hex = &manifest.content_hash;
         let chunk_count = manifest.chunk_count;
@@ -200,8 +197,8 @@ impl FileOperations {
 
         for i in 0..chunk_count {
             let url = format!(
-                "{}/chunk/{}/{}/{}/{}?content_hash={}",
-                storage_node_endpoint, app_id, subgrove_id, file_key, i, content_hash_hex
+                "{}/chunk/{}/{}/{}?content_hash={}",
+                storage_node_endpoint, subgrove_id, file_key, i, content_hash_hex
             );
             let resp = http.get(&url).send().await
                 .map_err(|e| WillowError::Network(format!("Chunk download failed: {}", e)))?;
@@ -248,14 +245,13 @@ impl FileOperations {
     /// Get file manifest metadata with GroveDB proof.
     pub async fn metadata(
         &self,
-        app_id: &str,
         subgrove_id: &str,
         file_key: &str,
     ) -> Result<FileManifest> {
         self.client
             .request(
                 "GET",
-                &format!("/files/{}/{}/{}", app_id, subgrove_id, file_key),
+                &format!("/files/{}/{}", subgrove_id, file_key),
                 None::<&()>,
                 false,
             )
@@ -265,14 +261,13 @@ impl FileOperations {
     /// List all files in a subgrove.
     pub async fn list(
         &self,
-        app_id: &str,
         subgrove_id: &str,
     ) -> Result<Vec<FileManifest>> {
         let response: FileListResponse = self
             .client
             .request(
                 "GET",
-                &format!("/files/{}/{}", app_id, subgrove_id),
+                &format!("/files/{}", subgrove_id),
                 None::<&()>,
                 false,
             )
@@ -286,7 +281,6 @@ impl FileOperations {
     /// When `signing_key` is provided, the delete transaction is signed.
     pub async fn delete(
         &self,
-        app_id: &str,
         subgrove_id: &str,
         file_key: &str,
         signing_key: Option<&SigningKey>,
@@ -300,8 +294,8 @@ impl FileOperations {
         let tx_nonce = self.client.consensus().get_next_nonce(&owner_did).await?;
         let (signature_bytes, pub_key_id) = if let Some(key) = signing_key {
             let message = format!(
-                "delete_file:{}:{}:{}",
-                app_id, subgrove_id, file_key
+                "delete_file:{}:{}",
+                subgrove_id, file_key
             );
             let signature = key.sign(message.as_bytes());
             (
@@ -316,7 +310,6 @@ impl FileOperations {
         use crate::consensus::ConsensusClient;
 
         let delete_tx = DeleteFileManifestTx {
-            app_id: app_id.to_string(),
             subgrove_id: subgrove_id.to_string(),
             file_key: file_key.to_string(),
             owner_did: owner_did.clone(),

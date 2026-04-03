@@ -30,8 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let amount: u128 = 1_000_000_000_000_000_000; // 1 WILL
 
     let memo = Some("Test transfer".to_string());
-    let nonce: u64 = 0; // Increment for each transaction from this DID
-                        // =========================================================================
+    // =========================================================================
 
     let client = WillowClient::builder()
         .api_url(api_url)
@@ -53,7 +52,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             private_key,
             public_key_id,
             SignatureAlgorithm::Ed25519,
-            nonce,
         )
         .await
     {

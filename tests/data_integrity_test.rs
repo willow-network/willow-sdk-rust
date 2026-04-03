@@ -2,7 +2,6 @@
 
 use ed25519_dalek::{Signer, SigningKey};
 use serde_json::json;
-use std::fs;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::time::sleep;
 use willow_sdk::{ConsensusClient, WillowClient};
@@ -16,10 +15,8 @@ async fn data_integrity_test() {
     println!("This test verifies CRUD operations and data consistency");
 
     // Read the funded DID
-    let funded_did = fs::read_to_string("../../tools/app_registrar/app_owner_did.txt")
-        .expect("Funded DID file not found")
-        .trim()
-        .to_string();
+    let funded_did = std::env::var("WILLOW_TEST_DID")
+        .unwrap_or_else(|_| "did:willow:test-owner".to_string());
 
     // Generate unique subgrove name with timestamp
     let timestamp = SystemTime::now()
@@ -30,7 +27,7 @@ async fn data_integrity_test() {
 
     println!("\n📋 Test Configuration:");
     println!("  DID: {}", funded_did);
-    println!("  App: test_app");
+    println!("  Subgrove: test-subgrove");
     println!("  Subgrove: {}", subgrove_name);
 
     let client = WillowClient::new("http://localhost:3031").await.unwrap();
@@ -41,9 +38,9 @@ async fn data_integrity_test() {
         SigningKey::from_bytes(&private_key_bytes.try_into().expect("Invalid key length"));
 
     // Setup: Wait for app and register subgrove
-    println!("\n📝 Setup: Waiting for app and registering integrity test subgrove...");
+    println!("\n📝 Setup: Waiting for subgrove and registering integrity test subgrove...");
 
-    // Wait for test_app to be registered
+    // Wait for subgrove to be registered
     let mut app_check_attempts = 0;
     let max_app_check_attempts = 30;
     let mut app_exists = false;
@@ -54,27 +51,27 @@ async fn data_integrity_test() {
         &format!("{}#key-1", funded_did),
     );
 
-    println!("  ⏳ Checking if test_app exists...");
+    println!("  ⏳ Checking if Subgrove exists...");
     while app_check_attempts < max_app_check_attempts {
         // Try to access the app by attempting to list subgroves or perform a simple operation
         match client
             .data()
-            .query("test_app", "dummy_subgrove", json!({"filters": {}}))
+            .query("dummy_subgrove", json!({"filters": {}}))
             .await
         {
             Ok(_) => {
-                println!("  ✅ test_app exists and is accessible");
+                println!("  ✅ Subgrove exists and is accessible");
                 app_exists = true;
                 break;
             }
             Err(e) => {
-                if e.to_string().contains("App not found")
+                if e.to_string().contains("Subgrove not found")
                     || e.to_string().contains("not registered")
                 {
                     app_check_attempts += 1;
                     if app_check_attempts < max_app_check_attempts {
                         println!(
-                            "  ⏳ App check attempt {} - app not found yet. Waiting 2s...",
+                            "  ⏳ Subgrove check attempt {} - subgrove not found yet. Waiting 2s...",
                             app_check_attempts
                         );
                         sleep(Duration::from_secs(2)).await;
@@ -82,7 +79,7 @@ async fn data_integrity_test() {
                 } else {
                     // App exists but subgrove doesn't, which is expected
                     println!(
-                        "  ✅ test_app exists (subgrove query returned expected error)"
+                        "  ✅ Subgrove exists (subgrove query returned expected error)"
                     );
                     app_exists = true;
                     break;
@@ -93,7 +90,7 @@ async fn data_integrity_test() {
 
     if !app_exists {
         panic!(
-            "test_app not found after {} attempts. Make sure it's registered first.",
+            "Subgrove not found after {} attempts. Make sure it's registered first.",
             max_app_check_attempts
         );
     }
@@ -130,8 +127,8 @@ async fn data_integrity_test() {
     nonce += 1;
     sleep(Duration::from_secs(10)).await;
 
-    // Fund app
-    let _ = fund_app(&consensus, &funded_did).await;
+    // Fund subgrove
+    let _ = fund_subgrove(&consensus, &funded_did).await;
     sleep(Duration::from_secs(10)).await;
 
     // Set identity (already set earlier, but re-affirm)
@@ -186,7 +183,7 @@ async fn data_integrity_test() {
 
     match client
         .data()
-        .get("test_app", &subgrove_name, test_key)
+        .get(&subgrove_name, test_key)
         .await
     {
         Ok(data) => {
@@ -252,8 +249,7 @@ async fn data_integrity_test() {
     use sha3::{Digest, Keccak256};
 
     let message = format!(
-        "UpdateData:{}:{}:{}:{}",
-        "test_app",
+        "UpdateData:{}:{}:{}",
         subgrove_name,
         test_key,
         serde_json::to_string(&updated_data).unwrap()
@@ -266,7 +262,7 @@ async fn data_integrity_test() {
 
     let update_tx = json!({
         "UpdateData": {
-            "app_id": "test_app",
+            
             "subgrove_id": subgrove_name,
             "key": test_key,
             "data": updated_data,
@@ -289,7 +285,7 @@ async fn data_integrity_test() {
     // Verify update
     match client
         .data()
-        .get("test_app", &subgrove_name, test_key)
+        .get(&subgrove_name, test_key)
         .await
     {
         Ok(data) => {
@@ -363,7 +359,7 @@ async fn data_integrity_test() {
     let mut consistent = true;
 
     for key in &all_keys {
-        match client.data().get("test_app", &subgrove_name, key).await {
+        match client.data().get(&subgrove_name, key).await {
             Ok(data) => {
                 println!(
                     "    ✅ {} exists: {} (value: {})",
@@ -389,7 +385,7 @@ async fn data_integrity_test() {
     println!("\n🧪 Test 5: DELETE - Testing deletion...");
 
     // Delete item_003 using consensus transaction
-    let message = format!("DeleteData:{}:{}:{}", "test_app", subgrove_name, "item_003");
+    let message = format!("DeleteData:{}:{}", subgrove_name, "item_003");
 
     let mut hasher = Keccak256::new();
     hasher.update(message.as_bytes());
@@ -398,7 +394,7 @@ async fn data_integrity_test() {
 
     let delete_tx = json!({
         "DeleteData": {
-            "app_id": "test_app",
+            
             "subgrove_id": subgrove_name,
             "key": "item_003",
             "owner_did": funded_did,
@@ -416,7 +412,7 @@ async fn data_integrity_test() {
             // Verify deletion
             match client
                 .data()
-                .get("test_app", &subgrove_name, "item_003")
+                .get(&subgrove_name, "item_003")
                 .await
             {
                 Ok(_) => println!("  ❌ Item still exists after deletion"),
@@ -466,7 +462,7 @@ async fn data_integrity_test() {
 
     match client
         .data()
-        .get("test_app", &subgrove_name, type_test_key)
+        .get(&subgrove_name, type_test_key)
         .await
     {
         Ok(data) => {
@@ -531,7 +527,7 @@ async fn register_subgrove(
     let schema_hash_hex = hex::encode(schema_hash);
 
     let message = format!(
-        "RegisterSubgrove\nID: {}\nApp: test_app\nName: Integrity Test\nSchemaHash: {}\nOwner: {}\nWriters: \nReaders: \nNonce: {}",
+        "RegisterSubgrove\nID: {}\nName: Integrity Test\nSchemaHash: {}\nOwner: {}\nWriters: \nReaders: \nNonce: {}",
         subgrove_id, schema_hash_hex, owner_did, nonce
     );
 
@@ -540,7 +536,7 @@ async fn register_subgrove(
     let transaction = json!({
         "RegisterSubgrove": {
             "subgrove_id": subgrove_id,
-            "app_id": "test_app",
+            
             "name": "Integrity Test",
             "schema": schema_json,
             "owner_did": owner_did,
@@ -555,13 +551,13 @@ async fn register_subgrove(
     submit_transaction(consensus, &transaction).await
 }
 
-async fn fund_app(
+async fn fund_subgrove(
     consensus: &ConsensusClient,
     from_did: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let fund_tx = json!({
-        "FundApp": {
-            "app_id": "test_app",
+        "FundSubgrove": {
+            
             "amount": 10_000_000_000_000_000_000u128,
             "from_did": from_did,
             "signature": []
@@ -581,12 +577,12 @@ async fn store_data(
     nonce: u64,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let data_json = serde_json::to_string(&data)?;
-    let message = format!("test_app:{}:{}:{}", subgrove_id, key, data_json);
+    let message = format!("{}:{}:{}", subgrove_id, key, data_json);
     let signature = signing_key.sign(message.as_bytes());
 
     let transaction = json!({
         "StoreData": {
-            "app_id": "test_app",
+            
             "subgrove_id": subgrove_id,
             "key": key,
             "data": data,

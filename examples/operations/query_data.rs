@@ -24,7 +24,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let public_key_id = DEVNET_VALIDATOR_1.public_key_id;
 
     // What to query
-    let app_id = "my-app";
     let subgrove_id = "users";
     let key = "user-1";
     // =========================================================================
@@ -34,8 +33,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     client.set_identity(did, private_key, public_key_id);
 
     // Get a specific document by key
-    println!("Getting: {}/{}/{}", app_id, subgrove_id, key);
-    match client.data().get_unverified(app_id, subgrove_id, key).await {
+    println!("Getting: {}/{}", subgrove_id, key);
+    match client.data().get_unverified(subgrove_id, key).await {
         Ok(data) => {
             println!("Document:");
             println!("  {}", serde_json::to_string_pretty(&data)?);
@@ -46,10 +45,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Query all documents in the subgrove
-    println!("\nQuerying all: {}/{}", app_id, subgrove_id);
+    println!("\nQuerying all: {}", subgrove_id);
     match client
         .data()
-        .query_unverified(app_id, subgrove_id, json!({ "limit": 100 }))
+        .query_unverified(subgrove_id, json!({ "limit": 100 }))
         .await
     {
         Ok(response) => {

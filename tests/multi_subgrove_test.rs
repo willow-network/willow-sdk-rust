@@ -2,7 +2,6 @@
 
 use ed25519_dalek::SigningKey;
 use serde_json::json;
-use std::fs;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::time::sleep;
 use willow_sdk::{ConsensusClient, WillowClient};
@@ -16,10 +15,8 @@ async fn multi_subgrove_test() {
     println!("This test verifies operations across multiple subgroves");
 
     // Read the funded DID
-    let funded_did = fs::read_to_string("../../tools/app_registrar/app_owner_did.txt")
-        .expect("Funded DID file not found")
-        .trim()
-        .to_string();
+    let funded_did = std::env::var("WILLOW_TEST_DID")
+        .unwrap_or_else(|_| "did:willow:test-owner".to_string());
 
     // Generate unique subgrove names with timestamp
     let timestamp = SystemTime::now()
@@ -32,7 +29,7 @@ async fn multi_subgrove_test() {
 
     println!("\n📋 Test Configuration:");
     println!("  DID: {}", funded_did);
-    println!("  App: test_app");
+    println!("  Subgrove: test-subgrove");
     println!(
         "  Subgroves: {}, {}, {}",
         users_subgrove, posts_subgrove, comments_subgrove
@@ -46,9 +43,9 @@ async fn multi_subgrove_test() {
         SigningKey::from_bytes(&private_key_bytes.try_into().expect("Invalid key length"));
 
     // Step 1: Wait for app to be registered and register multiple subgroves with different schemas
-    println!("\n📝 Step 1: Waiting for app registration and registering multiple subgroves...");
+    println!("\n📝 Step 1: Waiting for subgrove and registering multiple subgroves...");
 
-    // Wait for test_app to be registered
+    // Wait for subgrove to be registered
     let mut app_check_attempts = 0;
     let max_app_check_attempts = 30;
     let mut app_exists = false;
@@ -59,27 +56,27 @@ async fn multi_subgrove_test() {
         &format!("{}#key-1", funded_did),
     );
 
-    println!("  ⏳ Checking if test_app exists...");
+    println!("  ⏳ Checking if Subgrove exists...");
     while app_check_attempts < max_app_check_attempts {
         // Try to access the app by attempting to list subgroves or perform a simple operation
         match client
             .data()
-            .query("test_app", "dummy_subgrove", json!({"filters": {}}))
+            .query("dummy_subgrove", json!({"filters": {}}))
             .await
         {
             Ok(_) => {
-                println!("  ✅ test_app exists and is accessible");
+                println!("  ✅ Subgrove exists and is accessible");
                 app_exists = true;
                 break;
             }
             Err(e) => {
-                if e.to_string().contains("App not found")
+                if e.to_string().contains("Subgrove not found")
                     || e.to_string().contains("not registered")
                 {
                     app_check_attempts += 1;
                     if app_check_attempts < max_app_check_attempts {
                         println!(
-                            "  ⏳ App check attempt {} - app not found yet. Waiting 2s...",
+                            "  ⏳ Subgrove check attempt {} - subgrove not found yet. Waiting 2s...",
                             app_check_attempts
                         );
                         sleep(Duration::from_secs(2)).await;
@@ -87,7 +84,7 @@ async fn multi_subgrove_test() {
                 } else {
                     // App exists but subgrove doesn't, which is expected
                     println!(
-                        "  ✅ test_app exists (subgrove query returned expected error)"
+                        "  ✅ Subgrove exists (subgrove query returned expected error)"
                     );
                     app_exists = true;
                     break;
@@ -98,7 +95,7 @@ async fn multi_subgrove_test() {
 
     if !app_exists {
         panic!(
-            "test_app not found after {} attempts. Make sure it's registered first.",
+            "Subgrove not found after {} attempts. Make sure it's registered first.",
             max_app_check_attempts
         );
     }
@@ -221,8 +218,8 @@ async fn multi_subgrove_test() {
     println!("  ⏳ Waiting for subgrove initialization...");
     sleep(Duration::from_secs(10)).await;
 
-    // Fund app
-    let _ = fund_app(&consensus, &funded_did).await;
+    // Fund subgrove
+    let _ = fund_subgrove(&consensus, &funded_did).await;
     sleep(Duration::from_secs(10)).await;
 
     // Step 2: Store related data across subgroves
@@ -400,7 +397,7 @@ async fn multi_subgrove_test() {
     // Try to read user data from users subgrove
     match client
         .data()
-        .get("test_app", &users_subgrove, "user_alice")
+        .get(&users_subgrove, "user_alice")
         .await
     {
         Ok(data) => println!(
@@ -413,7 +410,7 @@ async fn multi_subgrove_test() {
     // Verify we can't read user data from posts subgrove
     match client
         .data()
-        .get("test_app", &posts_subgrove, "user_alice")
+        .get(&posts_subgrove, "user_alice")
         .await
     {
         Ok(_) => println!("  ❌ ERROR: Retrieved user data from posts subgrove!"),
@@ -431,7 +428,7 @@ async fn multi_subgrove_test() {
 
     match client
         .data()
-        .query("test_app", &posts_subgrove, alice_posts_query)
+        .query(&posts_subgrove, alice_posts_query)
         .await
     {
         Ok(results) => {
@@ -457,7 +454,7 @@ async fn multi_subgrove_test() {
 
                     match client
                         .data()
-                        .query("test_app", &comments_subgrove, comments_query)
+                        .query(&comments_subgrove, comments_query)
                         .await
                     {
                         Ok(comment_results) => {
@@ -493,7 +490,7 @@ async fn multi_subgrove_test() {
         // Read from users
         client_clone1
             .data()
-            .get("test_app", &users_subgrove_clone, "user_bob")
+            .get(&users_subgrove_clone, "user_bob")
             .await
     });
 
@@ -501,7 +498,7 @@ async fn multi_subgrove_test() {
         // Read from posts
         client_clone2
             .data()
-            .get("test_app", &posts_subgrove_clone, "post_2")
+            .get(&posts_subgrove_clone, "post_2")
             .await
     });
 
@@ -553,7 +550,7 @@ async fn register_subgrove(
     let schema_hash_hex = hex::encode(schema_hash);
 
     let message = format!(
-        "RegisterSubgrove\nID: {}\nApp: test_app\nName: {}\nSchemaHash: {}\nOwner: {}\nWriters: \nReaders: \nNonce: {}",
+        "RegisterSubgrove\nID: {}\nName: {}\nSchemaHash: {}\nOwner: {}\nWriters: \nReaders: \nNonce: {}",
         subgrove_id, name, schema_hash_hex, owner_did, nonce
     );
 
@@ -562,7 +559,7 @@ async fn register_subgrove(
     let transaction = json!({
         "RegisterSubgrove": {
             "subgrove_id": subgrove_id,
-            "app_id": "test_app",
+            
             "name": name,
             "schema": schema_json,
             "owner_did": owner_did,
@@ -577,13 +574,13 @@ async fn register_subgrove(
     submit_transaction(consensus, &transaction).await
 }
 
-async fn fund_app(
+async fn fund_subgrove(
     consensus: &ConsensusClient,
     from_did: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let fund_tx = json!({
-        "FundApp": {
-            "app_id": "test_app",
+        "FundSubgrove": {
+            
             "amount": 10_000_000_000_000_000_000u128,
             "from_did": from_did,
             "signature": []
@@ -605,12 +602,12 @@ async fn store_data(
     use ed25519_dalek::Signer;
 
     let data_json = serde_json::to_string(&data)?;
-    let message = format!("test_app:{}:{}:{}", subgrove_id, key, data_json);
+    let message = format!("{}:{}:{}", subgrove_id, key, data_json);
     let signature = signing_key.sign(message.as_bytes());
 
     let transaction = json!({
         "StoreData": {
-            "app_id": "test_app",
+            
             "subgrove_id": subgrove_id,
             "key": key,
             "data": data,

@@ -25,7 +25,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Authenticated as: {}\n", DEVNET_VALIDATOR_1.did);
 
-    let app_id = "proof-demo";
     let subgrove_id = "test-data";
 
     // 1. Get with automatic verification (default)
@@ -38,7 +37,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   - Compares against the consensus root hash");
     println!("   - Returns error if verification fails\n");
 
-    match client.data().get(app_id, subgrove_id, "test-key").await {
+    match client.data().get(subgrove_id, "test-key").await {
         Ok(data) => {
             println!("   Data retrieved and VERIFIED:");
             println!("   {}\n", serde_json::to_string_pretty(&data)?);
@@ -53,7 +52,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match client
         .data()
-        .get_unverified(app_id, subgrove_id, "test-key")
+        .get_unverified(subgrove_id, "test-key")
         .await
     {
         Ok(data) => {
@@ -69,7 +68,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match client
         .data()
-        .query(app_id, subgrove_id, query.clone())
+        .query(subgrove_id, query.clone())
         .await
     {
         Ok(response) => {
@@ -91,7 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("4. Query without verification (unverified)...");
     match client
         .data()
-        .query_unverified(app_id, subgrove_id, query)
+        .query_unverified(subgrove_id, query)
         .await
     {
         Ok(response) => {

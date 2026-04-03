@@ -28,12 +28,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Authenticated as: {}\n", DEVNET_VALIDATOR_1.did);
 
-    let app_id = "example-app";
     let dataset_id = "products";
 
     // 1. Get with proof verification (secure by default)
     println!("1. Get with proof verification...");
-    match client.data().get(app_id, dataset_id, "product-1").await {
+    match client.data().get(dataset_id, "product-1").await {
         Ok(data) => {
             println!("   Retrieved and VERIFIED:");
             println!("   {}", serde_json::to_string_pretty(&data)?);
@@ -45,7 +44,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n2. Get without verification (unverified)...");
     match client
         .data()
-        .get_unverified(app_id, dataset_id, "product-2")
+        .get_unverified(dataset_id, "product-2")
         .await
     {
         Ok(data) => {
@@ -65,7 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "limit": 10
     });
 
-    match client.data().query(app_id, dataset_id, query).await {
+    match client.data().query(dataset_id, query).await {
         Ok(response) => {
             println!("   Found {} documents", response.documents.len());
             if let Some(root_hash) = response.verified_root_hash {
@@ -89,7 +88,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match client
         .data()
-        .query_unverified(app_id, dataset_id, query)
+        .query_unverified(dataset_id, query)
         .await
     {
         Ok(response) => {

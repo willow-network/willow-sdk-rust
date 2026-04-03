@@ -21,8 +21,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let private_key = DEVNET_VALIDATOR_1.private_key;
     let public_key_id = DEVNET_VALIDATOR_1.public_key_id;
 
-    // Optional: App to check balance for
-    let app_id = Some("my-app");
+    // Optional: Subgrove to check balance for
+    let subgrove_id = Some("my-subgrove");
     // =========================================================================
 
     let client = WillowClient::new(api_url).await?;
@@ -44,10 +44,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => println!("  Error: {}", e),
     }
 
-    // Check app balance if specified
-    if let Some(app) = app_id {
-        println!("\nApp: {}", app);
-        match client.token().get_app_balance(app).await {
+    // Check subgrove balance if specified
+    if let Some(sg) = subgrove_id {
+        println!("\nSubgrove: {}", sg);
+        match client.token().get_subgrove_balance(sg).await {
             Ok(balance) => {
                 println!("  Balance: {} WILL", balance.balance);
             }

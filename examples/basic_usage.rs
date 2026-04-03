@@ -34,7 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 3. Retrieve data with automatic proof verification
     // Note: Data must first be stored via consensus transactions
     println!("3. Retrieving data (with proof verification)...");
-    match client.data().get("my-app", "users", "alice").await {
+    match client.data().get("users", "alice").await {
         Ok(data) => {
             println!("   Data retrieved and verified:");
             println!("   {}", serde_json::to_string_pretty(&data)?);
@@ -46,7 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n4. Retrieving data (without verification)...");
     match client
         .data()
-        .get_unverified("my-app", "users", "alice")
+        .get_unverified("users", "alice")
         .await
     {
         Ok(data) => {

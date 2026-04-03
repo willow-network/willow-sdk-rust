@@ -83,29 +83,20 @@ pub struct SchemaField {
 
 pub use willow_types::storage::types::{IndexDefinition, SchemaDefinition};
 
-/// App registration request
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RegisterAppRequest {
-    pub app_id: String,
-    pub name: String,
-    pub description: String,
-    pub owner_did: String,
-    #[serde(default)]
-    pub admins: Vec<String>,
-    pub signature: Vec<u8>,
-    pub public_key_id: String,
-    pub nonce: u64,
-}
-
 /// Subgrove registration request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisterSubgroveRequest {
     pub subgrove_id: String,
-    pub app_id: String,
     pub name: String,
+    #[serde(default)]
+    pub description: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub schema: Option<SchemaDefinition>,
     pub owner_did: String,
+    #[serde(default)]
+    pub admins: Vec<String>,
+    #[serde(default)]
+    pub initial_funding: Option<u128>,
     #[serde(default)]
     pub writers: Vec<String>,
     #[serde(default)]
@@ -114,8 +105,6 @@ pub struct RegisterSubgroveRequest {
     pub public_key_id: String,
     pub nonce: u64,
 }
-
-pub use willow_types::storage::types::AppRegistration;
 
 pub use willow_types::storage::types::SubgroveRegistration;
 
@@ -147,7 +136,6 @@ pub enum PermissionRole {
 /// Store data request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoreDataRequest {
-    pub app_id: String,
     pub subgrove_id: String,
     pub key: String,
     pub data: serde_json::Value,
@@ -157,10 +145,10 @@ pub struct StoreDataRequest {
     pub nonce: u64,
 }
 
-/// Fund app request
+/// Fund subgrove request
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FundAppRequest {
-    pub app_id: String,
+pub struct FundSubgroveRequest {
+    pub subgrove_id: String,
     pub amount: u128,
     pub from_did: String,
     pub signature: Vec<u8>,
@@ -206,11 +194,11 @@ pub struct BalanceInfo {
     pub locked: u128,
 }
 
-/// Balance information for an application
+/// Balance information for a subgrove
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AppBalanceInfo {
-    /// Application ID
-    pub app_id: String,
+pub struct SubgroveBalanceInfo {
+    /// Subgrove ID
+    pub subgrove_id: String,
     /// Available balance
     pub balance: u128,
     /// Total amount spent
@@ -542,13 +530,13 @@ pub struct VerifyProofResponse {
 pub struct DidPermissions {
     /// DID this refers to
     pub did: String,
-    /// Apps where this DID is owner
-    pub owned_apps: Vec<String>,
-    /// Apps where this DID is admin
-    pub admin_apps: Vec<String>,
-    /// Apps/subgroves where this DID has write access
+    /// Subgroves where this DID is owner
+    pub owned_subgroves: Vec<String>,
+    /// Subgroves where this DID is admin
+    pub admin_subgroves: Vec<String>,
+    /// Subgroves where this DID has write access
     pub write_access: Vec<String>,
-    /// Apps/subgroves where this DID has read access
+    /// Subgroves where this DID has read access
     pub read_access: Vec<String>,
 }
 

@@ -21,13 +21,11 @@ pub struct RegisterDidTx {
     pub nonce: u64,
 }
 
-pub use willow_types::consensus::transactions::RegisterAppTx;
-
 pub use willow_types::consensus::indexing_transactions::RetentionWindow;
 
 pub use willow_types::consensus::indexing_transactions::SubgroveMode;
 pub use willow_types::consensus::transactions::{
-    DeleteDataTx, FundAppTx, RegisterSubgroveTx, TransferTx,
+    DeleteDataTx, FundSubgroveTx, RegisterSubgroveTx, TransferTx,
 };
 
 /// CometBFT RPC response
@@ -124,51 +122,6 @@ impl ConsensusClient {
         };
 
         let tx_json = Self::serialize_tx("RegisterDid", &register_tx)?;
-        self.submit_transaction(&tx_json).await
-    }
-
-    /// Register an app through consensus
-    pub async fn register_app(
-        &self,
-        app_id: &str,
-        name: &str,
-        description: &str,
-        owner_did: &str,
-        admins: Vec<String>,
-        private_key_hex: &str,
-        public_key_id: &str,
-        algorithm: SignatureAlgorithm,
-        initial_funding: Option<u128>,
-    ) -> Result<String> {
-        let nonce = self.get_next_nonce(owner_did).await?;
-        let mut app_message = format!(
-            "RegisterApp\nID: {}\nName: {}\nDescription: {}\nOwner: {}\nAdmins: {}\nNonce: {}",
-            app_id, name, description, owner_did, admins.join(","), nonce
-        );
-        if let Some(amount) = initial_funding {
-            if amount > 0 {
-                app_message.push_str(&format!("\nFunding: {}", amount));
-            }
-        }
-
-        // Sign the message
-        let signature_hex = sign_challenge(&app_message, private_key_hex, algorithm)?;
-        let signature_bytes = hex::decode(signature_hex)?;
-
-        // Create transaction
-        let register_tx = RegisterAppTx {
-            app_id: app_id.to_string(),
-            name: name.to_string(),
-            description: description.to_string(),
-            owner_did: owner_did.to_string(),
-            admins,
-            initial_funding,
-            signature: signature_bytes,
-            public_key_id: public_key_id.to_string(),
-            nonce,
-        };
-
-        let tx_json = Self::serialize_tx("RegisterApp", &register_tx)?;
         self.submit_transaction(&tx_json).await
     }
 
@@ -363,12 +316,13 @@ impl ConsensusClient {
 
         // Build canonical sign message based on mode
         let message = format!(
-            "RegisterSubgrove\nID: {}\nApp: {}\nName: {}\nSchemaHash: {}\nOwner: {}\nWriters: {}\nReaders: {}\nNonce: {}",
+            "RegisterSubgrove\nID: {}\nName: {}\nDescription: {}\nSchemaHash: {}\nOwner: {}\nAdmins: {}\nWriters: {}\nReaders: {}\nNonce: {}",
             request.subgrove_id,
-            request.app_id,
             request.name,
+            request.description,
             schema_hash_hex,
             request.owner_did,
+            request.admins.join(","),
             request.writers.join(","),
             request.readers.join(","),
             request.nonce
@@ -381,9 +335,12 @@ impl ConsensusClient {
         // Create transaction with DataStorage mode (SDK default)
         let register_tx = RegisterSubgroveTx {
             subgrove_id: request.subgrove_id.clone(),
-            app_id: request.app_id.clone(),
+            name: request.name.clone(),
+            description: request.description.clone(),
             schema: schema_json,
             owner_did: request.owner_did.clone(),
+            admins: request.admins.clone(),
+            initial_funding: request.initial_funding,
             mode: SubgroveMode::DataStorage {
                 name: request.name.clone(),
                 writers: request.writers.clone(),
@@ -408,7 +365,6 @@ impl ConsensusClient {
     pub async fn register_file_subgrove(
         &self,
         subgrove_id: &str,
-        app_id: &str,
         name: &str,
         owner_did: &str,
         writers: Vec<String>,
@@ -427,8 +383,8 @@ impl ConsensusClient {
         let schema_hash_hex = hex::encode(hasher.finalize());
 
         let message = format!(
-            "RegisterSubgrove\nID: {}\nApp: {}\nMode: FileStorage\nName: {}\nSchemaHash: {}\nOwner: {}\nWriters: {}\nReaders: {}\nNonce: {}",
-            subgrove_id, app_id, name, schema_hash_hex, owner_did,
+            "RegisterSubgrove\nID: {}\nMode: FileStorage\nName: {}\nDescription: \nSchemaHash: {}\nOwner: {}\nAdmins: \nWriters: {}\nReaders: {}\nNonce: {}",
+            subgrove_id, name, schema_hash_hex, owner_did,
             writers.join(","), readers.join(","), nonce
         );
 
@@ -436,9 +392,12 @@ impl ConsensusClient {
 
         let register_tx = RegisterSubgroveTx {
             subgrove_id: subgrove_id.to_string(),
-            app_id: app_id.to_string(),
+            name: name.to_string(),
+            description: String::new(),
             schema: schema_json.to_string(),
             owner_did: owner_did.to_string(),
+            admins: vec![],
+            initial_funding: None,
             mode: SubgroveMode::FileStorage {
                 name: name.to_string(),
                 max_file_size,
@@ -478,11 +437,9 @@ impl ConsensusClient {
     /// let signing_key = ed25519_dalek::SigningKey::from_bytes(&key_bytes);
     /// let tx_hash = client.register_blockchain_subgrove(
     ///     &def,
-    ///     "my-app",
     ///     "did:willow:owner",
     ///     "did:willow:owner#key-1",
     ///     &signing_key,
-    ///     1,
     /// ).await?;
     /// # Ok(())
     /// # }
@@ -490,17 +447,15 @@ impl ConsensusClient {
     pub async fn register_blockchain_subgrove(
         &self,
         definition: &crate::subgrove_config::SubgroveDefinition,
-        app_id: &str,
         owner_did: &str,
         public_key_id: &str,
         signing_key: &SigningKey,
     ) -> Result<String> {
         let nonce = self.get_next_nonce(owner_did).await?;
-        let payload = definition.signing_payload(app_id, owner_did, nonce);
+        let payload = definition.signing_payload(owner_did, nonce);
         let signature = signing_key.sign(payload.as_bytes());
 
         let tx_json = definition.to_register_transaction(
-            app_id,
             owner_did,
             public_key_id,
             signature.to_bytes().to_vec(),
@@ -520,8 +475,8 @@ impl ConsensusClient {
         let data_json =
             serde_json::to_string(&request.data).map_err(|e| WillowError::Serialization(e))?;
         let message = format!(
-            "{}:{}:{}:{}",
-            request.app_id, request.subgrove_id, request.key, data_json
+            "{}:{}:{}",
+            request.subgrove_id, request.key, data_json
         );
 
         // Sign the message
@@ -535,7 +490,6 @@ impl ConsensusClient {
     /// Delete data using SigningKey
     pub async fn delete_data(
         &self,
-        app_id: &str,
         subgrove_id: &str,
         key: &str,
         owner_did: &str,
@@ -543,11 +497,10 @@ impl ConsensusClient {
         signing_key: &SigningKey,
     ) -> Result<String> {
         let nonce = self.get_next_nonce(owner_did).await?;
-        let message = format!("DeleteData:{}:{}:{}", app_id, subgrove_id, key);
+        let message = format!("DeleteData:{}:{}", subgrove_id, key);
         let signature = signing_key.sign(message.as_bytes());
 
         let delete_tx = DeleteDataTx {
-            app_id: app_id.to_string(),
             subgrove_id: subgrove_id.to_string(),
             key: key.to_string(),
             owner_did: owner_did.to_string(),
@@ -559,30 +512,30 @@ impl ConsensusClient {
         self.submit_transaction(&tx_json).await
     }
 
-    /// Fund an app using SigningKey
-    pub async fn fund_app(
+    /// Fund a subgrove using SigningKey
+    pub async fn fund_subgrove(
         &self,
-        mut request: crate::types::FundAppRequest,
+        mut request: crate::types::FundSubgroveRequest,
         signing_key: &SigningKey,
     ) -> Result<String> {
         request.nonce = self.get_next_nonce(&request.from_did).await?;
         let signing_payload = format!(
-            "FundApp:{}:{}:{}:{}",
-            request.app_id, request.amount, request.from_did, request.nonce
+            "FundSubgrove\nSubgrove: {}\nAmount: {}\nFrom: {}\nNonce: {}",
+            request.subgrove_id, request.amount, request.from_did, request.nonce
         );
 
         // Sign with Ed25519 key
         let signature = signing_key.sign(signing_payload.as_bytes());
 
-        let fund_tx = FundAppTx {
-            app_id: request.app_id,
+        let fund_tx = FundSubgroveTx {
+            subgrove_id: request.subgrove_id,
             amount: request.amount,
             from_did: request.from_did,
             signature: signature.to_bytes().to_vec(),
             public_key_id: request.public_key_id,
             nonce: request.nonce,
         };
-        let tx_json = Self::serialize_tx("FundApp", &fund_tx)?;
+        let tx_json = Self::serialize_tx("FundSubgrove", &fund_tx)?;
         self.submit_transaction(&tx_json).await
     }
 
@@ -678,34 +631,15 @@ mod tests {
     }
 
     #[test]
-    fn test_register_app_tx_serialization() {
-        let tx = RegisterAppTx {
-            app_id: "test-app".to_string(),
-            name: "Test App".to_string(),
-            description: "A test application".to_string(),
-            owner_did: "did:willow:owner".to_string(),
-            admins: vec!["did:willow:admin".to_string()],
-            initial_funding: None,
-            signature: vec![4, 5, 6],
-            public_key_id: "did:willow:owner#key-1".to_string(),
-            nonce: 2,
-        };
-
-        let json = serde_json::to_string(&tx).unwrap();
-        let deserialized: RegisterAppTx = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(tx.app_id, deserialized.app_id);
-        assert_eq!(tx.name, deserialized.name);
-        assert_eq!(tx.admins, deserialized.admins);
-    }
-
-    #[test]
     fn test_register_subgrove_tx_serialization() {
         let tx = RegisterSubgroveTx {
             subgrove_id: "test-subgrove".to_string(),
-            app_id: "test-app".to_string(),
+            name: "Test Subgrove".to_string(),
+            description: "A test subgrove".to_string(),
             schema: r#"{"type":"object"}"#.to_string(),
             owner_did: "did:willow:owner".to_string(),
+            admins: vec![],
+            initial_funding: None,
             mode: SubgroveMode::DataStorage {
                 name: "Test Subgrove".to_string(),
                 writers: vec!["did:willow:writer".to_string()],

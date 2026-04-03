@@ -1,16 +1,16 @@
-//! Fund App Example
+//! Fund Subgrove Example
 //!
-//! Funds an application with WILL tokens.
+//! Funds a subgrove with WILL tokens.
 //!
-//! Run with: cargo run --example fund_app
+//! Run with: cargo run --example fund_subgrove
 //!
 //! Prerequisites:
 //! - Local Willow network running (./scripts/start_network.sh)
-//! - An app must already be registered
+//! - A subgrove must already be registered
 //! - Funder DID must have sufficient balance
 
 use ed25519_dalek::SigningKey;
-use willow_sdk::{types::FundAppRequest, WillowClient, DEVNET_VALIDATOR_1};
+use willow_sdk::{types::FundSubgroveRequest, WillowClient, DEVNET_VALIDATOR_1};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -25,8 +25,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let private_key_hex = DEVNET_VALIDATOR_1.private_key;
     let public_key_id = DEVNET_VALIDATOR_1.public_key_id;
 
-    // App to fund (must exist)
-    let app_id = "my-app";
+    // Subgrove to fund (must exist)
+    let subgrove_id = "my-subgrove";
 
     // Amount to fund (in base units, 18 decimals)
     let amount: u128 = 10_000_000_000_000_000_000; // 10 WILL
@@ -48,8 +48,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map_err(|_| "Invalid key length")?,
     );
 
-    let request = FundAppRequest {
-        app_id: app_id.to_string(),
+    let request = FundSubgroveRequest {
+        subgrove_id: subgrove_id.to_string(),
         amount,
         from_did: from_did.to_string(),
         signature: vec![],
@@ -57,11 +57,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         nonce,
     };
 
-    println!("Funding app: {}", app_id);
+    println!("Funding subgrove: {}", subgrove_id);
     println!("Amount: {} tokens", amount);
     println!("From: {}", from_did);
 
-    match client.consensus().fund_app(request, &signing_key).await {
+    match client.consensus().fund_subgrove(request, &signing_key).await {
         Ok(tx_hash) => {
             println!("SUCCESS! TX: {}", tx_hash);
             client.consensus().wait_for_transaction(&tx_hash, 5).await?;

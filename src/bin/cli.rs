@@ -49,12 +49,6 @@ enum Commands {
         command: IdentityCommands,
     },
 
-    #[command(about = "Application management")]
-    App {
-        #[command(subcommand)]
-        command: AppCommands,
-    },
-
     #[command(about = "Subgrove management")]
     Subgrove {
         #[command(subcommand)]
@@ -129,57 +123,9 @@ enum IdentityCommands {
 }
 
 #[derive(Subcommand)]
-enum AppCommands {
-    #[command(about = "Register a new application")]
-    Register {
-        #[arg(short, long)]
-        name: String,
-
-        #[arg(short, long)]
-        description: Option<String>,
-
-        #[arg(short = 'i', long)]
-        identity_id: String,
-
-        #[arg(short, long)]
-        private_key: String,
-    },
-
-    #[command(about = "Get application information")]
-    Info {
-        #[arg(short, long)]
-        app_id: String,
-    },
-
-    #[command(about = "List my applications")]
-    List {
-        #[arg(short = 'i', long)]
-        identity_id: String,
-    },
-
-    #[command(about = "Fund an application")]
-    Fund {
-        #[arg(short, long)]
-        app_id: String,
-
-        #[arg(short, long)]
-        amount: u64,
-
-        #[arg(short = 'i', long)]
-        identity_id: String,
-
-        #[arg(short, long)]
-        private_key: String,
-    },
-}
-
-#[derive(Subcommand)]
 enum SubgroveCommands {
     #[command(about = "Register a new subgrove")]
     Register {
-        #[arg(short, long)]
-        app_id: String,
-
         #[arg(short, long)]
         name: String,
 
@@ -196,10 +142,28 @@ enum SubgroveCommands {
     #[command(about = "Get subgrove information")]
     Info {
         #[arg(short, long)]
-        app_id: String,
+        subgrove_name: String,
+    },
+
+    #[command(about = "List subgroves")]
+    List {
+        #[arg(short = 'i', long)]
+        identity_id: String,
+    },
+
+    #[command(about = "Fund a subgrove")]
+    Fund {
+        #[arg(short, long)]
+        subgrove_id: String,
 
         #[arg(short, long)]
-        subgrove_name: String,
+        amount: u64,
+
+        #[arg(short = 'i', long)]
+        identity_id: String,
+
+        #[arg(short, long)]
+        private_key: String,
     },
 }
 
@@ -207,9 +171,6 @@ enum SubgroveCommands {
 enum DataCommands {
     #[command(about = "Get a single item")]
     Get {
-        #[arg(short, long)]
-        app_id: String,
-
         #[arg(short, long)]
         subgrove: String,
 
@@ -222,9 +183,6 @@ enum DataCommands {
 
     #[command(about = "Query items with conditions")]
     Query {
-        #[arg(short, long)]
-        app_id: String,
-
         #[arg(short, long)]
         subgrove: String,
 
@@ -442,7 +400,6 @@ async fn main() -> Result<()> {
         Commands::Identity { command } => {
             handle_identity_command(command, &config, cli.output, cli.config).await?
         }
-        Commands::App { command } => handle_app_command(command, &node_url, cli.output).await?,
         Commands::Subgrove { command } => {
             handle_subgrove_command(command, &node_url, cli.output).await?
         }
@@ -570,101 +527,6 @@ async fn handle_identity_command(
     Ok(())
 }
 
-async fn handle_app_command(
-    command: AppCommands,
-    node_url: &str,
-    format: OutputFormat,
-) -> Result<()> {
-    match command {
-        AppCommands::Register {
-            name,
-            description,
-            identity_id,
-            private_key,
-        } => {
-            let mut client = create_consensus_client(node_url.to_string()).await?;
-
-            // Note: Simplified implementation
-            let result = json!({
-                "app_name": name,
-                "description": description,
-                "message": "Application registration submitted"
-            });
-
-            output_result(result, format);
-        }
-        AppCommands::Info { app_id } => {
-            let client = create_client(node_url.to_string()).await?;
-
-            match client.get_app(&app_id).await {
-                Ok(Some(app)) => {
-                    let result = json!({
-                        "app_id": app_id,
-                        "name": app.name,
-                        "description": app.description,
-                        "owner_id": hex::encode(app.owner_id),
-                        "subgroves": app.subgroves.keys().collect::<Vec<_>>()
-                    });
-                    output_result(result, format);
-                }
-                Ok(None) => {
-                    let result = json!({
-                        "error": "Application not found"
-                    });
-                    output_result(result, format);
-                }
-                Err(e) => {
-                    let result = json!({
-                        "error": format!("Failed to get app info: {}", e)
-                    });
-                    output_result(result, format);
-                }
-            }
-        }
-        AppCommands::List { identity_id } => {
-            let client = create_client(node_url.to_string()).await?;
-
-            let apps = client.list_my_apps().await?;
-
-            let app_list: Vec<Value> = apps
-                .into_iter()
-                .map(|app| {
-                    json!({
-                        "name": app.name,
-                        "description": app.description,
-                        "subgroves": app.subgroves.keys().collect::<Vec<_>>()
-                    })
-                })
-                .collect();
-
-            let result = json!({
-                "apps": app_list,
-                "count": app_list.len()
-            });
-
-            output_result(result, format);
-        }
-        AppCommands::Fund {
-            app_id,
-            amount,
-            identity_id,
-            private_key,
-        } => {
-            let mut client = create_consensus_client(node_url.to_string()).await?;
-
-            let result = json!({
-                "app_id": app_id,
-                "amount": amount,
-                "message": "Application funding submitted"
-            });
-
-            output_result(result, format);
-        }
-    }
-
-    Ok(())
-}
-
 async fn handle_subgrove_command(
     command: SubgroveCommands,
     node_url: &str,
@@ -672,7 +534,6 @@ async fn handle_subgrove_command(
 ) -> Result<()> {
     match command {
         SubgroveCommands::Register {
-            app_id,
             name,
             schema,
             identity_id,
@@ -685,7 +546,6 @@ async fn handle_subgrove_command(
             let schema_json: Value = serde_json::from_str(&schema_content)?;
 
             let result = json!({
-                "app_id": app_id,
                 "subgrove_name": name,
                 "message": "Subgrove registration submitted"
             });
@@ -693,15 +553,13 @@ async fn handle_subgrove_command(
             output_result(result, format);
         }
         SubgroveCommands::Info {
-            app_id,
             subgrove_name,
         } => {
             let client = create_client(node_url.to_string()).await?;
 
-            match client.get_subgrove(&app_id, &subgrove_name).await {
+            match client.get_subgrove(&subgrove_name).await {
                 Ok(Some(subgrove)) => {
                     let result = json!({
-                        "app_id": app_id,
                         "subgrove_name": subgrove_name,
                         "schema": subgrove.schema,
                         "indexes": subgrove.indexes
@@ -722,6 +580,44 @@ async fn handle_subgrove_command(
                 }
             }
         }
+        SubgroveCommands::List { identity_id } => {
+            let client = create_client(node_url.to_string()).await?;
+
+            let subgroves = client.list_subgroves().await.unwrap_or_default();
+
+            let subgrove_list: Vec<Value> = subgroves
+                .into_iter()
+                .map(|sg| {
+                    json!({
+                        "subgrove_id": sg.subgrove_id,
+                        "name": sg.name,
+                    })
+                })
+                .collect();
+
+            let result = json!({
+                "subgroves": subgrove_list,
+                "count": subgrove_list.len()
+            });
+
+            output_result(result, format);
+        }
+        SubgroveCommands::Fund {
+            subgrove_id,
+            amount,
+            identity_id,
+            private_key,
+        } => {
+            let mut client = create_consensus_client(node_url.to_string()).await?;
+
+            let result = json!({
+                "subgrove_id": subgrove_id,
+                "amount": amount,
+                "message": "Subgrove funding submitted"
+            });
+
+            output_result(result, format);
+        }
     }
 
     Ok(())
@@ -734,7 +630,6 @@ async fn handle_data_command(
 ) -> Result<()> {
     match command {
         DataCommands::Get {
-            app_id,
             subgrove,
             key,
             no_verify,
@@ -742,9 +637,9 @@ async fn handle_data_command(
             let client = create_client(node_url.to_string()).await?;
 
             let item = if no_verify {
-                client.get_unverified(&app_id, &subgrove, &key).await?
+                client.get_unverified(&subgrove, &key).await?
             } else {
-                client.get(&app_id, &subgrove, &key).await?
+                client.get(&subgrove, &key).await?
             };
 
             match item {
@@ -765,7 +660,6 @@ async fn handle_data_command(
             }
         }
         DataCommands::Query {
-            app_id,
             subgrove,
             conditions,
             no_verify,
@@ -776,14 +670,13 @@ async fn handle_data_command(
 
             let results = if no_verify {
                 client
-                    .query_unverified(&app_id, &subgrove, conditions_json)
+                    .query_unverified(&subgrove, conditions_json)
                     .await?
             } else {
-                client.query(&app_id, &subgrove, conditions_json).await?
+                client.query(&subgrove, conditions_json).await?
             };
 
             let result = json!({
-                "app_id": app_id,
                 "subgrove": subgrove,
                 "results": results,
                 "count": results.len(),

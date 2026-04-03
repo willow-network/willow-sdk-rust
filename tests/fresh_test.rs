@@ -2,7 +2,6 @@
 
 use ed25519_dalek::SigningKey;
 use serde_json::json;
-use std::fs;
 use std::time::Duration;
 use tokio::time::sleep;
 use willow_sdk::{ConsensusClient, WillowClient};
@@ -15,14 +14,12 @@ async fn fresh_test() {
     println!("Starting fresh network test...");
     println!("This test assumes:");
     println!("- DID is registered (nonce 1)");
-    println!("- App is registered (nonce 2)");
+    println!("- Subgrove is registered (nonce 2)");
     println!("- Network was just restarted");
 
     // Read the funded DID
-    let funded_did = fs::read_to_string("../../tools/app_registrar/app_owner_did.txt")
-        .expect("Funded DID file not found")
-        .trim()
-        .to_string();
+    let funded_did = std::env::var("WILLOW_TEST_DID")
+        .unwrap_or_else(|_| "did:willow:test-owner".to_string());
 
     println!("\nUsing funded DID: {}", funded_did);
 
@@ -59,7 +56,7 @@ async fn fresh_test() {
 
     // Create message to sign
     let message = format!(
-        "RegisterSubgrove\nID: posts\nApp: test_app\nName: Blog Posts\nSchemaHash: {}\nOwner: {}\nWriters: \nReaders: \nNonce: 3",
+        "RegisterSubgrove\nID: posts\nName: Blog Posts\nSchemaHash: {}\nOwner: {}\nWriters: \nReaders: \nNonce: 3",
         schema_hash_hex,
         funded_did
     );
@@ -72,7 +69,7 @@ async fn fresh_test() {
     let transaction = json!({
         "RegisterSubgrove": {
             "subgrove_id": "posts",
-            "app_id": "test_app",
+            
             "name": "Blog Posts",
             "schema": schema_json,
             "owner_did": funded_did.clone(),
@@ -113,12 +110,12 @@ async fn fresh_test() {
     println!("Waiting for subgrove to be fully initialized...");
     sleep(Duration::from_secs(10)).await;
 
-    // Step 2: Fund app (no nonce)
-    println!("\nStep 2: Funding app...");
+    // Step 2: Fund subgrove (no nonce)
+    println!("\nStep 2: Funding subgrove...");
 
     let fund_tx = json!({
-        "FundApp": {
-            "app_id": "test_app",
+        "FundSubgrove": {
+            
             "amount": 10_000_000_000_000_000_000u128,
             "from_did": funded_did.clone(),
             "signature": []
@@ -145,9 +142,9 @@ async fn fresh_test() {
         .unwrap();
 
     let response_text = response.text().await.unwrap();
-    println!("Fund app response: {}", response_text);
+    println!("Fund subgrove response: {}", response_text);
 
-    println!("Waiting for app funding to be processed...");
+    println!("Waiting for subgrove funding to be processed...");
     sleep(Duration::from_secs(10)).await;
 
     // Step 3: Store data with nonce 4
@@ -161,13 +158,13 @@ async fn fresh_test() {
     });
 
     let data_json = serde_json::to_string(&data).unwrap();
-    let message = format!("test_app:posts:post1:{}", data_json);
+    let message = format!("posts:post1:{}", data_json);
 
     let signature = signing_key.sign(message.as_bytes());
 
     let store_tx = json!({
         "StoreData": {
-            "app_id": "test_app",
+            
             "subgrove_id": "posts",
             "key": "post1",
             "data": data,
@@ -214,7 +211,7 @@ async fn fresh_test() {
     );
 
     // Read data
-    match client.data().get("test_app", "posts", "post1").await {
+    match client.data().get("posts", "post1").await {
         Ok(data) => {
             println!("✅ Successfully retrieved data:");
             println!("{}", serde_json::to_string_pretty(&data).unwrap());

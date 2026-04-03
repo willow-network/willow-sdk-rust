@@ -24,7 +24,7 @@
 
 use crate::client::WillowClient;
 use crate::errors::{Result, WillowError};
-use crate::types::{ApiResponse, AppBalanceInfo, BalanceInfo, FeeSchedule, TokenInfo};
+use crate::types::{ApiResponse, SubgroveBalanceInfo, BalanceInfo, FeeSchedule, TokenInfo};
 
 /// Operations for token information and balances.
 pub struct TokenOperations {
@@ -67,15 +67,15 @@ impl TokenOperations {
             .ok_or_else(|| WillowError::NotFound(format!("Balance not found for: {}", did)))
     }
 
-    /// Gets the balance for an application.
+    /// Gets the balance for a subgrove.
     ///
     /// This is a public endpoint and does not require authentication.
-    pub async fn get_app_balance(&self, app_id: &str) -> Result<AppBalanceInfo> {
-        let response: ApiResponse<AppBalanceInfo> = self
+    pub async fn get_subgrove_balance(&self, subgrove_id: &str) -> Result<SubgroveBalanceInfo> {
+        let response: ApiResponse<SubgroveBalanceInfo> = self
             .client
             .request(
                 "GET",
-                &format!("/token/app/balance/{}", app_id),
+                &format!("/token/subgrove/balance/{}", subgrove_id),
                 None::<&()>,
                 false,
             )
@@ -83,7 +83,7 @@ impl TokenOperations {
 
         response
             .data
-            .ok_or_else(|| WillowError::NotFound(format!("App balance not found for: {}", app_id)))
+            .ok_or_else(|| WillowError::NotFound(format!("Subgrove balance not found for: {}", subgrove_id)))
     }
 
     /// Gets the current fee schedule.

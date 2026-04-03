@@ -2,7 +2,6 @@
 
 use ed25519_dalek::SigningKey;
 use serde_json::json;
-use std::fs;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::time::sleep;
 use willow_sdk::{ConsensusClient, WillowClient};
@@ -16,10 +15,8 @@ async fn basic_indexing_test() {
     println!("This test verifies core indexing functionality");
 
     // Read the funded DID
-    let funded_did = fs::read_to_string("../../tools/app_registrar/app_owner_did.txt")
-        .expect("Funded DID file not found")
-        .trim()
-        .to_string();
+    let funded_did = std::env::var("WILLOW_TEST_DID")
+        .unwrap_or_else(|_| "did:willow:test-owner".to_string());
 
     // Generate unique subgrove name with timestamp
     let timestamp = SystemTime::now()
@@ -30,7 +27,7 @@ async fn basic_indexing_test() {
 
     println!("\n📋 Test Configuration:");
     println!("  DID: {}", funded_did);
-    println!("  App: test_app");
+    println!("  Subgrove: test-subgrove");
     println!("  Subgrove: {}", subgrove_name);
 
     let client = WillowClient::new("http://localhost:3031").await.unwrap();
@@ -77,12 +74,11 @@ async fn basic_indexing_test() {
     let register_result = register_subgrove_direct(
         &consensus,
         &subgrove_name,
-        "test_app",
         "Basic Posts Test",
         &schema,
         &funded_did,
         &signing_key,
-        3, // nonce after DID and app registration
+        3, // nonce after DID registration
     )
     .await;
 
@@ -98,11 +94,11 @@ async fn basic_indexing_test() {
     sleep(Duration::from_secs(10)).await;
 
     // Step 2: Fund the app
-    println!("\n💰 Step 2: Funding the app...");
+    println!("\n💰 Step 2: Funding the subgrove...");
 
     let fund_tx = json!({
-        "FundApp": {
-            "app_id": "test_app",
+        "FundSubgrove": {
+            
             "amount": 10_000_000_000_000_000_000u128, // 10 WILL
             "from_did": funded_did.clone(),
             "signature": []
@@ -110,7 +106,7 @@ async fn basic_indexing_test() {
     });
 
     match submit_transaction(&consensus, &fund_tx).await {
-        Ok(tx_hash) => println!("  ✅ App funded: {}", tx_hash),
+        Ok(tx_hash) => println!("  ✅ Subgrove funded: {}", tx_hash),
         Err(e) => println!("  ⚠️  Funding error (may already be funded): {}", e),
     }
 
@@ -164,7 +160,6 @@ async fn basic_indexing_test() {
     for (key, data) in &documents {
         match store_data_direct(
             &consensus,
-            "test_app",
             &subgrove_name,
             key,
             data.clone(),
@@ -198,7 +193,7 @@ async fn basic_indexing_test() {
     let mut failure_count = 0;
 
     for (key, expected_data) in &documents {
-        match client.data().get("test_app", &subgrove_name, key).await {
+        match client.data().get(&subgrove_name, key).await {
             Ok(data) => {
                 // Verify key fields
                 if data["title"] == expected_data["title"]
@@ -233,7 +228,7 @@ async fn basic_indexing_test() {
         "limit": 10
     });
 
-    match client.data().query("test_app", &subgrove_name, query).await {
+    match client.data().query(&subgrove_name, query).await {
         Ok(results) => {
             if results.documents.is_empty() {
                 println!(
@@ -278,7 +273,7 @@ async fn basic_indexing_test() {
 async fn register_subgrove_direct(
     consensus: &ConsensusClient,
     subgrove_id: &str,
-    app_id: &str,
+    
     name: &str,
     schema: &serde_json::Value,
     owner_did: &str,
@@ -298,8 +293,8 @@ async fn register_subgrove_direct(
 
     // Create message to sign
     let message = format!(
-        "RegisterSubgrove\nID: {}\nApp: {}\nName: {}\nSchemaHash: {}\nOwner: {}\nWriters: \nReaders: \nNonce: {}",
-        subgrove_id, app_id, name, schema_hash_hex, owner_did, nonce
+        "RegisterSubgrove\nID: {}\nName: {}\nSchemaHash: {}\nOwner: {}\nWriters: \nReaders: \nNonce: {}",
+        subgrove_id, name, schema_hash_hex, owner_did, nonce
     );
 
     // Sign with Ed25519 key
@@ -309,7 +304,7 @@ async fn register_subgrove_direct(
     let transaction = json!({
         "RegisterSubgrove": {
             "subgrove_id": subgrove_id,
-            "app_id": app_id,
+            
             "name": name,
             "schema": schema_json,
             "owner_did": owner_did,
@@ -327,7 +322,7 @@ async fn register_subgrove_direct(
 // Helper function to store data directly
 async fn store_data_direct(
     consensus: &ConsensusClient,
-    app_id: &str,
+    
     subgrove_id: &str,
     key: &str,
     data: serde_json::Value,
@@ -338,13 +333,13 @@ async fn store_data_direct(
     use ed25519_dalek::Signer;
 
     let data_json = serde_json::to_string(&data)?;
-    let message = format!("{}:{}:{}:{}", app_id, subgrove_id, key, data_json);
+    let message = format!("{}:{}:{}", subgrove_id, key, data_json);
 
     let signature = signing_key.sign(message.as_bytes());
 
     let transaction = json!({
         "StoreData": {
-            "app_id": app_id,
+            
             "subgrove_id": subgrove_id,
             "key": key,
             "data": data,

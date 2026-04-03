@@ -54,7 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ).await?;
 
     // All data operations automatically verify proofs
-    let data = client.data().get("app_id", "dataset_id", "key").await?;
+    let data = client.data().get("dataset_id", "key").await?;
 
     Ok(())
 }
@@ -87,7 +87,7 @@ let client = WillowClient::builder()
     .await?;
 
 // All operations now verified against validator consensus
-let data = client.data().get("app_id", "dataset_id", "key").await?;
+let data = client.data().get("dataset_id", "key").await?;
 ```
 
 ### Persisting Light Client State
@@ -112,10 +112,10 @@ client.light_client().unwrap().import_trusted_state(state).await?;
 
 ```rust
 // Automatically verifies proof against consensus
-let data = client.data().get("app_id", "dataset_id", "key").await?;
+let data = client.data().get("dataset_id", "key").await?;
 
 // Query with automatic proof verification
-let response = client.data().query("app_id", "dataset_id", json!({
+let response = client.data().query("dataset_id", json!({
     "filters": { "status": "active" },
     "limit": 10
 })).await?;
@@ -130,8 +130,8 @@ if let Some(root_hash) = response.verified_root_hash {
 
 ```rust
 // When you trust the node or need maximum performance
-let data = client.data().get_unverified("app_id", "dataset_id", "key").await?;
-let response = client.data().query_unverified("app_id", "dataset_id", query).await?;
+let data = client.data().get_unverified("dataset_id", "key").await?;
+let response = client.data().query_unverified("dataset_id", query).await?;
 ```
 
 ### Store, Update, and Delete Data
@@ -142,7 +142,6 @@ All data writes go through consensus transactions to ensure all nodes maintain c
 use willow_sdk::types::StoreDataRequest;
 
 let request = StoreDataRequest {
-    app_id: "app_id".to_string(),
     subgrove_id: "dataset_id".to_string(),
     key: "key".to_string(),
     data: json!({ "name": "Alice", "score": 100 }),
@@ -224,8 +223,8 @@ println!("Symbol: {}, Max Supply: {}", info.symbol, info.max_supply);
 let balance = client.token().get_balance("did:willow:abc123").await?;
 println!("Balance: {} WILL", balance.balance);
 
-// Check app balance
-let app_balance = client.token().get_app_balance("my-app").await?;
+// Check subgrove balance
+let subgrove_balance = client.token().get_subgrove_balance("my-subgrove").await?;
 
 // Get fee schedule
 let fees = client.token().get_fee_schedule().await?;
@@ -235,26 +234,12 @@ println!("Cost per byte: {} wei", fees.cost_per_byte);
 
 ## Registration
 
-### Register App
+### Register Subgrove
+
+Subgroves are registered via consensus transactions:
 
 ```rust
-use willow_sdk::types::RegisterAppRequest;
-
-let app = client.registration().register_app(RegisterAppRequest {
-    app_id: "my-app".to_string(),
-    name: "My Application".to_string(),
-    description: "Built with Willow".to_string(),
-    app_type: "application".to_string(),
-    owner_did: session.did.clone(),
-    admins: vec![],
-    requires_graph_node: false,
-}).await?;
-```
-
-### Register Dataset
-
-```rust
-use willow_sdk::types::{RegisterDatasetRequest, SchemaDefinition, FieldType};
+use willow_sdk::types::{RegisterSubgroveRequest, SchemaDefinition, FieldType};
 use std::collections::HashMap;
 
 let mut fields = HashMap::new();
@@ -262,21 +247,25 @@ fields.insert("id".to_string(), FieldType::String);
 fields.insert("name".to_string(), FieldType::String);
 fields.insert("balance".to_string(), FieldType::Number);
 
-let dataset = client.registration().register_dataset(RegisterDatasetRequest {
-    dataset_id: "users".to_string(),
-    app_id: "my-app".to_string(),
+let request = RegisterSubgroveRequest {
+    subgrove_id: "users".to_string(),
     name: "Users".to_string(),
-    dataset_path: vec!["data".to_string()],
-    schema: SchemaDefinition {
+    description: "User data collection".to_string(),
+    schema: Some(SchemaDefinition {
         version: 1,
         fields,
-        indexes: vec!["name".to_string()],
+        indexes: vec![],
         required_fields: vec!["id".to_string()],
-    },
-    owner_did: session.did.clone(),
-    writers: vec![session.did.clone()],
+    }),
+    owner_did: did_info.did.clone(),
+    admins: vec![],
+    writers: vec![did_info.did.clone()],
     readers: vec![],
-}).await?;
+    signature: vec![],
+    public_key_id: did_info.public_key_id.clone(),
+    nonce: 1,
+};
+let tx_hash = consensus_client.register_subgrove(request, &signing_key).await?;
 ```
 
 ## Root Hash Verification
@@ -299,7 +288,7 @@ if verified_root != local_root {
 ```rust
 use willow_sdk::{WillowError, Result};
 
-match client.data().get("app", "dataset", "key").await {
+match client.data().get("subgrove", "dataset", "key").await {
     Ok(data) => println!("Data: {}", data),
     Err(WillowError::NotFound(msg)) => println!("Not found: {}", msg),
     Err(WillowError::ProofVerificationFailed(msg)) => {

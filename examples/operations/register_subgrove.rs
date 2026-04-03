@@ -1,6 +1,6 @@
 //! Register Subgrove Example
 //!
-//! Registers a new subgrove (data collection) within an app.
+//! Registers a new subgrove (data collection) in the Willow network.
 //!
 //! Run with: cargo run --example register_subgrove
 //!
@@ -9,7 +9,7 @@
 //! - An app must already be registered
 
 use ed25519_dalek::SigningKey;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use willow_sdk::{
     types::{FieldType, RegisterSubgroveRequest, SchemaDefinition},
     WillowClient, DEVNET_VALIDATOR_1,
@@ -23,13 +23,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let api_url = "http://localhost:3031";
     let consensus_url = "http://localhost:26657";
 
-    // DID to use (must be app owner or admin)
+    // DID to use (must be subgrove owner or admin)
     let owner_did = DEVNET_VALIDATOR_1.did;
     let private_key_hex = DEVNET_VALIDATOR_1.private_key;
     let public_key_id = DEVNET_VALIDATOR_1.public_key_id;
 
     // Subgrove details
-    let app_id = "my-app"; // Must exist - run register_app first
     let subgrove_id = "users";
     let subgrove_name = "Users Collection";
 
@@ -51,14 +50,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Define schema (field name -> field type)
-    let mut fields = HashMap::new();
+    let mut fields = BTreeMap::new();
     fields.insert("name".to_string(), FieldType::String);
     fields.insert("email".to_string(), FieldType::String);
 
     let request = RegisterSubgroveRequest {
         subgrove_id: subgrove_id.to_string(),
-        app_id: app_id.to_string(),
         name: subgrove_name.to_string(),
+        description: String::new(),
         schema: Some(SchemaDefinition {
             version: 1,
             fields,
@@ -66,6 +65,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             indexes: vec![],
         }),
         owner_did: owner_did.to_string(),
+        admins: vec![],
+        initial_funding: None,
         writers: vec![owner_did.to_string()],
         readers: vec![], // empty = public read
         signature: vec![],
@@ -73,7 +74,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         nonce,
     };
 
-    println!("Registering subgrove: {}/{}", app_id, subgrove_id);
+    println!("Registering subgrove: {}", subgrove_id);
 
     match client
         .consensus()

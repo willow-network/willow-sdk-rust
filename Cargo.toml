@@ -86,10 +86,6 @@ name = "register_did"
 path = "examples/operations/register_did.rs"
 
 [[example]]
-name = "register_app"
-path = "examples/operations/register_app.rs"
-
-[[example]]
 name = "register_subgrove"
 path = "examples/operations/register_subgrove.rs"
 
@@ -102,8 +98,8 @@ name = "transfer"
 path = "examples/operations/transfer.rs"
 
 [[example]]
-name = "fund_app"
-path = "examples/operations/fund_app.rs"
+name = "fund_subgrove"
+path = "examples/operations/fund_subgrove.rs"
 
 # Query/read examples
 [[example]]
