@@ -25,7 +25,7 @@ pub use willow_types::consensus::indexing_transactions::RetentionWindow;
 
 pub use willow_types::consensus::indexing_transactions::SubgroveMode;
 pub use willow_types::consensus::transactions::{
-    DeleteDataTx, FundSubgroveTx, RegisterSubgroveTx, TransferTx,
+    DeleteDataTx, DeregisterSubgroveTx, FundSubgroveTx, RegisterSubgroveTx, TransferTx,
 };
 
 /// CometBFT RPC response
@@ -536,6 +536,33 @@ impl ConsensusClient {
             nonce: request.nonce,
         };
         let tx_json = Self::serialize_tx("FundSubgrove", &fund_tx)?;
+        self.submit_transaction(&tx_json).await
+    }
+
+    /// Deregister (delete) a subgrove using SigningKey.
+    ///
+    /// Remaining subgrove funding balance is refunded to the owner.
+    pub async fn deregister_subgrove(
+        &self,
+        mut request: crate::types::DeregisterSubgroveRequest,
+        signing_key: &SigningKey,
+    ) -> Result<String> {
+        request.nonce = self.get_next_nonce(&request.owner_did).await?;
+        let signing_payload = format!(
+            "DeregisterSubgrove:{}:{}:{}",
+            request.subgrove_id, request.owner_did, request.nonce
+        );
+
+        let signature = signing_key.sign(signing_payload.as_bytes());
+
+        let deregister_tx = DeregisterSubgroveTx {
+            subgrove_id: request.subgrove_id,
+            owner_did: request.owner_did,
+            signature: signature.to_bytes().to_vec(),
+            public_key_id: request.public_key_id,
+            nonce: request.nonce,
+        };
+        let tx_json = Self::serialize_tx("DeregisterSubgrove", &deregister_tx)?;
         self.submit_transaction(&tx_json).await
     }
 

@@ -156,6 +156,16 @@ pub struct FundSubgroveRequest {
     pub nonce: u64,
 }
 
+/// Deregister subgrove request
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeregisterSubgroveRequest {
+    pub subgrove_id: String,
+    pub owner_did: String,
+    pub signature: Vec<u8>,
+    pub public_key_id: String,
+    pub nonce: u64,
+}
+
 // ============================================================================
 // Token Types
 // ============================================================================
