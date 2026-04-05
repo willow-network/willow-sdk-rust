@@ -80,7 +80,11 @@ impl WillowClient {
 
     /// Get the current DID, if identity is set.
     pub fn get_did(&self) -> Option<String> {
-        self.identity.read().unwrap().as_ref().map(|i| i.did.clone())
+        self.identity
+            .read()
+            .unwrap()
+            .as_ref()
+            .map(|i| i.did.clone())
     }
 
     /// Clear the current identity.
@@ -98,7 +102,7 @@ impl WillowClient {
     }
 
     /// Sign a request and return the headers map.
-    fn sign_request(&self, method: &str, path: &str) -> Option<Vec<(String, String)>> {
+    pub(crate) fn sign_request(&self, method: &str, path: &str) -> Option<Vec<(String, String)>> {
         let identity_lock = self.identity.read().unwrap();
         let identity = identity_lock.as_ref()?;
 
@@ -109,11 +113,15 @@ impl WillowClient {
             .to_string();
         let message = format!("{}:{}:{}", method, path, timestamp);
 
-        let signature = sign_challenge(&message, &identity.private_key_hex, identity.algorithm).ok()?;
+        let signature =
+            sign_challenge(&message, &identity.private_key_hex, identity.algorithm).ok()?;
 
         Some(vec![
             ("X-DID".to_string(), identity.did.clone()),
-            ("X-Public-Key-ID".to_string(), identity.public_key_id.clone()),
+            (
+                "X-Public-Key-ID".to_string(),
+                identity.public_key_id.clone(),
+            ),
             ("X-Signature".to_string(), signature),
             ("X-Timestamp".to_string(), timestamp),
         ])
@@ -700,7 +708,10 @@ mod tests {
             "did:willow:Ed25519:abc123#key-1",
         );
         assert!(client.has_identity());
-        assert_eq!(client.get_did(), Some("did:willow:Ed25519:abc123".to_string()));
+        assert_eq!(
+            client.get_did(),
+            Some("did:willow:Ed25519:abc123".to_string())
+        );
 
         client.clear_identity();
         assert!(!client.has_identity());

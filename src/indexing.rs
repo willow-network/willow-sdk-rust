@@ -71,17 +71,21 @@ impl IndexingOperations {
 
         // Route to indexer node when configured, otherwise use the validator API
         let base = self.client.indexer_base_url();
+        let path = format!("graphql/{}", subgrove_id);
         let url = base
-            .join(&format!("graphql/{}", subgrove_id))
+            .join(&path)
             .map_err(|e| WillowError::Config(format!("Invalid URL: {}", e)))?;
 
-        let http_resp = self
-            .client
-            .http_client
-            .post(url)
-            .json(&request)
-            .send()
-            .await?;
+        let mut req_builder = self.client.http_client.post(url).json(&request);
+
+        // Add authentication headers
+        if let Some(headers) = self.client.sign_request("POST", &format!("/{}", path)) {
+            for (key, value) in headers {
+                req_builder = req_builder.header(&key, &value);
+            }
+        }
+
+        let http_resp = req_builder.send().await?;
 
         let status = http_resp.status();
         let text = http_resp.text().await?;
@@ -92,8 +96,8 @@ impl IndexingOperations {
                 return Ok(direct);
             }
             // Fall back to ApiResponse wrapper (validator returns this format)
-            let api: ApiResponse<GraphQLResponse> = serde_json::from_str(&text)
-                .map_err(|e| WillowError::Serialization(e))?;
+            let api: ApiResponse<GraphQLResponse> =
+                serde_json::from_str(&text).map_err(|e| WillowError::Serialization(e))?;
             api.data
                 .ok_or_else(|| WillowError::Custom("No data in GraphQL response".to_string()))
         } else {
