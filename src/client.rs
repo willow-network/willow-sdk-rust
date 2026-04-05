@@ -33,8 +33,10 @@ struct ClientIdentity {
 /// Main client for interacting with Willow
 #[derive(Clone)]
 pub struct WillowClient {
-    http_client: Client,
+    pub(crate) http_client: Client,
     base_url: Url,
+    /// Optional indexer URL for routing GraphQL/SQL queries to an indexer node.
+    indexer_url: Option<Url>,
     identity: Arc<RwLock<Option<ClientIdentity>>>,
     retry_config: RetryConfig,
     #[cfg(not(feature = "no-light-client"))]
@@ -201,6 +203,14 @@ impl WillowClient {
     /// Get validator operations
     pub fn validators(&self) -> ValidatorOperations {
         ValidatorOperations::new(self.clone())
+    }
+
+    /// Returns the indexer base URL if configured, otherwise the validator API base URL.
+    ///
+    /// Used by indexing operations to route GraphQL/SQL queries to an indexer node
+    /// when `indexer_url` is set on the client builder.
+    pub fn indexer_base_url(&self) -> &Url {
+        self.indexer_url.as_ref().unwrap_or(&self.base_url)
     }
 
     /// Get indexing operations (GraphQL, subgroves)
@@ -438,6 +448,7 @@ impl WillowClient {
 pub struct WillowClientBuilder {
     api_url: Option<String>,
     consensus_url: Option<String>,
+    indexer_url: Option<String>,
     timeout: Duration,
     retry_config: RetryConfig,
     #[cfg(not(feature = "no-light-client"))]
@@ -449,6 +460,7 @@ impl Default for WillowClientBuilder {
         Self {
             api_url: None,
             consensus_url: None,
+            indexer_url: None,
             timeout: Duration::from_secs(30),
             retry_config: RetryConfig::default(),
             #[cfg(not(feature = "no-light-client"))]
@@ -485,6 +497,31 @@ impl WillowClientBuilder {
     /// ```
     pub fn consensus_url(mut self, url: &str) -> Self {
         self.consensus_url = Some(url.to_string());
+        self
+    }
+
+    /// Set an optional indexer node URL.
+    ///
+    /// When set, GraphQL and SQL queries are routed to this indexer node
+    /// instead of the validator API. This enables querying indexed data
+    /// directly from a decentralized indexer.
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// use willow_sdk::WillowClient;
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    ///     let client = WillowClient::builder()
+    ///         .api_url("http://localhost:3031")
+    ///         .indexer_url("http://localhost:8090")
+    ///         .build()
+    ///         .await?;
+    ///     Ok(())
+    /// }
+    /// ```
+    pub fn indexer_url(mut self, url: &str) -> Self {
+        self.indexer_url = Some(url.to_string());
         self
     }
 
@@ -531,6 +568,12 @@ impl WillowClientBuilder {
 
         let base_url = parse_api_url(&api_url)?;
 
+        // Parse optional indexer URL
+        let indexer_url = self
+            .indexer_url
+            .map(|url| parse_api_url(&url))
+            .transpose()?;
+
         let http_client = Client::builder()
             .timeout(self.timeout)
             .build()
@@ -552,6 +595,7 @@ impl WillowClientBuilder {
         Ok(WillowClient {
             http_client,
             base_url,
+            indexer_url,
             identity: Arc::new(RwLock::new(None)),
             retry_config: self.retry_config,
             #[cfg(not(feature = "no-light-client"))]

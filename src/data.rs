@@ -234,6 +234,9 @@ impl DataOperations {
 
     /// Execute a SQL query against a subgrove.
     ///
+    /// When an `indexer_url` is configured on the client, the query is routed
+    /// to the indexer node. Otherwise it falls back to the validator API.
+    ///
     /// Works with both DataStorage and BlockchainIndexing subgroves.
     /// For DataStorage, the table name in FROM is ignored — all documents
     /// are the dataset. Standard SQL: WHERE, ORDER BY, LIMIT, OFFSET,
@@ -250,14 +253,31 @@ impl DataOperations {
             include_proof: None,
         };
 
-        self.client
-            .request(
-                "POST",
-                &format!("/sql/{}", subgrove_id),
-                Some(&request),
-                true,
-            )
-            .await
+        // Route to indexer node when configured, otherwise use the validator API
+        let base = self.client.indexer_base_url();
+        let url = base
+            .join(&format!("sql/{}", subgrove_id))
+            .map_err(|e| WillowError::Config(format!("Invalid URL: {}", e)))?;
+
+        let http_resp = self
+            .client
+            .http_client
+            .post(url)
+            .json(&request)
+            .send()
+            .await?;
+
+        let status = http_resp.status();
+        let text = http_resp.text().await?;
+
+        if status.is_success() {
+            serde_json::from_str(&text).map_err(|e| WillowError::Serialization(e))
+        } else {
+            Err(WillowError::Http {
+                status: status.as_u16(),
+                message: text,
+            })
+        }
     }
 
     /// Query items without proof verification for performance-critical cases

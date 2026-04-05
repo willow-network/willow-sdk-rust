@@ -30,8 +30,8 @@
 use crate::client::WillowClient;
 use crate::errors::{Result, WillowError};
 use crate::types::{
-    ApiResponse, GraphQLRequest, GraphQLResponse, IndexerInfo, SqlRequest, SqlResponse,
-    SubgroveIndexingStatus, SubgroveInfo, VerificationStats,
+    ApiResponse, GraphQLRequest, GraphQLResponse, IndexerInfo, SubgroveIndexingStatus,
+    SubgroveInfo, VerificationStats,
 };
 
 /// Operations for interacting with indexed blockchain data.
@@ -45,6 +45,9 @@ impl IndexingOperations {
     }
 
     /// Executes a GraphQL query against an indexed subgrove.
+    ///
+    /// When an `indexer_url` is configured on the client, the query is routed
+    /// to the indexer node. Otherwise it falls back to the validator API.
     ///
     /// # Arguments
     ///
@@ -66,19 +69,39 @@ impl IndexingOperations {
             variables,
         };
 
-        let response: ApiResponse<GraphQLResponse> = self
+        // Route to indexer node when configured, otherwise use the validator API
+        let base = self.client.indexer_base_url();
+        let url = base
+            .join(&format!("graphql/{}", subgrove_id))
+            .map_err(|e| WillowError::Config(format!("Invalid URL: {}", e)))?;
+
+        let http_resp = self
             .client
-            .request(
-                "POST",
-                &format!("/graphql/{}", subgrove_id),
-                Some(&request),
-                false, // GraphQL queries don't require auth
-            )
+            .http_client
+            .post(url)
+            .json(&request)
+            .send()
             .await?;
 
-        response
-            .data
-            .ok_or_else(|| WillowError::Custom("No data in GraphQL response".to_string()))
+        let status = http_resp.status();
+        let text = http_resp.text().await?;
+
+        if status.is_success() {
+            // Try direct GraphQL response first (indexer returns this format)
+            if let Ok(direct) = serde_json::from_str::<GraphQLResponse>(&text) {
+                return Ok(direct);
+            }
+            // Fall back to ApiResponse wrapper (validator returns this format)
+            let api: ApiResponse<GraphQLResponse> = serde_json::from_str(&text)
+                .map_err(|e| WillowError::Serialization(e))?;
+            api.data
+                .ok_or_else(|| WillowError::Custom("No data in GraphQL response".to_string()))
+        } else {
+            Err(WillowError::Http {
+                status: status.as_u16(),
+                message: text,
+            })
+        }
     }
 
     /// Lists all available subgroves.
