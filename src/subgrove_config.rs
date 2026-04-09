@@ -251,6 +251,7 @@ impl SubgroveDefinition {
         public_key_id: &str,
         signature: Vec<u8>,
         nonce: u64,
+        initial_funding: Option<u128>,
     ) -> String {
         use willow_types::consensus::transactions::RegisterSubgroveTx;
         use willow_types::consensus::indexing_transactions::{
@@ -285,7 +286,7 @@ impl SubgroveDefinition {
             schema: self.schema.clone(),
             owner_did: owner_did.to_string(),
             admins: vec![],
-            initial_funding: None,
+            initial_funding,
             mode: SubgroveMode::BlockchainIndexing {
                 manifest_content,
                 wasm_modules: vec![],
@@ -395,6 +396,7 @@ handler = "handleSwap"
             "did:willow:owner#key-1",
             vec![1, 2, 3],
             1,
+            None,
         );
         let parsed: serde_json::Value = serde_json::from_str(&tx).unwrap();
         let reg = &parsed["RegisterSubgrove"];

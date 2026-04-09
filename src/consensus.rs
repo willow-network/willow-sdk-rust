@@ -373,6 +373,7 @@ impl ConsensusClient {
         replication_factor: u8,
         public_key_id: &str,
         signing_key: &SigningKey,
+        initial_funding: Option<u128>,
     ) -> Result<String> {
         let nonce = self.get_next_nonce(owner_did).await?;
         use sha3::{Digest, Keccak256};
@@ -397,7 +398,7 @@ impl ConsensusClient {
             schema: schema_json.to_string(),
             owner_did: owner_did.to_string(),
             admins: vec![],
-            initial_funding: None,
+            initial_funding,
             mode: SubgroveMode::FileStorage {
                 name: name.to_string(),
                 max_file_size,
@@ -450,6 +451,7 @@ impl ConsensusClient {
         owner_did: &str,
         public_key_id: &str,
         signing_key: &SigningKey,
+        initial_funding: Option<u128>,
     ) -> Result<String> {
         let nonce = self.get_next_nonce(owner_did).await?;
         let payload = definition.signing_payload(owner_did, nonce);
@@ -460,6 +462,7 @@ impl ConsensusClient {
             public_key_id,
             signature.to_bytes().to_vec(),
             nonce,
+            initial_funding,
         );
 
         self.submit_transaction(&tx_json).await
