@@ -7,6 +7,12 @@
 //! handshake, and delivers each `next` payload to the caller via an
 //! `mpsc::Receiver`.
 //!
+//! On unexpected disconnect the SDK auto-reconnects by default (exponential
+//! backoff, capped). For `SubscribeSource::Indexer` the failing indexer is
+//! evicted from the discovery cache and a different one is tried on the
+//! next attempt, so a dead indexer fails over without caller intervention.
+//! Pass `reconnect: false` on `SubscribeOptions` to opt out.
+//!
 //! See `docs/QUERY_ROUTING.md` for the validator vs indexer trust model.
 //!
 //! # Example
@@ -38,10 +44,13 @@ use crate::indexers::WillowIndexers;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::net::TcpStream;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::protocol::Message;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use url::Url;
 
 /// Which backend to open the subscription WebSocket against.
@@ -62,8 +71,14 @@ impl Default for SubscribeSource {
     }
 }
 
+/// Default initial reconnect delay before the first retry.
+pub const DEFAULT_RECONNECT_BACKOFF: Duration = Duration::from_millis(500);
+/// Default cap on the reconnect backoff. Doubling from the initial value
+/// tops out here.
+pub const DEFAULT_MAX_RECONNECT_BACKOFF: Duration = Duration::from_secs(30);
+
 /// Optional subscription parameters.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct SubscribeOptions {
     /// GraphQL variables passed to the subscription.
     pub variables: Option<serde_json::Value>,
@@ -74,6 +89,45 @@ pub struct SubscribeOptions {
     /// Where to open the WebSocket. Defaults to
     /// [`SubscribeSource::Validator`].
     pub source: SubscribeSource,
+
+    /// Automatically reconnect on unexpected disconnect. Defaults to
+    /// `true`. Set to `false` for the classic "subscription ends on
+    /// close" behavior.
+    ///
+    /// Reconnect-only: messages that were in flight when the socket
+    /// dropped are not replayed, and the new connection may redeliver
+    /// events the old one already emitted. Callers that need
+    /// exactly-once should dedupe by a stable field (e.g., block number
+    /// or entity id) themselves.
+    pub reconnect: bool,
+
+    /// Maximum number of reconnection attempts before giving up.
+    /// `None` (the default) means retry forever.
+    pub max_reconnect_attempts: Option<usize>,
+
+    /// Initial reconnect delay. Doubles on each failed attempt up to
+    /// [`Self::max_reconnect_backoff`]. Default
+    /// [`DEFAULT_RECONNECT_BACKOFF`] (500ms).
+    pub reconnect_backoff: Duration,
+
+    /// Maximum reconnect delay. Default [`DEFAULT_MAX_RECONNECT_BACKOFF`]
+    /// (30 seconds).
+    pub max_reconnect_backoff: Duration,
+}
+
+impl Default for SubscribeOptions {
+    fn default() -> Self {
+        Self {
+            variables: None,
+            operation_name: None,
+            connection_payload: None,
+            source: SubscribeSource::default(),
+            reconnect: true,
+            max_reconnect_attempts: None,
+            reconnect_backoff: DEFAULT_RECONNECT_BACKOFF,
+            max_reconnect_backoff: DEFAULT_MAX_RECONNECT_BACKOFF,
+        }
+    }
 }
 
 /// A single payload pushed by the server over a `next` frame.
@@ -99,14 +153,15 @@ pub struct SubscriptionHandle {
 
 impl SubscriptionHandle {
     /// Await the next payload. Returns `None` when the subscription
-    /// completes (server sent `complete`, connection dropped, or
-    /// [`Self::unsubscribe`] was called).
+    /// completes: server sent `complete`, [`Self::unsubscribe`] was
+    /// called, reconnect is disabled and the connection dropped, or
+    /// `max_reconnect_attempts` was exhausted.
     pub async fn recv(&mut self) -> Option<SubscriptionPayload> {
         self.rx.recv().await
     }
 
-    /// Gracefully close: send `complete` to the server and drop the
-    /// socket. Safe to call multiple times.
+    /// Gracefully close: send `complete` to the server (if connected)
+    /// and drop the socket. Safe to call multiple times.
     pub async fn unsubscribe(&mut self) {
         if let Some(tx) = self.cancel.lock().await.take() {
             let _ = tx.send(()).await;
@@ -147,70 +202,27 @@ impl WillowSubscriptions {
     ///
     /// For `SubscribeSource::Indexer`, the discovery round-trip happens
     /// inside this call; surface errors reach the caller before any
-    /// socket is opened.
+    /// socket is opened. Subsequent reconnects after a disconnect happen
+    /// asynchronously inside the task that backs the handle.
     pub async fn subscribe(
         &self,
         subgrove_id: &str,
         query: &str,
         options: SubscribeOptions,
     ) -> Result<SubscriptionHandle> {
-        let ws_url = self.resolve_ws_url(subgrove_id, options.source).await?;
-        self.open_and_subscribe(ws_url, query, options).await
-    }
+        let (ws_url, initial_indexer_did) = resolve_ws_url(
+            &self.api_url,
+            &self.indexers,
+            subgrove_id,
+            options.source,
+            None, // no indexer to evict on the first attempt
+        )
+        .await?;
 
-    async fn resolve_ws_url(
-        &self,
-        subgrove_id: &str,
-        source: SubscribeSource,
-    ) -> Result<String> {
-        match source {
-            SubscribeSource::Validator => Ok(http_to_ws(self.api_url.as_str()) + "graphql/ws"),
-            SubscribeSource::Indexer => {
-                let candidates = self.indexers.for_subgrove(subgrove_id).await?;
-                if candidates.is_empty() {
-                    return Err(WillowError::Custom(format!(
-                        "No indexer serves subgrove {} — cannot open indexer subscription",
-                        subgrove_id
-                    )));
-                }
-                // Highest-performance candidate. Failover on disconnect is
-                // tracked as follow-up; see QUERY_ROUTING.md.
-                let endpoint = candidates[0]
-                    .effective_query_endpoint()
-                    .trim_end_matches('/')
-                    .to_string();
-                Ok(http_to_ws(&endpoint) + "/graphql/ws")
-            }
-        }
-    }
-
-    async fn open_and_subscribe(
-        &self,
-        ws_url: String,
-        query: &str,
-        options: SubscribeOptions,
-    ) -> Result<SubscriptionHandle> {
-        let request = ws_url
-            .clone()
-            .into_client_request()
-            .map_err(|e| WillowError::Config(format!("Invalid WebSocket URL {}: {}", ws_url, e)))?;
-        // Protocol negotiation happens via the Sec-WebSocket-Protocol
-        // header below — tungstenite's connect_async accepts this on the
-        // client request.
-        let mut request = request;
-        request.headers_mut().insert(
-            "Sec-WebSocket-Protocol",
-            "graphql-transport-ws".parse().unwrap(),
-        );
-
-        let (ws_stream, _) = tokio_tungstenite::connect_async(request)
-            .await
-            .map_err(|e| WillowError::Custom(format!("WebSocket connect failed: {}", e)))?;
-
-        let (payload_tx, payload_rx) = mpsc::channel::<SubscriptionPayload>(64);
-        let (cancel_tx, mut cancel_rx) = mpsc::channel::<()>(1);
-
-        // Use a short ID — only meaningful within this socket's scope.
+        // Stable across reconnects — the graphql-ws `id` is per-socket
+        // but there's no harm in reusing the same string on each new
+        // subscribe frame. The server treats each as a fresh
+        // subscription; filtering on our side stays consistent.
         let sub_id = format!(
             "sub-{}",
             std::time::SystemTime::now()
@@ -219,116 +231,372 @@ impl WillowSubscriptions {
                 .unwrap_or(0)
         );
 
-        let query = query.to_string();
+        // First connect — surface errors to the caller.
+        let initial_stream = connect_and_handshake(&ws_url, &sub_id, query, &options).await?;
 
-        let task = tokio::spawn(async move {
-            let (mut sink, mut stream) = ws_stream.split();
+        let (payload_tx, payload_rx) = mpsc::channel::<SubscriptionPayload>(64);
+        let (cancel_tx, cancel_rx) = mpsc::channel::<()>(1);
 
-            // 1. connection_init
-            let init = serde_json::json!({
-                "type": "connection_init",
-                "payload": options.connection_payload.unwrap_or(serde_json::json!({})),
-            });
-            if sink.send(Message::Text(init.to_string())).await.is_err() {
-                return;
-            }
+        let task_state = TaskState {
+            api_url: self.api_url.clone(),
+            indexers: self.indexers.clone(),
+            subgrove_id: subgrove_id.to_string(),
+            query: query.to_string(),
+            options,
+            sub_id,
+            current_indexer_did: initial_indexer_did,
+            payload_tx,
+            cancel_rx,
+        };
 
-            let mut initialized = false;
-
-            loop {
-                tokio::select! {
-                    _ = cancel_rx.recv() => {
-                        // Caller asked us to stop. Send `complete` if
-                        // we're past the handshake, then drop the socket.
-                        if initialized {
-                            let complete = serde_json::json!({
-                                "type": "complete",
-                                "id": sub_id,
-                            });
-                            let _ = sink.send(Message::Text(complete.to_string())).await;
-                        }
-                        let _ = sink.close().await;
-                        return;
-                    }
-                    frame = stream.next() => {
-                        let Some(Ok(frame)) = frame else {
-                            // Server closed or transport error — drop
-                            // the tx; the receiver will see `None`.
-                            return;
-                        };
-                        let text = match frame {
-                            Message::Text(t) => t,
-                            Message::Close(_) => return,
-                            Message::Ping(p) => {
-                                let _ = sink.send(Message::Pong(p)).await;
-                                continue;
-                            }
-                            _ => continue,
-                        };
-                        let Ok(msg) = serde_json::from_str::<serde_json::Value>(&text) else {
-                            continue;
-                        };
-                        let msg_type = msg.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                        match msg_type {
-                            "connection_ack" => {
-                                initialized = true;
-                                let mut sub_payload = serde_json::json!({ "query": query });
-                                if let Some(v) = &options.variables {
-                                    sub_payload["variables"] = v.clone();
-                                }
-                                if let Some(op) = &options.operation_name {
-                                    sub_payload["operationName"] = serde_json::Value::String(op.clone());
-                                }
-                                let subscribe_msg = serde_json::json!({
-                                    "type": "subscribe",
-                                    "id": sub_id,
-                                    "payload": sub_payload,
-                                });
-                                if sink.send(Message::Text(subscribe_msg.to_string())).await.is_err() {
-                                    return;
-                                }
-                            }
-                            "next" => {
-                                if msg.get("id").and_then(|v| v.as_str()) != Some(sub_id.as_str()) {
-                                    continue;
-                                }
-                                let payload = msg
-                                    .get("payload")
-                                    .cloned()
-                                    .unwrap_or(serde_json::Value::Null);
-                                let parsed: SubscriptionPayload = serde_json::from_value(payload)
-                                    .unwrap_or(SubscriptionPayload {
-                                        data: None,
-                                        errors: None,
-                                    });
-                                if payload_tx.send(parsed).await.is_err() {
-                                    // Receiver dropped — nothing more to deliver.
-                                    return;
-                                }
-                            }
-                            "complete" => {
-                                if msg.get("id").and_then(|v| v.as_str()) == Some(sub_id.as_str()) {
-                                    return;
-                                }
-                            }
-                            "ping" => {
-                                let pong = serde_json::json!({ "type": "pong" });
-                                let _ = sink.send(Message::Text(pong.to_string())).await;
-                            }
-                            _ => {
-                                // Ignore unknown message types.
-                            }
-                        }
-                    }
-                }
-            }
-        });
+        let task = tokio::spawn(subscription_loop(initial_stream, task_state));
 
         Ok(SubscriptionHandle {
             rx: payload_rx,
             cancel: Arc::new(Mutex::new(Some(cancel_tx))),
             task: Some(task),
         })
+    }
+}
+
+// ── Internal state & loop ────────────────────────────────────────────
+
+struct TaskState {
+    api_url: Url,
+    indexers: WillowIndexers,
+    subgrove_id: String,
+    query: String,
+    options: SubscribeOptions,
+    sub_id: String,
+    /// DID of the indexer we're currently connected to, if any. Used to
+    /// evict from the discovery cache on reconnect so the failover picks
+    /// a different indexer.
+    current_indexer_did: Option<String>,
+    payload_tx: mpsc::Sender<SubscriptionPayload>,
+    cancel_rx: mpsc::Receiver<()>,
+}
+
+type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
+
+/// Outcome of pumping a single socket until it's done.
+enum PumpExit {
+    /// Caller-initiated stop. Send `complete`, close, exit task.
+    Cancelled,
+    /// Server sent a `complete` frame for our subscription ID. Definitive
+    /// end — don't reconnect.
+    ServerComplete,
+    /// Socket closed or transport errored. Candidate for reconnect.
+    ///
+    /// `delivered_payload` reflects whether we saw at least one `next`
+    /// frame before the drop. It gates whether the reconnect-loop should
+    /// reset its attempt counter: resetting only after real data flow
+    /// (rather than after a bare handshake) stops a server that accepts
+    /// connections but immediately drops them from driving an infinite
+    /// reconnect loop.
+    Disconnected { delivered_payload: bool },
+}
+
+/// The task entry point: pumps the current socket, then reconnects as
+/// long as options and attempt counters allow.
+async fn subscription_loop(initial_stream: WsStream, mut state: TaskState) {
+    let mut current_stream = Some(initial_stream);
+    let mut attempts: usize = 0;
+    let max_attempts = state.options.max_reconnect_attempts.unwrap_or(usize::MAX);
+
+    loop {
+        // Pump the current socket if we have one.
+        if let Some(stream) = current_stream.take() {
+            let exit = pump_socket(stream, &mut state).await;
+            match exit {
+                PumpExit::Cancelled | PumpExit::ServerComplete => return,
+                PumpExit::Disconnected { delivered_payload } => {
+                    // Reset the attempt counter only if we saw real
+                    // data this round. Otherwise a server accepting
+                    // connections and immediately dropping them would
+                    // loop forever at attempts=0 (each reconnect
+                    // resetting before any payload arrives).
+                    if delivered_payload {
+                        attempts = 0;
+                    }
+                }
+            }
+        }
+
+        if !state.options.reconnect {
+            return;
+        }
+        if attempts >= max_attempts {
+            return;
+        }
+        attempts += 1;
+
+        // Exponential backoff, capped. `attempts` is 1-indexed so the
+        // first retry uses `reconnect_backoff` (no doubling yet).
+        let delay = std::cmp::min(
+            state
+                .options
+                .reconnect_backoff
+                .saturating_mul(1u32 << (attempts - 1).min(30)),
+            state.options.max_reconnect_backoff,
+        );
+
+        // Sleep, watching for cancel so unsubscribe() during the backoff
+        // cuts the retry cleanly.
+        tokio::select! {
+            _ = tokio::time::sleep(delay) => {}
+            _ = state.cancel_rx.recv() => return,
+        }
+
+        // Resolve a new endpoint. Passing the current DID tells the
+        // helper to evict that indexer from discovery first, so we
+        // fail over to a different one when multiple are registered.
+        let resolve = resolve_ws_url(
+            &state.api_url,
+            &state.indexers,
+            &state.subgrove_id,
+            state.options.source,
+            state.current_indexer_did.as_deref(),
+        )
+        .await;
+
+        let (ws_url, new_did) = match resolve {
+            Ok(r) => r,
+            Err(_) => {
+                // Discovery failed (validator unreachable, empty list,
+                // etc.). Keep retrying — `attempts` increments each
+                // iteration so we'll eventually honor
+                // `max_reconnect_attempts`.
+                continue;
+            }
+        };
+
+        match connect_and_handshake(&ws_url, &state.sub_id, &state.query, &state.options).await {
+            Ok(stream) => {
+                // Connection + handshake succeeded; data-flow determines
+                // whether to reset the attempt counter. See
+                // `PumpExit::Disconnected.delivered_payload`.
+                state.current_indexer_did = new_did;
+                current_stream = Some(stream);
+            }
+            Err(_) => {
+                // Connect / handshake failed. Back off and retry.
+                continue;
+            }
+        }
+    }
+}
+
+/// Resolve the WebSocket URL for a given source. For indexer mode,
+/// optionally evicts `skip_indexer_did` from the discovery cache first
+/// — pass this on reconnect to fail over to a different indexer.
+///
+/// Returns `(ws_url, maybe_indexer_did)`. The `indexer_did` is `Some`
+/// iff the source is `Indexer` and the resolve succeeded.
+async fn resolve_ws_url(
+    api_url: &Url,
+    indexers: &WillowIndexers,
+    subgrove_id: &str,
+    source: SubscribeSource,
+    skip_indexer_did: Option<&str>,
+) -> Result<(String, Option<String>)> {
+    match source {
+        SubscribeSource::Validator => Ok((http_to_ws(api_url.as_str()) + "graphql/ws", None)),
+        SubscribeSource::Indexer => {
+            if let Some(did) = skip_indexer_did {
+                indexers.evict(did);
+            }
+            let candidates = indexers.for_subgrove(subgrove_id).await?;
+            if candidates.is_empty() {
+                return Err(WillowError::Custom(format!(
+                    "No indexer serves subgrove {} — cannot open indexer subscription",
+                    subgrove_id
+                )));
+            }
+            let chosen = &candidates[0];
+            let did = chosen.indexer_did.clone();
+            let endpoint = chosen
+                .effective_query_endpoint()
+                .trim_end_matches('/')
+                .to_string();
+            Ok((http_to_ws(&endpoint) + "/graphql/ws", Some(did)))
+        }
+    }
+}
+
+/// Dial the WebSocket, send `connection_init`, wait for `connection_ack`,
+/// send `subscribe`. Returns the ready-to-pump stream on success.
+async fn connect_and_handshake(
+    ws_url: &str,
+    sub_id: &str,
+    query: &str,
+    options: &SubscribeOptions,
+) -> Result<WsStream> {
+    let mut request = ws_url
+        .to_string()
+        .into_client_request()
+        .map_err(|e| WillowError::Config(format!("Invalid WebSocket URL {}: {}", ws_url, e)))?;
+    request.headers_mut().insert(
+        "Sec-WebSocket-Protocol",
+        "graphql-transport-ws".parse().unwrap(),
+    );
+
+    let (mut ws_stream, _) = tokio_tungstenite::connect_async(request)
+        .await
+        .map_err(|e| WillowError::Custom(format!("WebSocket connect failed: {}", e)))?;
+
+    // connection_init
+    let init = serde_json::json!({
+        "type": "connection_init",
+        "payload": options.connection_payload.clone().unwrap_or(serde_json::json!({})),
+    });
+    ws_stream
+        .send(Message::Text(init.to_string()))
+        .await
+        .map_err(|e| WillowError::Custom(format!("send connection_init: {}", e)))?;
+
+    // Wait for connection_ack. Tolerate ping/pong during handshake.
+    loop {
+        let frame = ws_stream
+            .next()
+            .await
+            .ok_or_else(|| WillowError::Custom("socket closed during handshake".to_string()))?
+            .map_err(|e| WillowError::Custom(format!("read during handshake: {}", e)))?;
+
+        let text = match frame {
+            Message::Text(t) => t,
+            Message::Ping(p) => {
+                let _ = ws_stream.send(Message::Pong(p)).await;
+                continue;
+            }
+            Message::Close(_) => {
+                return Err(WillowError::Custom(
+                    "server closed during handshake".to_string(),
+                ));
+            }
+            _ => continue,
+        };
+
+        let Ok(msg) = serde_json::from_str::<serde_json::Value>(&text) else {
+            continue;
+        };
+        match msg.get("type").and_then(|v| v.as_str()) {
+            Some("connection_ack") => break,
+            Some("ping") => {
+                let pong = serde_json::json!({ "type": "pong" });
+                let _ = ws_stream.send(Message::Text(pong.to_string())).await;
+            }
+            Some("connection_error") => {
+                return Err(WillowError::Custom(format!(
+                    "server refused connection: {:?}",
+                    msg.get("payload")
+                )));
+            }
+            _ => continue,
+        }
+    }
+
+    // subscribe
+    let mut sub_payload = serde_json::json!({ "query": query });
+    if let Some(v) = &options.variables {
+        sub_payload["variables"] = v.clone();
+    }
+    if let Some(op) = &options.operation_name {
+        sub_payload["operationName"] = serde_json::Value::String(op.clone());
+    }
+    let subscribe_msg = serde_json::json!({
+        "type": "subscribe",
+        "id": sub_id,
+        "payload": sub_payload,
+    });
+    ws_stream
+        .send(Message::Text(subscribe_msg.to_string()))
+        .await
+        .map_err(|e| WillowError::Custom(format!("send subscribe: {}", e)))?;
+
+    Ok(ws_stream)
+}
+
+/// Read frames from a single socket until cancel / server complete /
+/// transport close. Delivers `next` frames to `state.payload_tx` and
+/// transparently responds to `ping` / `connection_ack`.
+async fn pump_socket(stream: WsStream, state: &mut TaskState) -> PumpExit {
+    let (mut sink, mut read) = stream.split();
+    let mut delivered_payload = false;
+
+    loop {
+        tokio::select! {
+            _ = state.cancel_rx.recv() => {
+                // Send `complete` if the server is still listening,
+                // then close.
+                let complete = serde_json::json!({
+                    "type": "complete",
+                    "id": state.sub_id,
+                });
+                let _ = sink.send(Message::Text(complete.to_string())).await;
+                let _ = sink.close().await;
+                return PumpExit::Cancelled;
+            }
+            frame = read.next() => {
+                let Some(frame) = frame else {
+                    return PumpExit::Disconnected { delivered_payload };
+                };
+                let Ok(frame) = frame else {
+                    return PumpExit::Disconnected { delivered_payload };
+                };
+                let text = match frame {
+                    Message::Text(t) => t,
+                    Message::Close(_) => return PumpExit::Disconnected { delivered_payload },
+                    Message::Ping(p) => {
+                        let _ = sink.send(Message::Pong(p)).await;
+                        continue;
+                    }
+                    _ => continue,
+                };
+                let Ok(msg) = serde_json::from_str::<serde_json::Value>(&text) else {
+                    continue;
+                };
+                let msg_type = msg.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                match msg_type {
+                    "next" => {
+                        if msg.get("id").and_then(|v| v.as_str())
+                            != Some(state.sub_id.as_str())
+                        {
+                            continue;
+                        }
+                        let payload = msg
+                            .get("payload")
+                            .cloned()
+                            .unwrap_or(serde_json::Value::Null);
+                        let parsed: SubscriptionPayload = serde_json::from_value(payload)
+                            .unwrap_or(SubscriptionPayload {
+                                data: None,
+                                errors: None,
+                            });
+                        if state.payload_tx.send(parsed).await.is_err() {
+                            // Receiver dropped — end the subscription
+                            // outright (no reconnect) since there's no
+                            // consumer.
+                            return PumpExit::Cancelled;
+                        }
+                        delivered_payload = true;
+                    }
+                    "complete" => {
+                        if msg.get("id").and_then(|v| v.as_str())
+                            == Some(state.sub_id.as_str())
+                        {
+                            return PumpExit::ServerComplete;
+                        }
+                    }
+                    "ping" => {
+                        let pong = serde_json::json!({ "type": "pong" });
+                        let _ = sink.send(Message::Text(pong.to_string())).await;
+                    }
+                    _ => {
+                        // Ignore unknown message types.
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -373,6 +641,15 @@ mod tests {
     #[test]
     fn subscribe_source_default_is_validator() {
         assert_eq!(SubscribeSource::default(), SubscribeSource::Validator);
+    }
+
+    #[test]
+    fn subscribe_options_defaults_enable_reconnect() {
+        let opts = SubscribeOptions::default();
+        assert!(opts.reconnect);
+        assert!(opts.max_reconnect_attempts.is_none());
+        assert_eq!(opts.reconnect_backoff, DEFAULT_RECONNECT_BACKOFF);
+        assert_eq!(opts.max_reconnect_backoff, DEFAULT_MAX_RECONNECT_BACKOFF);
     }
 
     #[test]
