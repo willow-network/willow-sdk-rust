@@ -75,6 +75,7 @@ pub mod errors;
 pub mod files;
 pub mod indexers;
 pub mod indexing;
+pub mod subscriptions;
 pub mod light_client;
 pub mod privacy;
 pub mod proof;
@@ -93,6 +94,10 @@ pub use data::{
 pub use errors::{Result, WillowError};
 pub use indexers::{QuerySource, RoutedQueryResult, ServedBy, WillowIndexers};
 pub use indexing::IndexingOperations;
+pub use subscriptions::{
+    SubscribeOptions, SubscribeSource, SubscriptionHandle, SubscriptionPayload,
+    WillowSubscriptions,
+};
 #[cfg(not(feature = "no-light-client"))]
 pub use light_client::{
     LightClient, LightClientConfig, LightClientConfigBuilder, TrustedHeader, TrustedState,

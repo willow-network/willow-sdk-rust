@@ -13,6 +13,10 @@ categories = ["web-programming", "cryptography"]
 # HTTP client
 reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
 
+# WebSocket client for GraphQL subscriptions over graphql-transport-ws
+tokio-tungstenite = { version = "0.21", features = ["rustls-tls-native-roots"] }
+futures-util = "0.3"
+
 # Async runtime
 tokio = { version = "1.35", features = ["full"] }
 
