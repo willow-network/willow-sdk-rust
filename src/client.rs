@@ -4,6 +4,7 @@ use crate::auth::{detect_algorithm_from_did, sign_challenge};
 use crate::consensus::ConsensusClient;
 use crate::data::DataOperations;
 use crate::errors::{Result, WillowError};
+use crate::indexers::WillowIndexers;
 use crate::indexing::IndexingOperations;
 #[cfg(not(feature = "no-light-client"))]
 use crate::light_client::{LightClient, LightClientConfig};
@@ -37,6 +38,9 @@ pub struct WillowClient {
     base_url: Url,
     /// Optional indexer URL for routing GraphQL/SQL queries to an indexer node.
     indexer_url: Option<Url>,
+    /// Indexer discovery client. Normal callers use the source-routed query
+    /// methods on `indexing()` / `data()` — this is surfaced for listing.
+    indexers: WillowIndexers,
     identity: Arc<RwLock<Option<ClientIdentity>>>,
     retry_config: RetryConfig,
     #[cfg(not(feature = "no-light-client"))]
@@ -219,6 +223,21 @@ impl WillowClient {
     /// when `indexer_url` is set on the client builder.
     pub fn indexer_base_url(&self) -> &Url {
         self.indexer_url.as_ref().unwrap_or(&self.base_url)
+    }
+
+    /// Returns the validator API base URL (unchanged regardless of indexer config).
+    pub(crate) fn validator_base_url(&self) -> &Url {
+        &self.base_url
+    }
+
+    /// Access the indexer discovery client.
+    ///
+    /// When the client was built without `indexer_url`, calls `GET /indexers`
+    /// on the validator with a 30-second cache. When `indexer_url` was set
+    /// explicitly, discovery is bypassed and a synthetic single-entry list
+    /// is returned.
+    pub fn indexers(&self) -> &WillowIndexers {
+        &self.indexers
     }
 
     /// Get indexing operations (GraphQL, subgroves)
@@ -600,10 +619,14 @@ impl WillowClientBuilder {
             .consensus_url
             .map(|url| Arc::new(ConsensusClient::new_with_api(&url, base_url.as_str())));
 
+        let indexers =
+            WillowIndexers::new(http_client.clone(), base_url.clone(), indexer_url.clone());
+
         Ok(WillowClient {
             http_client,
             base_url,
             indexer_url,
+            indexers,
             identity: Arc::new(RwLock::new(None)),
             retry_config: self.retry_config,
             #[cfg(not(feature = "no-light-client"))]

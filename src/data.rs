@@ -234,8 +234,9 @@ impl DataOperations {
 
     /// Execute a SQL query against a subgrove.
     ///
-    /// When an `indexer_url` is configured on the client, the query is routed
-    /// to the indexer node. Otherwise it falls back to the validator API.
+    /// Legacy signature: targets [`WillowClient::indexer_base_url`] — the
+    /// explicit `indexer_url` override if set, else the validator. For
+    /// source-routed queries use [`Self::sql_with_source`].
     ///
     /// Works with both DataStorage and BlockchainIndexing subgroves.
     /// For DataStorage, the table name in FROM is ignored — all documents
@@ -253,7 +254,6 @@ impl DataOperations {
             include_proof: None,
         };
 
-        // Route to indexer node when configured, otherwise use the validator API
         let base = self.client.indexer_base_url();
         let url = base
             .join(&format!("sql/{}", subgrove_id))
@@ -271,13 +271,40 @@ impl DataOperations {
         let text = http_resp.text().await?;
 
         if status.is_success() {
-            serde_json::from_str(&text).map_err(|e| WillowError::Serialization(e))
+            serde_json::from_str(&text).map_err(WillowError::Serialization)
         } else {
             Err(WillowError::Http {
                 status: status.as_u16(),
                 message: text,
             })
         }
+    }
+
+    /// Execute a SQL query with explicit source selection.
+    ///
+    /// See [`crate::indexers::QuerySource`] for the routing semantics.
+    /// The returned [`crate::indexers::RoutedQueryResult`] tells the caller
+    /// which backend actually served the query.
+    pub async fn sql_with_source(
+        &self,
+        subgrove_id: &str,
+        query: &str,
+        source: crate::indexers::QuerySource,
+    ) -> Result<crate::indexers::RoutedQueryResult<crate::types::SqlResponse>> {
+        self.ensure_authenticated()?;
+
+        let request = crate::types::SqlRequest {
+            query: query.to_string(),
+            include_proof: None,
+        };
+
+        // The shared routing helper lives on IndexingOperations so both
+        // `graphql_query_with_source` and `sql_with_source` go through the
+        // same code path — single source of truth for the routing behaviour.
+        self.client
+            .indexing()
+            .route("sql", subgrove_id, &request, source)
+            .await
     }
 
     /// Query items without proof verification for performance-critical cases

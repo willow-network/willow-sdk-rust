@@ -73,6 +73,7 @@ pub mod data;
 pub mod erc8004;
 pub mod errors;
 pub mod files;
+pub mod indexers;
 pub mod indexing;
 pub mod light_client;
 pub mod privacy;
@@ -90,6 +91,7 @@ pub use data::{
     CheckpointInfo, DataOperations, HistoricalQueryRequest, HistoricalQueryResponse, QueryResponse,
 };
 pub use errors::{Result, WillowError};
+pub use indexers::{QuerySource, RoutedQueryResult, ServedBy, WillowIndexers};
 pub use indexing::IndexingOperations;
 #[cfg(not(feature = "no-light-client"))]
 pub use light_client::{

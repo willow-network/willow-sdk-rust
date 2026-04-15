@@ -430,14 +430,27 @@ pub struct IndexerInfo {
     pub subgroves: Vec<String>,
     /// Total staked amount
     pub stake_amount: u128,
-    /// Query endpoint URL
+    /// Monitoring / health endpoint (historically also used for queries).
     pub endpoint: String,
+    /// Optional dedicated endpoint for client query traffic
+    /// (GraphQL/SQL/historical). When absent, callers fall back to `endpoint`.
+    /// See [`IndexerInfo::effective_query_endpoint`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query_endpoint: Option<String>,
     /// Current status
     pub status: IndexerStatus,
     /// Performance score (0.0 - 100.0)
     pub performance_score: f64,
     /// Last update timestamp
     pub last_update: u64,
+}
+
+impl IndexerInfo {
+    /// URL clients should POST GraphQL/SQL queries to. Prefers
+    /// `query_endpoint` when set; falls back to `endpoint` otherwise.
+    pub fn effective_query_endpoint(&self) -> &str {
+        self.query_endpoint.as_deref().unwrap_or(&self.endpoint)
+    }
 }
 
 /// Indexer status
