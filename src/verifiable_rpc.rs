@@ -307,13 +307,28 @@ fn verify_gkr_proof(proof: &GkrProofData, expected_state_root: [u8; 32]) -> Resu
 
 /// Full-GKR verification dispatch.
 ///
-/// With the `verifiable-rpc-full` feature: deserializes the embedded
-/// circuit for `proof.verification_key_hash` and runs the real
-/// `GkrVerifierImpl::verify` via `willow-gkr-verify::full`.
+/// Routing precedence (first matching cfg wins):
 ///
-/// Without the feature: returns a precise "full verify not compiled in"
-/// error so callers can decide whether to drop to `VerifyMode::GroveDbOnly`.
-#[cfg(feature = "verifiable-rpc-full")]
+///  1. `verifiable-rpc-pure` — pure-Rust verifier
+///     (`willow-gkr-verify-pure`), no Expander in the dep graph,
+///     compiles to `wasm32-unknown-unknown`. Same cryptographic
+///     guarantees as the native path; cross-validated byte-for-byte
+///     against Expander via fixtures.
+///  2. `verifiable-rpc-full` — native Expander verifier via
+///     `willow-gkr-verify::full`. Fastest on desktops/servers;
+///     drags in several MB of C-FFI dependencies.
+///  3. Neither → return a precise "not compiled in" error.
+#[cfg(feature = "verifiable-rpc-pure")]
+fn verify_full(proof: &GkrProofData) -> Result<()> {
+    willow_gkr_verify_pure::verify_full_proof_with_registry(
+        &proof.proof,
+        &proof.public_inputs,
+        proof.verification_key_hash,
+    )
+    .map_err(|e| WillowError::ProofVerificationFailed(e.to_string()))
+}
+
+#[cfg(all(feature = "verifiable-rpc-full", not(feature = "verifiable-rpc-pure")))]
 fn verify_full(proof: &GkrProofData) -> Result<()> {
     let circuit_bytes = willow_gkr_verify::get_circuit_bytes(&proof.verification_key_hash)
         .ok_or_else(|| {
@@ -334,13 +349,14 @@ fn verify_full(proof: &GkrProofData) -> Result<()> {
     .map_err(|e| WillowError::ProofVerificationFailed(e.to_string()))
 }
 
-#[cfg(not(feature = "verifiable-rpc-full"))]
+#[cfg(not(any(feature = "verifiable-rpc-full", feature = "verifiable-rpc-pure")))]
 fn verify_full(_proof: &GkrProofData) -> Result<()> {
     Err(WillowError::ProofVerificationFailed(
         "indexer returned a GKR_PROOF_FULL proof; enable the \
-         `verifiable-rpc-full` cargo feature on the SDK to verify it, \
+         `verifiable-rpc-full` (native) or `verifiable-rpc-pure` \
+         (wasm-friendly) cargo feature on the SDK to verify it, \
          or use VerifyMode::GroveDbOnly and anchor state_root via \
-         consensus. See docs/todo/proposal-gkr-verify-crate.md."
+         consensus. See docs/todo/proposal-pure-rust-verifier.md."
             .into(),
     ))
 }

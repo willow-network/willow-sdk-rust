@@ -4059,6 +4059,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "willow-gkr-verify-pure"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "log",
+ "sha2",
+ "sha3",
+ "subtle",
+ "thiserror 1.0.69",
+ "willow-gkr-verify",
+ "willow-types",
+]
+
+[[package]]
 name = "willow-sdk"
 version = "0.1.0"
 dependencies = [
@@ -4094,6 +4108,7 @@ dependencies = [
  "url",
  "uuid",
  "willow-gkr-verify",
+ "willow-gkr-verify-pure",
  "willow-types",
  "wiremock",
  "x25519-dalek",

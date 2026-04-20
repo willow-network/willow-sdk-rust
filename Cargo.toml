@@ -69,6 +69,13 @@ willow-types = { path = "../../crates/types" }
 # this file (keep in sync with the workspace root Cargo.toml).
 willow-gkr-verify = { path = "../../crates/gkr-verify", optional = true }
 
+# Pure-Rust full-soundness GKR verifier. No Expander in the dep graph,
+# so compiles cleanly to wasm32-unknown-unknown. Enabled via the
+# `verifiable-rpc-pure` feature; mutually exclusive with
+# `verifiable-rpc-full` at runtime (pure takes precedence when both
+# are on — the native Expander backend then becomes dead code).
+willow-gkr-verify-pure = { path = "../../crates/gkr-verify-pure", optional = true }
+
 # Light client dependencies - uses grovedb verify feature for lightweight proof verification
 # These are included by default for trustless verification
 grovedb = { version = "3.1.0", default-features = false, features = ["verify"] }
@@ -98,6 +105,17 @@ verifiable-rpc = ["dep:willow-gkr-verify"]
 # clients need Phase 2+ permissionless trust over the Phase 1 hosted-
 # service trust model. See docs/todo/proposal-gkr-verify-crate.md.
 verifiable-rpc-full = ["verifiable-rpc", "willow-gkr-verify/full"]
+# Full-soundness GKR verification via the pure-Rust port
+# (`willow-gkr-verify-pure`). Same guarantees as `verifiable-rpc-full`
+# but no Expander transitive deps — the whole stack (Fiat-Shamir
+# transcript, M31/M31Ext3 field math, GKR sumcheck, Orion PCS opening)
+# is hand-rolled in pure Rust. Target audience: browser + mobile
+# clients that can't compile the Expander C-FFI dependencies.
+verifiable-rpc-pure = [
+    "verifiable-rpc",
+    "dep:willow-gkr-verify-pure",
+    "willow-gkr-verify/registry",
+]
 
 [[bin]]
 name = "willow-cli"
