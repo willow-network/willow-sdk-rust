@@ -3,6 +3,12 @@
 version = 4
 
 [[package]]
+name = "adler2"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
+
+[[package]]
 name = "aead"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -95,7 +101,7 @@ checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
 [[package]]
 name = "arith"
 version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=884c6cc971374fb10ddbfad17ac824090aafe95a#884c6cc971374fb10ddbfad17ac824090aafe95a"
+source = "git+https://github.com/willow-network/Expander?rev=274e2f4d9d59344ba80be2b3a853e1a4d53819bb#274e2f4d9d59344ba80be2b3a853e1a4d53819bb"
 dependencies = [
  "ark-std",
  "criterion",
@@ -199,7 +205,7 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 [[package]]
 name = "babybear"
 version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=884c6cc971374fb10ddbfad17ac824090aafe95a#884c6cc971374fb10ddbfad17ac824090aafe95a"
+source = "git+https://github.com/willow-network/Expander?rev=274e2f4d9d59344ba80be2b3a853e1a4d53819bb#274e2f4d9d59344ba80be2b3a853e1a4d53819bb"
 dependencies = [
  "arith",
  "ark-std",
@@ -481,7 +487,7 @@ dependencies = [
 [[package]]
 name = "circuit"
 version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=884c6cc971374fb10ddbfad17ac824090aafe95a#884c6cc971374fb10ddbfad17ac824090aafe95a"
+source = "git+https://github.com/willow-network/Expander?rev=274e2f4d9d59344ba80be2b3a853e1a4d53819bb#274e2f4d9d59344ba80be2b3a853e1a4d53819bb"
 dependencies = [
  "arith",
  "ark-std",
@@ -566,7 +572,7 @@ dependencies = [
 [[package]]
 name = "config_macros"
 version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=884c6cc971374fb10ddbfad17ac824090aafe95a#884c6cc971374fb10ddbfad17ac824090aafe95a"
+source = "git+https://github.com/willow-network/Expander?rev=274e2f4d9d59344ba80be2b3a853e1a4d53819bb#274e2f4d9d59344ba80be2b3a853e1a4d53819bb"
 dependencies = [
  "gkr_engine",
  "gkr_hashers",
@@ -627,6 +633,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "crc32fast"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9481c1c90cbf2ac953f07c8d4a58aa3945c425b7185c9154d67a65e4230da511"
+dependencies = [
+ "cfg-if",
 ]
 
 [[package]]
@@ -985,6 +1000,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a3076410a55c90011c298b04d0cfa770b00fa04e1e3c97d3f6c9de105a03844"
 
 [[package]]
+name = "flate2"
+version = "1.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "843fba2746e448b37e26a819579957415c8cef339bf08564fe8b7ddbd959573c"
+dependencies = [
+ "crc32fast",
+ "miniz_oxide",
+]
+
+[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1158,8 +1183,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "335ff9f135e4384c8150d6f27c6daed433577f86b4750418338c01a1a2528592"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "wasi 0.11.1+wasi-snapshot-preview1",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -1177,7 +1204,7 @@ dependencies = [
 [[package]]
 name = "gf2"
 version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=884c6cc971374fb10ddbfad17ac824090aafe95a#884c6cc971374fb10ddbfad17ac824090aafe95a"
+source = "git+https://github.com/willow-network/Expander?rev=274e2f4d9d59344ba80be2b3a853e1a4d53819bb#274e2f4d9d59344ba80be2b3a853e1a4d53819bb"
 dependencies = [
  "arith",
  "ark-std",
@@ -1194,7 +1221,7 @@ dependencies = [
 [[package]]
 name = "gf2_128"
 version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=884c6cc971374fb10ddbfad17ac824090aafe95a#884c6cc971374fb10ddbfad17ac824090aafe95a"
+source = "git+https://github.com/willow-network/Expander?rev=274e2f4d9d59344ba80be2b3a853e1a4d53819bb#274e2f4d9d59344ba80be2b3a853e1a4d53819bb"
 dependencies = [
  "arith",
  "ark-std",
@@ -1207,7 +1234,7 @@ dependencies = [
 [[package]]
 name = "gkr"
 version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=884c6cc971374fb10ddbfad17ac824090aafe95a#884c6cc971374fb10ddbfad17ac824090aafe95a"
+source = "git+https://github.com/willow-network/Expander?rev=274e2f4d9d59344ba80be2b3a853e1a4d53819bb#274e2f4d9d59344ba80be2b3a853e1a4d53819bb"
 dependencies = [
  "arith",
  "ark-std",
@@ -1240,7 +1267,7 @@ dependencies = [
 [[package]]
 name = "gkr_engine"
 version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=884c6cc971374fb10ddbfad17ac824090aafe95a#884c6cc971374fb10ddbfad17ac824090aafe95a"
+source = "git+https://github.com/willow-network/Expander?rev=274e2f4d9d59344ba80be2b3a853e1a4d53819bb#274e2f4d9d59344ba80be2b3a853e1a4d53819bb"
 dependencies = [
  "arith",
  "babybear",
@@ -1260,7 +1287,7 @@ dependencies = [
 [[package]]
 name = "gkr_hashers"
 version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=884c6cc971374fb10ddbfad17ac824090aafe95a#884c6cc971374fb10ddbfad17ac824090aafe95a"
+source = "git+https://github.com/willow-network/Expander?rev=274e2f4d9d59344ba80be2b3a853e1a4d53819bb#274e2f4d9d59344ba80be2b3a853e1a4d53819bb"
 dependencies = [
  "arith",
  "halo2curves",
@@ -1278,7 +1305,7 @@ checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 [[package]]
 name = "goldilocks"
 version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=884c6cc971374fb10ddbfad17ac824090aafe95a#884c6cc971374fb10ddbfad17ac824090aafe95a"
+source = "git+https://github.com/willow-network/Expander?rev=274e2f4d9d59344ba80be2b3a853e1a4d53819bb#274e2f4d9d59344ba80be2b3a853e1a4d53819bb"
 dependencies = [
  "arith",
  "ark-std",
@@ -2074,7 +2101,7 @@ checksum = "f52b00d39961fc5b2736ea853c9cc86238e165017a493d1d5c8eac6bdc4cc273"
 [[package]]
 name = "mersenne31"
 version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=884c6cc971374fb10ddbfad17ac824090aafe95a#884c6cc971374fb10ddbfad17ac824090aafe95a"
+source = "git+https://github.com/willow-network/Expander?rev=274e2f4d9d59344ba80be2b3a853e1a4d53819bb#274e2f4d9d59344ba80be2b3a853e1a4d53819bb"
 dependencies = [
  "arith",
  "ark-std",
@@ -2100,6 +2127,16 @@ name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
+
+[[package]]
+name = "miniz_oxide"
+version = "0.8.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1fa76a2c86f704bdb222d66965fb3d63269ce38518b83cb0575fca855ebb6316"
+dependencies = [
+ "adler2",
+ "simd-adler32",
+]
 
 [[package]]
 name = "mio"
@@ -2410,7 +2447,7 @@ dependencies = [
 [[package]]
 name = "poly_commit"
 version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=884c6cc971374fb10ddbfad17ac824090aafe95a#884c6cc971374fb10ddbfad17ac824090aafe95a"
+source = "git+https://github.com/willow-network/Expander?rev=274e2f4d9d59344ba80be2b3a853e1a4d53819bb#274e2f4d9d59344ba80be2b3a853e1a4d53819bb"
 dependencies = [
  "arith",
  "ark-std",
@@ -2435,7 +2472,7 @@ dependencies = [
 [[package]]
 name = "polynomials"
 version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=884c6cc971374fb10ddbfad17ac824090aafe95a#884c6cc971374fb10ddbfad17ac824090aafe95a"
+source = "git+https://github.com/willow-network/Expander?rev=274e2f4d9d59344ba80be2b3a853e1a4d53819bb#274e2f4d9d59344ba80be2b3a853e1a4d53819bb"
 dependencies = [
  "arith",
  "ark-std",
@@ -3085,7 +3122,7 @@ dependencies = [
 [[package]]
 name = "serdes"
 version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=884c6cc971374fb10ddbfad17ac824090aafe95a#884c6cc971374fb10ddbfad17ac824090aafe95a"
+source = "git+https://github.com/willow-network/Expander?rev=274e2f4d9d59344ba80be2b3a853e1a4d53819bb#274e2f4d9d59344ba80be2b3a853e1a4d53819bb"
 dependencies = [
  "ethnum",
  "halo2curves",
@@ -3096,7 +3133,7 @@ dependencies = [
 [[package]]
 name = "serdes_derive"
 version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=884c6cc971374fb10ddbfad17ac824090aafe95a#884c6cc971374fb10ddbfad17ac824090aafe95a"
+source = "git+https://github.com/willow-network/Expander?rev=274e2f4d9d59344ba80be2b3a853e1a4d53819bb#274e2f4d9d59344ba80be2b3a853e1a4d53819bb"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3164,6 +3201,12 @@ checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
 dependencies = [
  "rand_core 0.6.4",
 ]
+
+[[package]]
+name = "simd-adler32"
+version = "0.3.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "703d5c7ef118737c72f1af64ad2f6f8c5e1921f818cdcb97b8fe6fc69bf66214"
 
 [[package]]
 name = "slab"
@@ -3246,7 +3289,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "sumcheck"
 version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=884c6cc971374fb10ddbfad17ac824090aafe95a#884c6cc971374fb10ddbfad17ac824090aafe95a"
+source = "git+https://github.com/willow-network/Expander?rev=274e2f4d9d59344ba80be2b3a853e1a4d53819bb#274e2f4d9d59344ba80be2b3a853e1a4d53819bb"
 dependencies = [
  "arith",
  "circuit",
@@ -3696,7 +3739,7 @@ dependencies = [
 [[package]]
 name = "transcript"
 version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=884c6cc971374fb10ddbfad17ac824090aafe95a#884c6cc971374fb10ddbfad17ac824090aafe95a"
+source = "git+https://github.com/willow-network/Expander?rev=274e2f4d9d59344ba80be2b3a853e1a4d53819bb#274e2f4d9d59344ba80be2b3a853e1a4d53819bb"
 dependencies = [
  "arith",
  "gkr_engine",
@@ -3719,7 +3762,7 @@ dependencies = [
 [[package]]
 name = "tree"
 version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=884c6cc971374fb10ddbfad17ac824090aafe95a#884c6cc971374fb10ddbfad17ac824090aafe95a"
+source = "git+https://github.com/willow-network/Expander?rev=274e2f4d9d59344ba80be2b3a853e1a4d53819bb#274e2f4d9d59344ba80be2b3a853e1a4d53819bb"
 dependencies = [
  "arith",
  "ark-std",
@@ -3834,7 +3877,7 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 [[package]]
 name = "utils"
 version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=884c6cc971374fb10ddbfad17ac824090aafe95a#884c6cc971374fb10ddbfad17ac824090aafe95a"
+source = "git+https://github.com/willow-network/Expander?rev=274e2f4d9d59344ba80be2b3a853e1a4d53819bb#274e2f4d9d59344ba80be2b3a853e1a4d53819bb"
 
 [[package]]
 name = "uuid"
@@ -3998,6 +4041,8 @@ version = "0.1.0"
 dependencies = [
  "arith",
  "circuit",
+ "flate2",
+ "getrandom 0.2.16",
  "gkr",
  "gkr_engine",
  "hex",
@@ -4569,9 +4614,9 @@ dependencies = [
 [[patch.unused]]
 name = "bin"
 version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=884c6cc971374fb10ddbfad17ac824090aafe95a#884c6cc971374fb10ddbfad17ac824090aafe95a"
+source = "git+https://github.com/willow-network/Expander?rev=274e2f4d9d59344ba80be2b3a853e1a4d53819bb#274e2f4d9d59344ba80be2b3a853e1a4d53819bb"
 
 [[patch.unused]]
 name = "crosslayer_prototype"
 version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=884c6cc971374fb10ddbfad17ac824090aafe95a#884c6cc971374fb10ddbfad17ac824090aafe95a"
+source = "git+https://github.com/willow-network/Expander?rev=274e2f4d9d59344ba80be2b3a853e1a4d53819bb#274e2f4d9d59344ba80be2b3a853e1a4d53819bb"
