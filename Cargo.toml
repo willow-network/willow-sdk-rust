@@ -44,7 +44,7 @@ anyhow = "1.0"
 
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }
-uuid = { version = "1.6", features = ["v4", "serde"] }
+uuid = { version = "1.6", features = ["v4", "serde", "js"] }
 url = "2.5"
 base64 = "0.22"
 
@@ -80,6 +80,26 @@ willow-gkr-verify-pure = { path = "../../crates/gkr-verify-pure", optional = tru
 # These are included by default for trustless verification
 grovedb = { version = "3.1.0", default-features = false, features = ["verify"] }
 grovedb-version = "3.1.0"
+
+# On `wasm32-unknown-unknown`, `getrandom` (pulled in transitively
+# via base64 / serde_json / grovedb) needs its `js` feature so it
+# can source entropy from `crypto.getRandomValues`. Without it the
+# build fails with a `compile_error!` inside getrandom itself.
+# Similarly `uuid`'s wasm backend needs its `js` feature —
+# `"v4"` alone isn't sufficient on wasm32.
+#
+# Two `getrandom` versions pinned because the workspace has both
+# major lines in the graph; each emits its own incompatible feature.
+#
+# NB: enabling these is *necessary* for wasm but not *sufficient* —
+# the SDK's native HTTP/WebSocket/tokio-net stack still blocks the
+# full `wasm32-unknown-unknown` build. See
+# docs/todo/proposal-pure-rust-verifier.md for the larger wasm-
+# ification story. For pure verification in browsers today, consume
+# `willow-gkr-verify-pure` directly; it builds clean on wasm.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
 
 [dev-dependencies]
 tokio-test = "0.4"
