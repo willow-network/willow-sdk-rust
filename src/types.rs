@@ -107,6 +107,7 @@ pub struct RegisterSubgroveRequest {
 }
 
 pub use willow_types::storage::types::SubgroveRegistration;
+pub use willow_types::storage::TemplateSubgroveConfig;
 
 /// Generic API response
 #[derive(Debug, Clone, Serialize, Deserialize)]

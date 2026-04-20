@@ -102,6 +102,10 @@ pub struct SubgroveDefinition {
 
     /// Subgraph manifest describing data sources and event handlers.
     pub manifest: ManifestDef,
+
+    /// ZK-template binding for GkrExecution mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub template_config: Option<willow_types::storage::TemplateSubgroveConfig>,
 }
 
 /// Indexer requirements and reward configuration.
@@ -297,6 +301,7 @@ impl SubgroveDefinition {
             checkpoint_verification: Default::default(),
             privacy: None,
             initial_owner_key_grant: None,
+            template_config: self.template_config.clone(),
             signature,
             public_key_id: public_key_id.to_string(),
             nonce,
