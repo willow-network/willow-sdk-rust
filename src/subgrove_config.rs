@@ -297,6 +297,7 @@ impl SubgroveDefinition {
                 execution_mode,
                 indexer_config,
                 retention_window: RetentionWindow::default(),
+                completeness: None,
             },
             checkpoint_verification: Default::default(),
             privacy: None,

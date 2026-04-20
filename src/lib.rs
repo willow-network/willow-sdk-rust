@@ -85,8 +85,12 @@ pub mod token;
 pub mod types;
 pub mod utils;
 pub mod validators;
+#[cfg(feature = "verifiable-rpc")]
+pub mod verifiable_rpc;
 
-pub use client::WillowClient;
+pub use client::{SeenStateRoot, VerifyMode, WillowClient};
+#[cfg(feature = "verifiable-rpc")]
+pub use verifiable_rpc::{VerifiableRpcOperations, VerificationResult, VerifiedAnswer};
 pub use consensus::{ConsensusClient, Transaction};
 pub use data::{
     CheckpointInfo, DataOperations, HistoricalQueryRequest, HistoricalQueryResponse, QueryResponse,

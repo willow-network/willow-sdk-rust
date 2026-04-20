@@ -50,6 +50,54 @@ pub struct WillowClient {
     light_client_once: Arc<OnceCell<Arc<LightClient>>>,
     /// Consensus client for submitting transactions to CometBFT
     consensus_client: Option<Arc<ConsensusClient>>,
+    /// Per-subgrove last-seen state root. Populated by `verifiable_rpc().query()`
+    /// so the client can detect forks or stale state across calls on the
+    /// same session (chain-from-last-seen). Stored on the client so the
+    /// cache survives `VerifiableRpcOperations` going out of scope.
+    pub(crate) state_root_cache: Arc<RwLock<std::collections::HashMap<String, SeenStateRoot>>>,
+    /// Verification policy for verifiable RPC responses.
+    pub(crate) verify_mode: Arc<RwLock<VerifyMode>>,
+}
+
+/// Policy for how strictly the client verifies a verifiable-RPC response.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VerifyMode {
+    /// Require both a valid GKR proof and a valid GroveDB proof. Phase 1
+    /// indexers produce `GKR_PROOF_FULL`, which the SDK's bundled
+    /// verifier cannot yet check (see
+    /// `docs/todo/proposal-gkr-verify-crate.md`). Opt in explicitly when
+    /// your indexer is configured to emit `GKR_PROOF_BINDING_ONLY` or
+    /// after the thin verifier crate lands.
+    Strict,
+    /// Require a GroveDB proof; accept responses without a full GKR
+    /// check. The caller is responsible for anchoring `state_root` some
+    /// other way (e.g., via the consensus light client). Phase 1 default
+    /// because it matches the hosted-service trust model and the SDK's
+    /// lightweight posture.
+    GroveDbOnly,
+    /// Skip verification entirely. Debug/development only — never use in
+    /// production.
+    Disabled,
+}
+
+impl Default for VerifyMode {
+    fn default() -> Self {
+        VerifyMode::GroveDbOnly
+    }
+}
+
+/// Cached record of a state root we've observed for a subgrove.
+///
+/// The client uses this to detect two problems: (1) an indexer that
+/// starts serving a *different* state root for an earlier block range
+/// (fork / rewrite) and (2) responses that advance the state root
+/// backwards (stale indexer serving an old checkpoint).
+#[derive(Debug, Clone)]
+pub struct SeenStateRoot {
+    pub state_root: [u8; 32],
+    pub block_range: (u64, u64),
+    pub checkpoint_id: [u8; 32],
+    pub observed_at_unix_secs: u64,
 }
 
 impl WillowClient {
@@ -247,15 +295,37 @@ impl WillowClient {
     /// the `source` in [`crate::subscriptions::SubscribeOptions`]. See
     /// `docs/QUERY_ROUTING.md` for the source-selection matrix.
     pub fn subscriptions(&self) -> crate::subscriptions::WillowSubscriptions {
-        crate::subscriptions::WillowSubscriptions::new(
-            self.base_url.clone(),
-            self.indexers.clone(),
-        )
+        crate::subscriptions::WillowSubscriptions::new(self.base_url.clone(), self.indexers.clone())
     }
 
     /// Get indexing operations (GraphQL, subgroves)
     pub fn indexing(&self) -> IndexingOperations {
         IndexingOperations::new(self.clone())
+    }
+
+    /// Set the verification policy for verifiable-RPC responses.
+    ///
+    /// Defaults to [`VerifyMode::Strict`]. Use [`VerifyMode::GroveDbOnly`] if
+    /// you anchor state roots via the consensus light client yourself, and
+    /// [`VerifyMode::Disabled`] only for local debugging.
+    pub fn set_verify_mode(&self, mode: VerifyMode) {
+        *self.verify_mode.write().unwrap() = mode;
+    }
+
+    /// Current verification policy.
+    pub fn verify_mode(&self) -> VerifyMode {
+        *self.verify_mode.read().unwrap()
+    }
+
+    /// Get verifiable-RPC operations.
+    ///
+    /// Requires the `verifiable-rpc` cargo feature. Without the feature,
+    /// this method isn't compiled in — attempting to call it will fail to
+    /// build with a clear "method not found" error rather than a runtime
+    /// failure.
+    #[cfg(feature = "verifiable-rpc")]
+    pub fn verifiable_rpc(&self) -> crate::verifiable_rpc::VerifiableRpcOperations {
+        crate::verifiable_rpc::VerifiableRpcOperations::new(self.clone())
     }
 
     /// Get consensus operations for submitting transactions.
@@ -647,6 +717,8 @@ impl WillowClientBuilder {
             #[cfg(not(feature = "no-light-client"))]
             light_client_once: Arc::new(OnceCell::new()),
             consensus_client,
+            state_root_cache: Arc::new(RwLock::new(std::collections::HashMap::new())),
+            verify_mode: Arc::new(RwLock::new(VerifyMode::default())),
         })
     }
 }
