@@ -6,13 +6,12 @@
 //!
 //!  1. **GKR proof** (if present) — confirms the indexer's claimed
 //!     `state_root` is the correct output of transforming committed events.
-//!     Phase 1 of the SDK supports the binding-only proof format
-//!     (`GKR_PROOF_BINDING_ONLY`), which is self-contained and verifiable
-//!     with just SHA-256. Full-soundness GKR proofs (`GKR_PROOF_FULL`)
-//!     require the Expander stack and will be supported in a follow-up
-//!     when a thin verification crate or build patches are in place — for
-//!     now `query()` rejects them in `Strict` mode rather than silently
-//!     passing them.
+//!     Always supports `GKR_PROOF_BINDING_ONLY` (pure SHA-256, no heavy
+//!     deps). With the `verifiable-rpc-full` cargo feature enabled, also
+//!     verifies `GKR_PROOF_FULL` — the SDK embeds the compiled circuit
+//!     bytes at build time via `willow_gkr_verify::circuits` and runs
+//!     the real cryptographic verifier via the `full` feature on the
+//!     thin crate.
 //!  2. **GroveDB Merkle proof** — confirms `answer` is the value at `key`
 //!     in the tree rooted at `state_root`. Verified via GroveDB's
 //!     lightweight verify-only mode (already shipped with the SDK).
@@ -274,10 +273,15 @@ fn verify_grovedb_proof(resp: &VerifiableRpcResponse, key: &[u8]) -> Result<()> 
 /// Verify the GKR proof carried in a verifiable-RPC response.
 ///
 /// Cross-checks the proof's claimed `output_root` against the response's
-/// `state_root`, then routes to `willow-gkr-verify` for the binding-only
-/// path. Full GKR proofs are surfaced as a precise error until the
-/// full-GKR follow-up lands (see
-/// `docs/todo/proposal-gkr-verify-crate.md`).
+/// `state_root`, then routes to `willow-gkr-verify` by format:
+///
+///  - `GKR_PROOF_BINDING_ONLY` → pure-sha2 binding check (always
+///    available).
+///  - `GKR_PROOF_FULL` → full GKR verification via the `full` feature.
+///    Needs the serialized circuit bytes for the proof's circuit
+///    version; those are embedded at compile time (see
+///    `willow_gkr_verify::circuits`). Without the feature, surfaces a
+///    precise "not compiled in" error.
 fn verify_gkr_proof(proof: &GkrProofData, expected_state_root: [u8; 32]) -> Result<()> {
     if proof.public_inputs.output_root != expected_state_root {
         return Err(WillowError::ProofVerificationFailed(format!(
@@ -294,18 +298,51 @@ fn verify_gkr_proof(proof: &GkrProofData, expected_state_root: [u8; 32]) -> Resu
             proof.verification_key_hash,
         )
         .map_err(|e| WillowError::ProofVerificationFailed(e.to_string())),
-        ProofFormat::Full => Err(WillowError::ProofVerificationFailed(
-            "Phase 1 SDK verifies GKR_PROOF_BINDING_ONLY only; the indexer \
-             returned a GKR_PROOF_FULL proof. Configure the indexer to \
-             produce binding-only proofs or wait for the SDK's full-GKR \
-             verifier (planned follow-up; see \
-             docs/todo/proposal-gkr-verify-crate.md)."
-                .into(),
-        )),
+        ProofFormat::Full => verify_full(proof),
         ProofFormat::Unknown => Err(WillowError::ProofVerificationFailed(
             "GKR proof header is not a recognised format".into(),
         )),
     }
+}
+
+/// Full-GKR verification dispatch.
+///
+/// With the `verifiable-rpc-full` feature: deserializes the embedded
+/// circuit for `proof.verification_key_hash` and runs the real
+/// `GkrVerifierImpl::verify` via `willow-gkr-verify::full`.
+///
+/// Without the feature: returns a precise "full verify not compiled in"
+/// error so callers can decide whether to drop to `VerifyMode::GroveDbOnly`.
+#[cfg(feature = "verifiable-rpc-full")]
+fn verify_full(proof: &GkrProofData) -> Result<()> {
+    let circuit_bytes = willow_gkr_verify::get_circuit_bytes(&proof.verification_key_hash)
+        .ok_or_else(|| {
+            WillowError::ProofVerificationFailed(format!(
+                "no embedded circuit for verification_key_hash {}; SDK cannot \
+                 verify full GKR proofs for this circuit — rebuild the SDK \
+                 with an updated willow-gkr-verify after re-exporting",
+                hex::encode(&proof.verification_key_hash[..8])
+            ))
+        })?;
+
+    willow_gkr_verify::verify_full_proof(
+        circuit_bytes,
+        &proof.proof,
+        &proof.public_inputs,
+        proof.verification_key_hash,
+    )
+    .map_err(|e| WillowError::ProofVerificationFailed(e.to_string()))
+}
+
+#[cfg(not(feature = "verifiable-rpc-full"))]
+fn verify_full(_proof: &GkrProofData) -> Result<()> {
+    Err(WillowError::ProofVerificationFailed(
+        "indexer returned a GKR_PROOF_FULL proof; enable the \
+         `verifiable-rpc-full` cargo feature on the SDK to verify it, \
+         or use VerifyMode::GroveDbOnly and anchor state_root via \
+         consensus. See docs/todo/proposal-gkr-verify-crate.md."
+            .into(),
+    ))
 }
 
 #[cfg(test)]
@@ -455,8 +492,12 @@ mod tests {
         assert!(err.to_string().contains("output_root"));
     }
 
+    /// Without the `verifiable-rpc-full` feature, full proofs are
+    /// surfaced with a precise "not compiled in" error so callers can
+    /// decide what to do (drop to GroveDbOnly, recompile, etc.).
+    #[cfg(not(feature = "verifiable-rpc-full"))]
     #[test]
-    fn verify_gkr_proof_rejects_full_format() {
+    fn verify_gkr_proof_rejects_full_format_without_feature() {
         let pi = GkrPublicInputs {
             input_commitment: [1; 32],
             output_root: [2; 32],
@@ -474,9 +515,42 @@ mod tests {
             gpu_accelerated: false,
         };
         let err = verify_gkr_proof(&data, pi.output_root)
-            .expect_err("full proof must be rejected by phase-1 verifier");
-        assert!(err.to_string().contains("Phase 1"));
+            .expect_err("full proof must be rejected when the full feature is off");
         assert!(err.to_string().contains("GKR_PROOF_FULL"));
+        assert!(err.to_string().contains("verifiable-rpc-full"));
+    }
+
+    /// With the full feature on, a full proof with the wrong
+    /// circuit-version hash has no embedded bytes and surfaces a
+    /// "no embedded circuit" error. With a matching hash but garbage
+    /// payload it fails deserialization or cryptographic verification,
+    /// surfacing one of the upstream errors.
+    #[cfg(feature = "verifiable-rpc-full")]
+    #[test]
+    fn verify_gkr_proof_full_feature_rejects_unknown_circuit() {
+        let pi = GkrPublicInputs {
+            input_commitment: [1; 32],
+            output_root: [2; 32],
+            block_range: (0, 1),
+            config_hash: [3; 32],
+        };
+        let mut full_proof = FULL_HEADER.to_vec();
+        full_proof.extend_from_slice(&[0u8; 200]);
+        let data = GkrProofData {
+            proof: full_proof,
+            public_inputs: pi.clone(),
+            verification_key_hash: [0x55; 32], // not an embedded circuit
+            proof_size_bytes: 0,
+            generation_time_ms: 0,
+            gpu_accelerated: false,
+        };
+        let err =
+            verify_gkr_proof(&data, pi.output_root).expect_err("unknown circuit must be rejected");
+        assert!(
+            err.to_string().contains("no embedded circuit"),
+            "unexpected error: {}",
+            err
+        );
     }
 
     #[test]

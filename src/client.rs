@@ -62,18 +62,21 @@ pub struct WillowClient {
 /// Policy for how strictly the client verifies a verifiable-RPC response.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerifyMode {
-    /// Require both a valid GKR proof and a valid GroveDB proof. Phase 1
-    /// indexers produce `GKR_PROOF_FULL`, which the SDK's bundled
-    /// verifier cannot yet check (see
-    /// `docs/todo/proposal-gkr-verify-crate.md`). Opt in explicitly when
-    /// your indexer is configured to emit `GKR_PROOF_BINDING_ONLY` or
-    /// after the thin verifier crate lands.
+    /// Require both a valid GKR proof and a valid GroveDB proof.
+    ///
+    /// Works end-to-end when the SDK is compiled with the
+    /// `verifiable-rpc-full` feature — `GKR_PROOF_FULL` proofs are
+    /// verified against circuit bytes embedded at compile time (see
+    /// `willow_gkr_verify::circuits`). Without that feature, `Strict`
+    /// accepts binding-only proofs only and errors on full proofs with
+    /// a precise message. `GKR_PROOF_BINDING_ONLY` proofs verify under
+    /// either build.
     Strict,
     /// Require a GroveDB proof; accept responses without a full GKR
     /// check. The caller is responsible for anchoring `state_root` some
-    /// other way (e.g., via the consensus light client). Phase 1 default
-    /// because it matches the hosted-service trust model and the SDK's
-    /// lightweight posture.
+    /// other way (e.g., via the consensus light client). The default —
+    /// matches the hosted-service trust model and works under every
+    /// SDK feature combination.
     GroveDbOnly,
     /// Skip verification entirely. Debug/development only — never use in
     /// production.
