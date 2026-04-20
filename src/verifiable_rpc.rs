@@ -48,23 +48,12 @@ use crate::client::{SeenStateRoot, VerifyMode, WillowClient};
 use crate::errors::{Result, WillowError};
 use grovedb::{GroveDb, PathQuery, Query};
 use grovedb_version::version::GroveVersion;
-use sha2::{Digest, Sha256};
 use std::time::{SystemTime, UNIX_EPOCH};
-use willow_types::consensus::indexing_transactions::{GkrProofData, GkrPublicInputs};
+use willow_gkr_verify::{
+    detect_format, verify_binding_only_proof as verify_binding_only, ProofFormat,
+};
+use willow_types::consensus::indexing_transactions::GkrProofData;
 use willow_types::verifiable_rpc::VerifiableRpcResponse;
-
-/// Header bytes prefixing every binding-only proof produced by
-/// `willow-gkr`'s prover (`generate_binding_only_proof`). Kept in sync
-/// with `crates/gkr/src/verifier.rs::verify_binding_proof`.
-const BINDING_HEADER: &[u8] = b"GKR_PROOF_BINDING_ONLY";
-/// Header bytes for full GKR proofs. The SDK's binding-only verifier
-/// recognizes these so it can return a precise error rather than failing
-/// at the format check.
-const FULL_HEADER: &[u8] = b"GKR_PROOF_FULL";
-/// Supported binding-only serialization-format version. Bumped only on
-/// breaking changes to the byte layout — must stay aligned with
-/// `crates/gkr/src/prover.rs`.
-const BINDING_FORMAT_VERSION: u8 = 1;
 
 /// Verified answer returned by [`VerifiableRpcOperations::query`].
 ///
@@ -282,6 +271,13 @@ fn verify_grovedb_proof(resp: &VerifiableRpcResponse, key: &[u8]) -> Result<()> 
     Ok(())
 }
 
+/// Verify the GKR proof carried in a verifiable-RPC response.
+///
+/// Cross-checks the proof's claimed `output_root` against the response's
+/// `state_root`, then routes to `willow-gkr-verify` for the binding-only
+/// path. Full GKR proofs are surfaced as a precise error until the
+/// full-GKR follow-up lands (see
+/// `docs/todo/proposal-gkr-verify-crate.md`).
 fn verify_gkr_proof(proof: &GkrProofData, expected_state_root: [u8; 32]) -> Result<()> {
     if proof.public_inputs.output_root != expected_state_root {
         return Err(WillowError::ProofVerificationFailed(format!(
@@ -291,144 +287,33 @@ fn verify_gkr_proof(proof: &GkrProofData, expected_state_root: [u8; 32]) -> Resu
         )));
     }
 
-    if proof.proof.len() >= FULL_HEADER.len() && &proof.proof[..FULL_HEADER.len()] == FULL_HEADER {
-        return Err(WillowError::ProofVerificationFailed(
+    match detect_format(&proof.proof) {
+        ProofFormat::BindingOnly => verify_binding_only(
+            &proof.proof,
+            &proof.public_inputs,
+            proof.verification_key_hash,
+        )
+        .map_err(|e| WillowError::ProofVerificationFailed(e.to_string())),
+        ProofFormat::Full => Err(WillowError::ProofVerificationFailed(
             "Phase 1 SDK verifies GKR_PROOF_BINDING_ONLY only; the indexer \
              returned a GKR_PROOF_FULL proof. Configure the indexer to \
              produce binding-only proofs or wait for the SDK's full-GKR \
-             verifier (planned follow-up)."
+             verifier (planned follow-up; see \
+             docs/todo/proposal-gkr-verify-crate.md)."
                 .into(),
-        ));
+        )),
+        ProofFormat::Unknown => Err(WillowError::ProofVerificationFailed(
+            "GKR proof header is not a recognised format".into(),
+        )),
     }
-
-    verify_binding_only_proof(
-        &proof.proof,
-        &proof.public_inputs,
-        proof.verification_key_hash,
-    )
-}
-
-/// Verify a `GKR_PROOF_BINDING_ONLY` proof byte-for-byte against the format
-/// produced by `willow-gkr`'s prover. This is intentionally a hand-rolled
-/// reimplementation of the binding-only branch in
-/// `crates/gkr/src/verifier.rs::verify_binding_proof`: keeping the verifier
-/// tiny is the whole point of the SDK side, and the binding-only format
-/// only needs SHA-256 — no Expander, no GroveDB, no Arkworks.
-///
-/// **Soundness caveat.** Binding-only proofs guarantee that the prover knew
-/// a witness consistent with the claimed public inputs *and* committed to
-/// it via SHA-256. They do not have full GKR cryptographic soundness — a
-/// malicious prover with knowledge of the witness layout could in
-/// principle construct a "valid" binding-only proof for an incorrect
-/// transformation. Use binding-only mode only when the prover is trusted
-/// (the Phase 1 hosted-service model in `docs/VERIFIABLE_RPC.md`); for
-/// untrusted indexers, use the future full-GKR verifier.
-fn verify_binding_only_proof(
-    proof: &[u8],
-    public_inputs: &GkrPublicInputs,
-    verification_key_hash: [u8; 32],
-) -> Result<()> {
-    const HEADER_LEN: usize = BINDING_HEADER.len(); // 22
-    const MIN_LEN: usize = 131; // header + version + circuit_version + pi_hash + meta + commitment
-
-    if proof.len() < MIN_LEN {
-        return Err(WillowError::ProofVerificationFailed(format!(
-            "binding-only proof too short: {} < {}",
-            proof.len(),
-            MIN_LEN
-        )));
-    }
-
-    if &proof[..HEADER_LEN] != BINDING_HEADER {
-        return Err(WillowError::ProofVerificationFailed(
-            "binding-only proof header mismatch".into(),
-        ));
-    }
-
-    let format_version = proof[HEADER_LEN];
-    if format_version != BINDING_FORMAT_VERSION {
-        return Err(WillowError::ProofVerificationFailed(format!(
-            "unsupported binding-only proof format version {} (expected {})",
-            format_version, BINDING_FORMAT_VERSION
-        )));
-    }
-
-    let cv_start = HEADER_LEN + 1;
-    let proof_circuit_version: [u8; 32] = proof[cv_start..cv_start + 32]
-        .try_into()
-        .map_err(|_| WillowError::ProofVerificationFailed("circuit_version slice".into()))?;
-
-    if proof_circuit_version != verification_key_hash {
-        return Err(WillowError::ProofVerificationFailed(format!(
-            "circuit version mismatch: proof carries {} but response says {}",
-            hex::encode(&proof_circuit_version[..8]),
-            hex::encode(&verification_key_hash[..8])
-        )));
-    }
-
-    let pi_hash_start = cv_start + 32;
-    let proof_pi_hash: [u8; 32] = proof[pi_hash_start..pi_hash_start + 32]
-        .try_into()
-        .map_err(|_| WillowError::ProofVerificationFailed("public_input_hash slice".into()))?;
-
-    let mut hasher = Sha256::new();
-    hasher.update(public_inputs.input_commitment);
-    hasher.update(public_inputs.output_root);
-    hasher.update(public_inputs.config_hash);
-    hasher.update(public_inputs.block_range.0.to_be_bytes());
-    hasher.update(public_inputs.block_range.1.to_be_bytes());
-    let expected_pi_hash: [u8; 32] = hasher.finalize().into();
-
-    if !ct_eq(&proof_pi_hash, &expected_pi_hash) {
-        return Err(WillowError::ProofVerificationFailed(
-            "public input hash mismatch — proof does not bind to the response's GkrPublicInputs"
-                .into(),
-        ));
-    }
-
-    let meta_start = pi_hash_start + 32;
-    let commitment_start = meta_start + 12; // 3 × u32 metadata
-    let commitment: [u8; 32] = proof[commitment_start..commitment_start + 32]
-        .try_into()
-        .map_err(|_| WillowError::ProofVerificationFailed("witness_commitment slice".into()))?;
-
-    if commitment.iter().all(|&b| b == 0) {
-        return Err(WillowError::ProofVerificationFailed(
-            "witness commitment is all zero".into(),
-        ));
-    }
-
-    let mut wc_hasher = Sha256::new();
-    wc_hasher.update(&proof[..commitment_start]);
-    wc_hasher.update(b"witness_commitment");
-    let expected_commitment: [u8; 32] = wc_hasher.finalize().into();
-
-    if !ct_eq(&commitment, &expected_commitment) {
-        return Err(WillowError::ProofVerificationFailed(
-            "witness commitment recomputation mismatch — proof bytes were tampered with".into(),
-        ));
-    }
-
-    Ok(())
-}
-
-/// Constant-time byte comparison. Avoids leaking proof contents via
-/// timing — important for any cryptographic equality check.
-fn ct_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut diff = 0u8;
-    for (x, y) in a.iter().zip(b.iter()) {
-        diff |= x ^ y;
-    }
-    diff == 0
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::client::WillowClient;
+    use sha2::{Digest, Sha256};
+    use willow_gkr_verify::{BINDING_FORMAT_VERSION, BINDING_HEADER, FULL_HEADER};
     use willow_types::consensus::indexing_transactions::{GkrProofData, GkrPublicInputs};
 
     fn mk_response(state_root: [u8; 32], tip: u64) -> VerifiableRpcResponse {
@@ -456,6 +341,29 @@ mod tests {
             }),
             served_at_unix_secs: 1_700_000_000,
         }
+    }
+
+    /// Build a binding-only proof in the byte-exact format produced by
+    /// `willow_gkr::prover::GkrProver::generate_binding_only_proof`. The
+    /// verifier crate itself covers the full format-check matrix; here we
+    /// only need to fabricate one valid proof for the SDK dispatch tests.
+    fn build_valid_binding_only(pi: &GkrPublicInputs, circuit_version: [u8; 32]) -> Vec<u8> {
+        let mut proof = Vec::with_capacity(131);
+        proof.extend_from_slice(BINDING_HEADER);
+        proof.push(BINDING_FORMAT_VERSION);
+        proof.extend_from_slice(&circuit_version);
+        proof.extend_from_slice(&willow_gkr_verify::binding_only::compute_public_input_hash(
+            pi,
+        ));
+        proof.extend_from_slice(&1u32.to_be_bytes());
+        proof.extend_from_slice(&2u32.to_be_bytes());
+        proof.extend_from_slice(&3u32.to_be_bytes());
+        let mut hasher = Sha256::new();
+        hasher.update(&proof);
+        hasher.update(b"witness_commitment");
+        let commitment: [u8; 32] = hasher.finalize().into();
+        proof.extend_from_slice(&commitment);
+        proof
     }
 
     async fn test_client() -> WillowClient {
@@ -526,8 +434,8 @@ mod tests {
             .expect("idempotent re-read must be accepted");
     }
 
-    #[tokio::test]
-    async fn verify_gkr_proof_rejects_mismatched_root() {
+    #[test]
+    fn verify_gkr_proof_rejects_mismatched_root() {
         let proof = GkrProofData {
             proof: vec![0; 64],
             public_inputs: GkrPublicInputs {
@@ -547,112 +455,17 @@ mod tests {
         assert!(err.to_string().contains("output_root"));
     }
 
-    #[tokio::test]
-    async fn verify_grovedb_rejects_empty_proof() {
-        let mut resp = mk_response([0; 32], 0);
-        resp.grovedb_proof.clear();
-        let err = verify_grovedb_proof(&resp, &resp.key.clone())
-            .expect_err("empty proof must be rejected");
-        assert!(err.to_string().contains("empty"));
-    }
-
-    /// Build a valid binding-only proof byte sequence matching the format
-    /// produced by `crates/gkr/src/prover.rs::generate_binding_only_proof`.
-    /// Used to test the SDK's hand-rolled verifier without needing the
-    /// Expander stack.
-    fn build_binding_only_proof(
-        circuit_version: [u8; 32],
-        public_inputs: &GkrPublicInputs,
-    ) -> Vec<u8> {
-        let mut proof = Vec::with_capacity(131);
-        proof.extend_from_slice(BINDING_HEADER);
-        proof.push(BINDING_FORMAT_VERSION);
-        proof.extend_from_slice(&circuit_version);
-
-        let mut hasher = Sha256::new();
-        hasher.update(public_inputs.input_commitment);
-        hasher.update(public_inputs.output_root);
-        hasher.update(public_inputs.config_hash);
-        hasher.update(public_inputs.block_range.0.to_be_bytes());
-        hasher.update(public_inputs.block_range.1.to_be_bytes());
-        let pi_hash: [u8; 32] = hasher.finalize().into();
-        proof.extend_from_slice(&pi_hash);
-
-        // Witness metadata: 3 × u32 placeholders.
-        proof.extend_from_slice(&1u32.to_be_bytes());
-        proof.extend_from_slice(&2u32.to_be_bytes());
-        proof.extend_from_slice(&3u32.to_be_bytes());
-
-        let mut wc_hasher = Sha256::new();
-        wc_hasher.update(&proof);
-        wc_hasher.update(b"witness_commitment");
-        let commitment: [u8; 32] = wc_hasher.finalize().into();
-        proof.extend_from_slice(&commitment);
-        proof
-    }
-
     #[test]
-    fn binding_only_verifier_accepts_valid_proof() {
-        let pi = GkrPublicInputs {
-            input_commitment: [0xaa; 32],
-            output_root: [0xbb; 32],
-            block_range: (1_000, 2_000),
-            config_hash: [0xcc; 32],
-        };
-        let proof_bytes = build_binding_only_proof([0x55; 32], &pi);
-        verify_binding_only_proof(&proof_bytes, &pi, [0x55; 32])
-            .expect("freshly built binding-only proof must verify");
-    }
-
-    #[test]
-    fn binding_only_verifier_rejects_tampered_pi_hash() {
-        let pi = GkrPublicInputs {
-            input_commitment: [0xaa; 32],
-            output_root: [0xbb; 32],
-            block_range: (1, 2),
-            config_hash: [0xcc; 32],
-        };
-        let proof_bytes = build_binding_only_proof([0x55; 32], &pi);
-
-        // Pretend the prover lied about output_root — the recomputed
-        // SHA-256 will diverge from what the proof carries.
-        let lying_pi = GkrPublicInputs {
-            output_root: [0xff; 32],
-            ..pi.clone()
-        };
-        let err = verify_binding_only_proof(&proof_bytes, &lying_pi, [0x55; 32])
-            .expect_err("tampered public inputs must be rejected");
-        assert!(err.to_string().contains("public input hash mismatch"));
-    }
-
-    #[test]
-    fn binding_only_verifier_rejects_circuit_version_mismatch() {
+    fn verify_gkr_proof_rejects_full_format() {
         let pi = GkrPublicInputs {
             input_commitment: [1; 32],
             output_root: [2; 32],
             block_range: (0, 1),
             config_hash: [3; 32],
         };
-        let proof = build_binding_only_proof([0x55; 32], &pi);
-        let err = verify_binding_only_proof(&proof, &pi, [0x66; 32])
-            .expect_err("circuit version mismatch must be rejected");
-        assert!(err.to_string().contains("circuit version mismatch"));
-    }
-
-    #[test]
-    fn binding_only_verifier_rejects_full_gkr_format() {
-        let pi = GkrPublicInputs {
-            input_commitment: [1; 32],
-            output_root: [2; 32],
-            block_range: (0, 1),
-            config_hash: [3; 32],
-        };
-        // Pretend a GKR_PROOF_FULL came down the wire — must be cleanly
-        // rejected with a precise error rather than a format-check stutter.
         let mut full_proof = FULL_HEADER.to_vec();
         full_proof.extend_from_slice(&[0u8; 200]);
-
-        let proof_data = GkrProofData {
+        let data = GkrProofData {
             proof: full_proof,
             public_inputs: pi.clone(),
             verification_key_hash: [0x55; 32],
@@ -660,16 +473,46 @@ mod tests {
             generation_time_ms: 0,
             gpu_accelerated: false,
         };
-        let err = verify_gkr_proof(&proof_data, pi.output_root)
+        let err = verify_gkr_proof(&data, pi.output_root)
             .expect_err("full proof must be rejected by phase-1 verifier");
         assert!(err.to_string().contains("Phase 1"));
         assert!(err.to_string().contains("GKR_PROOF_FULL"));
     }
 
-    /// Wire-format compat: the JSON the indexer emits decodes into our
-    /// `VerifiableRpcResponse` cleanly, then the binding-only verifier
-    /// accepts the embedded proof. This is the cross-crate guarantee the
-    /// rest of the test suite mocks around — keep it locked here.
+    #[test]
+    fn verify_gkr_proof_rejects_unknown_format() {
+        let pi = GkrPublicInputs {
+            input_commitment: [1; 32],
+            output_root: [2; 32],
+            block_range: (0, 1),
+            config_hash: [3; 32],
+        };
+        let data = GkrProofData {
+            proof: b"SOME_OTHER_FORMAT_....................................".to_vec(),
+            public_inputs: pi.clone(),
+            verification_key_hash: [0; 32],
+            proof_size_bytes: 0,
+            generation_time_ms: 0,
+            gpu_accelerated: false,
+        };
+        let err =
+            verify_gkr_proof(&data, pi.output_root).expect_err("unknown format must be rejected");
+        assert!(err.to_string().contains("not a recognised format"));
+    }
+
+    #[test]
+    fn verify_grovedb_rejects_empty_proof() {
+        let mut resp = mk_response([0; 32], 0);
+        resp.grovedb_proof.clear();
+        let err = verify_grovedb_proof(&resp, &resp.key.clone())
+            .expect_err("empty proof must be rejected");
+        assert!(err.to_string().contains("empty"));
+    }
+
+    /// Cross-crate wire-format lock: JSON round-trips through
+    /// `VerifiableRpcResponse` and the embedded binding-only proof
+    /// verifies via the shared crate's verifier. If this test breaks, the
+    /// indexer and SDK have diverged on the on-the-wire format.
     #[test]
     fn json_wire_compat_then_binding_only_verifies() {
         let pi = GkrPublicInputs {
@@ -678,7 +521,8 @@ mod tests {
             block_range: (10, 20),
             config_hash: [0x77; 32],
         };
-        let proof = build_binding_only_proof([0x55; 32], &pi);
+        let cv = [0x55; 32];
+        let proof = build_valid_binding_only(&pi, cv);
         let response = VerifiableRpcResponse {
             subgrove_id: "sg".into(),
             key: vec![1, 2, 3],
@@ -692,32 +536,16 @@ mod tests {
                 proof_size_bytes: proof.len() as u64,
                 proof,
                 public_inputs: pi.clone(),
-                verification_key_hash: [0x55; 32],
+                verification_key_hash: cv,
                 generation_time_ms: 7,
                 gpu_accelerated: false,
             }),
             served_at_unix_secs: 1_700_000_000,
         };
 
-        // Round-trip through JSON (the actual transport).
         let json = serde_json::to_string(&response).expect("encode");
         let decoded: VerifiableRpcResponse = serde_json::from_str(&json).expect("decode");
-
-        // Binding-only verification accepts the embedded proof.
         verify_gkr_proof(decoded.gkr_proof.as_ref().unwrap(), decoded.state_root)
-            .expect("verifier accepts");
-    }
-
-    #[test]
-    fn binding_only_verifier_rejects_short_proof() {
-        let pi = GkrPublicInputs {
-            input_commitment: [0; 32],
-            output_root: [0; 32],
-            block_range: (0, 0),
-            config_hash: [0; 32],
-        };
-        let err = verify_binding_only_proof(&vec![0u8; 50], &pi, [0; 32])
-            .expect_err("short proof must be rejected");
-        assert!(err.to_string().contains("too short"));
+            .expect("shared verifier accepts round-tripped proof");
     }
 }

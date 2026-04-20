@@ -59,11 +59,11 @@ dirs = { version = "5.0", optional = true }
 # Shared types with the server (token units, transaction types, etc.)
 willow-types = { path = "../../crates/types" }
 
-# Note: the verifiable-rpc feature implements binding-only GKR proof
-# verification directly in the SDK using sha2 (already a dep). Full GKR
-# proof verification is not yet exposed in the SDK because pulling
-# willow-gkr's full Expander stack into a workspace-excluded crate fights
-# the dependency-resolution rules. Tracked as a follow-up.
+# Thin GKR verifier crate — binding-only proof verification today,
+# full GKR planned. Pure sha2/subtle; safe to pull into the SDK
+# without inheriting the workspace's Expander [patch] block.
+# See docs/todo/proposal-gkr-verify-crate.md for the full-GKR path.
+willow-gkr-verify = { path = "../../crates/gkr-verify", optional = true }
 
 # Light client dependencies - uses grovedb verify feature for lightweight proof verification
 # These are included by default for trustless verification
@@ -86,9 +86,9 @@ tracing = ["dep:tracing"]
 no-light-client = []
 # Enable client-side verification for the verifiable-RPC flow
 # (GET /verifiable-rpc/:subgrove/:key with a GKR proof attached).
-# Phase 1: binding-only proof verification (uses sha2, already a dep).
+# Phase 1: binding-only proof verification via willow-gkr-verify.
 # Full GKR-soundness verification is a planned follow-up.
-verifiable-rpc = []
+verifiable-rpc = ["dep:willow-gkr-verify"]
 
 [[bin]]
 name = "willow-cli"
