@@ -75,7 +75,7 @@ willow-gkr-verify = { path = "../../crates/gkr-verify", optional = true }
 # `verifiable-rpc-pure` feature; mutually exclusive with
 # `verifiable-rpc-full` at runtime (pure takes precedence when both
 # are on — the native Expander backend then becomes dead code).
-willow-gkr-verify-pure = { path = "../../crates/gkr-verify-pure", optional = true }
+willow-gkr-verify-pure = { path = "../../crates/gkr-verify-pure", features = ["registry"], optional = true }
 
 # Light client dependencies - uses grovedb verify feature for lightweight proof verification
 # These are included by default for trustless verification
