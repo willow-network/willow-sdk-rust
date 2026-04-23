@@ -189,8 +189,14 @@ impl ConsensusClient {
     }
 
     async fn submit_transaction(&self, tx_json: &str) -> Result<String> {
-        // Base64 encode the serialized transaction
-        let tx_base64 = base64::engine::general_purpose::STANDARD.encode(tx_json.as_bytes());
+        // Convert JSON-encoded tx to the bincode wire format the validator
+        // expects. See docs/todo/proposal-bincode-wire.md.
+        let tx: willow_types::consensus::transactions::Transaction =
+            serde_json::from_str(tx_json).map_err(WillowError::Serialization)?;
+        let tx_bytes = bincode::serialize(&tx).map_err(|e| {
+            WillowError::Custom(format!("bincode serialize transaction: {}", e))
+        })?;
+        let tx_base64 = base64::engine::general_purpose::STANDARD.encode(&tx_bytes);
 
         // Create JSON-RPC request
         let rpc_request = json!({
