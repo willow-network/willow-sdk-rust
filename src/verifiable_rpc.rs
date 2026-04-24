@@ -382,7 +382,6 @@ mod tests {
             gkr_proof: Some(GkrProofData {
                 proof: vec![0xbb; 64],
                 public_inputs: GkrPublicInputs {
-                    input_commitment: [1; 32],
                     output_root: state_root,
                     block_range: (tip.saturating_sub(100), tip),
                     config_hash: [2; 32],
@@ -492,7 +491,6 @@ mod tests {
         let proof = GkrProofData {
             proof: vec![0; 64],
             public_inputs: GkrPublicInputs {
-                input_commitment: [0; 32],
                 output_root: [7; 32],
                 block_range: (0, 10),
                 config_hash: [0; 32],
@@ -515,7 +513,6 @@ mod tests {
     #[test]
     fn verify_gkr_proof_rejects_full_format_without_feature() {
         let pi = GkrPublicInputs {
-            input_commitment: [1; 32],
             output_root: [2; 32],
             block_range: (0, 1),
             config_hash: [3; 32],
@@ -545,7 +542,6 @@ mod tests {
     #[test]
     fn verify_gkr_proof_full_feature_rejects_unknown_circuit() {
         let pi = GkrPublicInputs {
-            input_commitment: [1; 32],
             output_root: [2; 32],
             block_range: (0, 1),
             config_hash: [3; 32],
@@ -572,7 +568,6 @@ mod tests {
     #[test]
     fn verify_gkr_proof_rejects_unknown_format() {
         let pi = GkrPublicInputs {
-            input_commitment: [1; 32],
             output_root: [2; 32],
             block_range: (0, 1),
             config_hash: [3; 32],
@@ -606,7 +601,6 @@ mod tests {
     #[test]
     fn json_wire_compat_then_binding_only_verifies() {
         let pi = GkrPublicInputs {
-            input_commitment: [0x42; 32],
             output_root: [0x99; 32],
             block_range: (10, 20),
             config_hash: [0x77; 32],
