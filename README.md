@@ -32,6 +32,16 @@ To disable proof verification (if you trust your node):
 willow-sdk = { version = "0.1.0", features = ["no-light-client"] }
 ```
 
+## Transaction submission
+
+Transactions submitted through this SDK go to the API server's
+`POST /tx/submit` endpoint. The server accepts the JSON-encoded
+transaction, bincode-encodes it (the chain's on-the-wire format), and
+forwards to CometBFT's `broadcast_tx_sync`. `api_url` is therefore
+**required** whenever you submit a tx; `consensus_rpc_url` is only
+used for read-only RPC queries (status, block, validators) and may be
+omitted or pointed at the same endpoint.
+
 ## Quick Start
 
 ```rust
