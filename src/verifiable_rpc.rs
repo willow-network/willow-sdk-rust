@@ -123,17 +123,24 @@ impl VerifiableRpcOperations {
             }
             VerifyMode::Strict => {
                 verify_grovedb_proof(&raw, key)?;
-                match &raw.gkr_proof {
-                    Some(proof) => {
-                        verify_gkr_proof(proof, raw.state_root)?;
-                        VerificationResult::GkrAndGroveDb
-                    }
-                    None => {
-                        return Err(WillowError::ProofVerificationFailed(
-                            "Strict verify mode: indexer returned no GKR proof".into(),
-                        ));
-                    }
+                if raw.gkr_proofs.is_empty() {
+                    return Err(WillowError::ProofVerificationFailed(
+                        "Strict verify mode: indexer returned no GKR proofs".into(),
+                    ));
                 }
+                // Verify each chunk's proof. The final chunk's
+                // output_root must equal `state_root` (the block's
+                // settled state); intermediate chunks chain to the
+                // next chunk's `starting_state_root`.
+                for (i, proof) in raw.gkr_proofs.iter().enumerate() {
+                    let expected_root = if i + 1 == raw.gkr_proofs.len() {
+                        raw.state_root
+                    } else {
+                        raw.gkr_proofs[i + 1].public_inputs.starting_state_root
+                    };
+                    verify_gkr_proof(proof, expected_root)?;
+                }
+                VerificationResult::GkrAndGroveDb
             }
         };
 
@@ -379,7 +386,7 @@ mod tests {
             state_root,
             block_range: (tip.saturating_sub(100), tip),
             grovedb_proof: vec![0xaa; 64],
-            gkr_proof: Some(GkrProofData {
+            gkr_proofs: vec![GkrProofData {
                 proof: vec![0xbb; 64],
                 public_inputs: GkrPublicInputs {
                     output_root: state_root,
@@ -390,7 +397,8 @@ mod tests {
                 proof_size_bytes: 64,
                 generation_time_ms: 1,
                 gpu_accelerated: false,
-            }),
+            }],
+            completeness_proof: None,
             served_at_unix_secs: 1_700_000_000,
         }
     }
@@ -616,14 +624,15 @@ mod tests {
             state_root: pi.output_root,
             block_range: pi.block_range,
             grovedb_proof: vec![0xab, 0xcd], // placeholder; not verified here
-            gkr_proof: Some(GkrProofData {
+            gkr_proofs: vec![GkrProofData {
                 proof_size_bytes: proof.len() as u64,
                 proof,
                 public_inputs: pi.clone(),
                 verification_key_hash: cv,
                 generation_time_ms: 7,
                 gpu_accelerated: false,
-            }),
+            }],
+            completeness_proof: None,
             served_at_unix_secs: 1_700_000_000,
         };
 
