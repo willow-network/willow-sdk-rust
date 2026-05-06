@@ -259,7 +259,7 @@ impl SubgroveDefinition {
     ) -> String {
         use willow_types::consensus::transactions::RegisterSubgroveTx;
         use willow_types::consensus::indexing_transactions::{
-            SubgroveMode, ExecutionMode, IndexerConfig, RetentionWindow,
+            ExecutionMode, HistoricalAuthMode, IndexerConfig, RetentionWindow, SubgroveMode,
         };
 
         let manifest_content = serde_json::to_vec(&self.manifest).unwrap_or_default();
@@ -298,6 +298,7 @@ impl SubgroveDefinition {
                 indexer_config,
                 retention_window: RetentionWindow::default(),
                 completeness: None,
+                historical_auth_mode: HistoricalAuthMode::default(),
             },
             checkpoint_verification: Default::default(),
             privacy: None,
