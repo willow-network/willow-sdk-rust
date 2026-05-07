@@ -32,6 +32,13 @@ use std::path::Path;
 
 use crate::errors::{Result, WillowError};
 
+// Canonical manifest schema lives in `willow-types`. The SDK re-exports
+// the same types so callers building a `SubgroveDefinition` produce bytes
+// that round-trip through the consensus validator without translation.
+pub use willow_types::consensus::{
+    DataSource, EventSignature, EvmAddress, SupportedChain, WillowManifest,
+};
+
 /// Deserialize a u128 from either an integer or a quoted string.
 /// TOML integers are i64, so values above i64::MAX must be quoted strings.
 fn deserialize_u128<'de, D>(deserializer: D) -> std::result::Result<u128, D::Error>
@@ -100,8 +107,9 @@ pub struct SubgroveDefinition {
     /// GraphQL schema defining the indexed entities (inline string).
     pub schema: String,
 
-    /// Subgraph manifest describing data sources and event handlers.
-    pub manifest: ManifestDef,
+    /// Canonical manifest describing data sources to index. Must round-trip
+    /// through `WillowManifest::from_bytes` — see `willow-types`.
+    pub manifest: WillowManifest,
 
     /// ZK-template binding for GkrExecution mode.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -115,7 +123,10 @@ pub struct IndexerConfigDef {
     pub min_indexers: u8,
     #[serde(default = "default_max_indexers")]
     pub max_indexers: u8,
-    #[serde(default = "default_reward_per_epoch", deserialize_with = "deserialize_u128")]
+    #[serde(
+        default = "default_reward_per_epoch",
+        deserialize_with = "deserialize_u128"
+    )]
     pub reward_per_epoch: u128,
     #[serde(
         default = "default_min_indexer_stake",
@@ -133,45 +144,6 @@ impl Default for IndexerConfigDef {
             min_indexer_stake: default_min_indexer_stake(),
         }
     }
-}
-
-/// Subgraph manifest describing what to index.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ManifestDef {
-    pub spec_version: String,
-    pub description: String,
-    pub data_sources: Vec<DataSourceDef>,
-}
-
-/// A single data source (contract) to index.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DataSourceDef {
-    pub kind: String,
-    pub name: String,
-    pub network: String,
-    pub source: SourceDef,
-    pub mapping: MappingDef,
-}
-
-/// Contract address and deployment info.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SourceDef {
-    pub address: String,
-    pub abi: String,
-    pub start_block: u64,
-}
-
-/// Event handler mappings.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MappingDef {
-    pub event_handlers: Vec<EventHandlerDef>,
-}
-
-/// A single event handler definition.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EventHandlerDef {
-    pub event: String,
-    pub handler: String,
 }
 
 // Default value functions
@@ -257,10 +229,10 @@ impl SubgroveDefinition {
         nonce: u64,
         initial_funding: Option<u128>,
     ) -> String {
-        use willow_types::consensus::transactions::RegisterSubgroveTx;
         use willow_types::consensus::indexing_transactions::{
             ExecutionMode, HistoricalAuthMode, IndexerConfig, RetentionWindow, SubgroveMode,
         };
+        use willow_types::consensus::transactions::RegisterSubgroveTx;
 
         let manifest_content = serde_json::to_vec(&self.manifest).unwrap_or_default();
 
@@ -348,22 +320,16 @@ reward_per_epoch = "100000000000000000"
 min_indexer_stake = "100000000000000000000000"
 
 [manifest]
-spec_version = "0.0.4"
+spec_version = "1.0.0"
 description = "Test Swaps"
 
 [[manifest.data_sources]]
-kind = "ethereum/contract"
 name = "TestPool"
 network = "mainnet"
-
-[manifest.data_sources.source]
 address = "0x1234567890abcdef1234567890abcdef12345678"
 abi = "TestPool"
 start_block = 12345678
-
-[[manifest.data_sources.mapping.event_handlers]]
-event = "Swap(address,address,int256)"
-handler = "handleSwap"
+events = ["Swap(address,address,int256)"]
 "#;
 
     #[test]
@@ -373,26 +339,34 @@ handler = "handleSwap"
         assert_eq!(def.description, "Test swap events");
         assert_eq!(def.execution_mode, "ConsensusExecution");
         assert_eq!(def.manifest.data_sources.len(), 1);
-        assert_eq!(def.manifest.data_sources[0].name, "TestPool");
+        let ds = &def.manifest.data_sources[0];
+        assert_eq!(ds.name, "TestPool");
+        assert_eq!(ds.network, SupportedChain::Mainnet);
         assert_eq!(
-            def.manifest.data_sources[0].source.address,
+            ds.address.to_canonical_string(),
             "0x1234567890abcdef1234567890abcdef12345678"
         );
-        assert_eq!(def.manifest.data_sources[0].source.start_block, 12345678);
-        assert_eq!(
-            def.manifest.data_sources[0].mapping.event_handlers.len(),
-            1
-        );
+        assert_eq!(ds.start_block, 12345678);
+        assert_eq!(ds.events.len(), 1);
+        assert_eq!(ds.events[0].as_str(), "Swap(address,address,int256)");
+    }
+
+    #[test]
+    fn manifest_serializes_to_canonical_bytes() {
+        // The whole point of the SDK port: bytes the SDK produces must
+        // round-trip through `WillowManifest::from_bytes`, which is what
+        // the consensus validator runs.
+        let def = SubgroveDefinition::from_toml(SAMPLE_TOML).unwrap();
+        let bytes = serde_json::to_vec(&def.manifest).unwrap();
+        WillowManifest::from_bytes(&bytes)
+            .expect("SDK-produced manifest bytes must round-trip through canonical validator");
     }
 
     #[test]
     fn test_signing_payload() {
         let def = SubgroveDefinition::from_toml(SAMPLE_TOML).unwrap();
         let payload = def.signing_payload("did:willow:owner", 1);
-        assert_eq!(
-            payload,
-            "RegisterSubgrove:test-swaps:did:willow:owner:1"
-        );
+        assert_eq!(payload, "RegisterSubgrove:test-swaps:did:willow:owner:1");
     }
 
     #[test]
@@ -420,22 +394,16 @@ description = "Minimal definition"
 schema = "type T @entity { id: ID! }"
 
 [manifest]
-spec_version = "0.0.4"
+spec_version = "1.0.0"
 description = "Minimal"
 
 [[manifest.data_sources]]
-kind = "ethereum/contract"
 name = "Test"
 network = "mainnet"
-
-[manifest.data_sources.source]
 address = "0x0000000000000000000000000000000000000000"
 abi = "Test"
 start_block = 1
-
-[[manifest.data_sources.mapping.event_handlers]]
-event = "Event()"
-handler = "handle"
+events = ["Event()"]
 "#;
         let def = SubgroveDefinition::from_toml(minimal_toml).unwrap();
         assert_eq!(def.execution_mode, "ConsensusExecution");
@@ -454,22 +422,16 @@ sampling_rate_percent = 10
 schema = "type T @entity { id: ID! }"
 
 [manifest]
-spec_version = "0.0.4"
+spec_version = "1.0.0"
 description = "Test"
 
 [[manifest.data_sources]]
-kind = "ethereum/contract"
 name = "Test"
 network = "mainnet"
-
-[manifest.data_sources.source]
 address = "0x0000000000000000000000000000000000000000"
 abi = "Test"
 start_block = 1
-
-[[manifest.data_sources.mapping.event_handlers]]
-event = "Event()"
-handler = "handle"
+events = ["Event()"]
 "#;
         let def = SubgroveDefinition::from_toml(toml_str).unwrap();
         let mode = def.execution_mode_json();
