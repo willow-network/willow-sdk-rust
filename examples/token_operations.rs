@@ -62,14 +62,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match client.token().get_fee_schedule().await {
         Ok(fees) => {
             println!("   DID Registration: {} WILL", fees.did_registration);
-            println!("   Subgrove Registration: {} WILL", fees.subgrove_registration);
-            println!("   Subgrove Registration: {} WILL", fees.subgrove_registration);
+            println!(
+                "   Subgrove Registration: {} WILL",
+                fees.subgrove_registration
+            );
+            println!(
+                "   Subgrove Registration: {} WILL",
+                fees.subgrove_registration
+            );
             println!("   Base TX Cost: {} wei", fees.base_tx_cost);
             println!("   Cost Per Byte: {} wei", fees.cost_per_byte);
             println!("   Query Fee: {} wei", fees.query_fee);
             println!("   Transfer Fee: {} bps", fees.transfer_fee_percentage);
             println!("   Max TX Size: {} bytes", fees.max_tx_size_bytes);
-            println!("   Max Data Payload: {} bytes\n", fees.max_data_payload_bytes);
+            println!(
+                "   Max Data Payload: {} bytes\n",
+                fees.max_data_payload_bytes
+            );
         }
         Err(e) => println!("   Note: {}\n", e),
     }

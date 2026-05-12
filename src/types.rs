@@ -25,9 +25,7 @@ impl SignatureAlgorithm {
     }
 }
 
-pub use willow_types::consensus::transactions::{
-    DidDocument, PublicKey, ServiceEndpoint,
-};
+pub use willow_types::consensus::transactions::{DidDocument, PublicKey, ServiceEndpoint};
 
 /// DID information including keys
 #[derive(Debug, Clone)]

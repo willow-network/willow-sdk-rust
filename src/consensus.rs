@@ -81,13 +81,21 @@ impl ConsensusClient {
     /// Fetch the next valid nonce for a DID from the API server.
     pub async fn get_next_nonce(&self, did: &str) -> Result<u64> {
         let api_url = self.api_url.as_ref().ok_or_else(|| {
-            WillowError::Config("API URL not configured — needed for nonce auto-management".to_string())
+            WillowError::Config(
+                "API URL not configured — needed for nonce auto-management".to_string(),
+            )
         })?;
 
         let url = format!("{}/account/{}/nonce", api_url.trim_end_matches('/'), did);
-        let resp = self.http_client.get(&url).send().await
+        let resp = self
+            .http_client
+            .get(&url)
+            .send()
+            .await
             .map_err(|e| WillowError::Network(format!("Failed to fetch nonce: {}", e)))?;
-        let body: serde_json::Value = resp.json().await
+        let body: serde_json::Value = resp
+            .json()
+            .await
             .map_err(|e| WillowError::Network(format!("Failed to parse nonce response: {}", e)))?;
 
         // Response format: {"success": true, "data": {"did": "...", "nonce": N}}
@@ -193,9 +201,8 @@ impl ConsensusClient {
         // expects. See docs/todo/proposal-bincode-wire.md.
         let tx: willow_types::consensus::transactions::Transaction =
             serde_json::from_str(tx_json).map_err(WillowError::Serialization)?;
-        let tx_bytes = bincode::serialize(&tx).map_err(|e| {
-            WillowError::Custom(format!("bincode serialize transaction: {}", e))
-        })?;
+        let tx_bytes = bincode::serialize(&tx)
+            .map_err(|e| WillowError::Custom(format!("bincode serialize transaction: {}", e)))?;
         let tx_base64 = base64::engine::general_purpose::STANDARD.encode(&tx_bytes);
 
         // Create JSON-RPC request
@@ -485,10 +492,7 @@ impl ConsensusClient {
         request.nonce = self.get_next_nonce(&request.owner_did).await?;
         let data_json =
             serde_json::to_string(&request.data).map_err(|e| WillowError::Serialization(e))?;
-        let message = format!(
-            "{}:{}:{}",
-            request.subgrove_id, request.key, data_json
-        );
+        let message = format!("{}:{}:{}", request.subgrove_id, request.key, data_json);
 
         // Sign the message
         let signature = signing_key.sign(message.as_bytes());

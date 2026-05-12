@@ -50,11 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   Skips all proof verification for maximum performance");
     println!("   Use only when you trust the node\n");
 
-    match client
-        .data()
-        .get_unverified(subgrove_id, "test-key")
-        .await
-    {
+    match client.data().get_unverified(subgrove_id, "test-key").await {
         Ok(data) => {
             println!("   Data retrieved (no verification):");
             println!("   {}\n", serde_json::to_string_pretty(&data)?);
@@ -66,11 +62,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("3. Query with automatic verification...");
     let query = json!({ "limit": 5 });
 
-    match client
-        .data()
-        .query(subgrove_id, query.clone())
-        .await
-    {
+    match client.data().query(subgrove_id, query.clone()).await {
         Ok(response) => {
             println!("   Found {} documents", response.documents.len());
             if let Some(root_hash) = &response.verified_root_hash {
@@ -88,11 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 4. Query without verification (for comparison)
     println!("4. Query without verification (unverified)...");
-    match client
-        .data()
-        .query_unverified(subgrove_id, query)
-        .await
-    {
+    match client.data().query_unverified(subgrove_id, query).await {
         Ok(response) => {
             println!("   Found {} documents", response.documents.len());
             println!("   No verification performed");

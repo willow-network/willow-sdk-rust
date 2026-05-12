@@ -340,8 +340,9 @@ impl Erc8004Client {
             .map_err(|e| WillowError::Network(format!("Failed to parse response: {}", e)))?;
 
         if let Some(data) = body.get("data") {
-            let reg = serde_json::from_value(data.clone())
-                .map_err(|e| WillowError::Network(format!("Failed to parse registration: {}", e)))?;
+            let reg = serde_json::from_value(data.clone()).map_err(|e| {
+                WillowError::Network(format!("Failed to parse registration: {}", e))
+            })?;
             Ok(Some(reg))
         } else {
             Ok(None)

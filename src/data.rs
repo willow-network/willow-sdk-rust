@@ -158,11 +158,7 @@ impl DataOperations {
     }
 
     /// Get a single item without proof verification
-    pub async fn get_unverified(
-        &self,
-        subgrove_id: &str,
-        key: &str,
-    ) -> Result<Value> {
+    pub async fn get_unverified(&self, subgrove_id: &str, key: &str) -> Result<Value> {
         self.ensure_authenticated()?;
 
         let response: ApiResponse<Value> = self
@@ -186,11 +182,7 @@ impl DataOperations {
     /// If verification fails, the query will return an error.
     ///
     /// When `no-light-client` feature is enabled, this behaves the same as `query_unverified`.
-    pub async fn query(
-        &self,
-        subgrove_id: &str,
-        mut query: Value,
-    ) -> Result<QueryResponse> {
+    pub async fn query(&self, subgrove_id: &str, mut query: Value) -> Result<QueryResponse> {
         self.ensure_authenticated()?;
 
         // Only request proof if verification is enabled
@@ -216,7 +208,10 @@ impl DataOperations {
         // Verify proof if present and light client is available
         #[cfg(not(feature = "no-light-client"))]
         if query_response.proof.is_some() {
-            match self.verify_and_compare_root(subgrove_id, &query_response).await {
+            match self
+                .verify_and_compare_root(subgrove_id, &query_response)
+                .await
+            {
                 Ok(verified_root) => {
                     query_response.verified_root_hash = Some(verified_root);
                 }
@@ -242,11 +237,7 @@ impl DataOperations {
     /// For DataStorage, the table name in FROM is ignored — all documents
     /// are the dataset. Standard SQL: WHERE, ORDER BY, LIMIT, OFFSET,
     /// column projection, COUNT(*).
-    pub async fn sql(
-        &self,
-        subgrove_id: &str,
-        query: &str,
-    ) -> Result<crate::types::SqlResponse> {
+    pub async fn sql(&self, subgrove_id: &str, query: &str) -> Result<crate::types::SqlResponse> {
         self.ensure_authenticated()?;
 
         let request = crate::types::SqlRequest {
@@ -604,7 +595,6 @@ impl DataOperations {
 
         // Compare against current consensus app_hash from /block_results
         let consensus_root = hex::encode(light_client.fetch_current_app_hash().await?);
-
 
         // Compare roots
         if computed_root != consensus_root {

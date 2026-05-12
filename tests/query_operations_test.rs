@@ -15,8 +15,8 @@ async fn query_operations_test() {
     println!("This test verifies current query capabilities");
 
     // Read the funded DID
-    let funded_did = std::env::var("WILLOW_TEST_DID")
-        .unwrap_or_else(|_| "did:willow:test-owner".to_string());
+    let funded_did =
+        std::env::var("WILLOW_TEST_DID").unwrap_or_else(|_| "did:willow:test-owner".to_string());
 
     // Generate unique subgrove name with timestamp
     let timestamp = SystemTime::now()
@@ -87,7 +87,9 @@ async fn query_operations_test() {
             }
             Err(e) => {
                 let error_str = e.to_string();
-                if error_str.contains("Subgrove not found") || error_str.contains("subgrove does not exist") {
+                if error_str.contains("Subgrove not found")
+                    || error_str.contains("subgrove does not exist")
+                {
                     if attempt == 1 || attempt % 5 == 0 {
                         println!(
                             "  ⏳ Waiting for subgrove to be registered... (attempt {}/30)",
@@ -235,11 +237,7 @@ async fn query_operations_test() {
         "include_proof": true
     });
 
-    match client
-        .data()
-        .query(&subgrove_name, query_with_proof)
-        .await
-    {
+    match client.data().query(&subgrove_name, query_with_proof).await {
         Ok(results) => {
             println!("  ✅ Query returned {} documents", results.documents.len());
 
@@ -330,11 +328,7 @@ async fn query_operations_test() {
                 "offset": 2
             });
 
-            if let Ok(results2) = client
-                .data()
-                .query(&subgrove_name, query_page2)
-                .await
-            {
+            if let Ok(results2) = client.data().query(&subgrove_name, query_page2).await {
                 println!(
                     "  ✅ Page 2 returned {} documents",
                     results2.documents.len()
@@ -452,7 +446,7 @@ async fn register_subgrove(
     let transaction = json!({
         "RegisterSubgrove": {
             "subgrove_id": subgrove_id,
-            
+
             "name": "Query Products",
             "schema": schema_json,
             "owner_did": owner_did,
@@ -473,7 +467,7 @@ async fn fund_subgrove(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let fund_tx = json!({
         "FundSubgrove": {
-            
+
             "amount": 10_000_000_000_000_000_000u128,
             "from_did": from_did,
             "signature": []
@@ -500,7 +494,7 @@ async fn store_data(
 
     let transaction = json!({
         "StoreData": {
-            
+
             "subgrove_id": subgrove_id,
             "key": key,
             "data": data,

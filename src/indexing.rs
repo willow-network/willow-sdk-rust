@@ -73,7 +73,8 @@ impl IndexingOperations {
         query: &str,
         variables: Option<serde_json::Value>,
     ) -> Result<GraphQLResponse> {
-        self.graphql_query_legacy(subgrove_id, query, variables).await
+        self.graphql_query_legacy(subgrove_id, query, variables)
+            .await
     }
 
     /// Executes a GraphQL query with explicit source selection.
@@ -274,17 +275,13 @@ impl IndexingOperations {
         if let Ok(direct) = serde_json::from_str::<T>(&text) {
             return Ok(direct);
         }
-        let api: ApiResponse<T> = serde_json::from_str(&text).map_err(WillowError::Serialization)?;
+        let api: ApiResponse<T> =
+            serde_json::from_str(&text).map_err(WillowError::Serialization)?;
         api.data
             .ok_or_else(|| WillowError::Custom("empty data in response".to_string()))
     }
 
-    async fn call_indexer<B, T>(
-        &self,
-        info: &IndexerInfo,
-        path: &str,
-        body: &B,
-    ) -> Result<T>
+    async fn call_indexer<B, T>(&self, info: &IndexerInfo, path: &str, body: &B) -> Result<T>
     where
         B: serde::Serialize + ?Sized,
         T: serde::de::DeserializeOwned,
@@ -313,7 +310,8 @@ impl IndexingOperations {
         if let Ok(direct) = serde_json::from_str::<T>(&text) {
             return Ok(direct);
         }
-        let api: ApiResponse<T> = serde_json::from_str(&text).map_err(WillowError::Serialization)?;
+        let api: ApiResponse<T> =
+            serde_json::from_str(&text).map_err(WillowError::Serialization)?;
         api.data
             .ok_or_else(|| WillowError::Custom("empty data in response".to_string()))
     }

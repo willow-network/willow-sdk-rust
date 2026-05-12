@@ -15,8 +15,8 @@ async fn data_integrity_test() {
     println!("This test verifies CRUD operations and data consistency");
 
     // Read the funded DID
-    let funded_did = std::env::var("WILLOW_TEST_DID")
-        .unwrap_or_else(|_| "did:willow:test-owner".to_string());
+    let funded_did =
+        std::env::var("WILLOW_TEST_DID").unwrap_or_else(|_| "did:willow:test-owner".to_string());
 
     // Generate unique subgrove name with timestamp
     let timestamp = SystemTime::now()
@@ -78,9 +78,7 @@ async fn data_integrity_test() {
                     }
                 } else {
                     // App exists but subgrove doesn't, which is expected
-                    println!(
-                        "  ✅ Subgrove exists (subgrove query returned expected error)"
-                    );
+                    println!("  ✅ Subgrove exists (subgrove query returned expected error)");
                     app_exists = true;
                     break;
                 }
@@ -181,11 +179,7 @@ async fn data_integrity_test() {
     // Test 2: Read operation
     println!("\n🧪 Test 2: READ - Retrieving stored data...");
 
-    match client
-        .data()
-        .get(&subgrove_name, test_key)
-        .await
-    {
+    match client.data().get(&subgrove_name, test_key).await {
         Ok(data) => {
             println!("  ✅ Retrieved data successfully");
 
@@ -262,7 +256,7 @@ async fn data_integrity_test() {
 
     let update_tx = json!({
         "UpdateData": {
-            
+
             "subgrove_id": subgrove_name,
             "key": test_key,
             "data": updated_data,
@@ -283,11 +277,7 @@ async fn data_integrity_test() {
     sleep(Duration::from_secs(15)).await;
 
     // Verify update
-    match client
-        .data()
-        .get(&subgrove_name, test_key)
-        .await
-    {
+    match client.data().get(&subgrove_name, test_key).await {
         Ok(data) => {
             if data["name"] == "Test Item Updated" && data["value"] == 200 && data["version"] == 2 {
                 println!("  ✅ Update verified successfully");
@@ -394,7 +384,7 @@ async fn data_integrity_test() {
 
     let delete_tx = json!({
         "DeleteData": {
-            
+
             "subgrove_id": subgrove_name,
             "key": "item_003",
             "owner_did": funded_did,
@@ -410,11 +400,7 @@ async fn data_integrity_test() {
             sleep(Duration::from_secs(5)).await;
 
             // Verify deletion
-            match client
-                .data()
-                .get(&subgrove_name, "item_003")
-                .await
-            {
+            match client.data().get(&subgrove_name, "item_003").await {
                 Ok(_) => println!("  ❌ Item still exists after deletion"),
                 Err(_) => println!("  ✅ Item successfully deleted"),
             }
@@ -460,11 +446,7 @@ async fn data_integrity_test() {
 
     sleep(Duration::from_secs(15)).await;
 
-    match client
-        .data()
-        .get(&subgrove_name, type_test_key)
-        .await
-    {
+    match client.data().get(&subgrove_name, type_test_key).await {
         Ok(data) => {
             println!("  ✅ Retrieved type test data");
 
@@ -536,7 +518,7 @@ async fn register_subgrove(
     let transaction = json!({
         "RegisterSubgrove": {
             "subgrove_id": subgrove_id,
-            
+
             "name": "Integrity Test",
             "schema": schema_json,
             "owner_did": owner_did,
@@ -557,7 +539,7 @@ async fn fund_subgrove(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let fund_tx = json!({
         "FundSubgrove": {
-            
+
             "amount": 10_000_000_000_000_000_000u128,
             "from_did": from_did,
             "signature": []
@@ -582,7 +564,7 @@ async fn store_data(
 
     let transaction = json!({
         "StoreData": {
-            
+
             "subgrove_id": subgrove_id,
             "key": key,
             "data": data,

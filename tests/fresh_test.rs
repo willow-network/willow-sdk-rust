@@ -18,8 +18,8 @@ async fn fresh_test() {
     println!("- Network was just restarted");
 
     // Read the funded DID
-    let funded_did = std::env::var("WILLOW_TEST_DID")
-        .unwrap_or_else(|_| "did:willow:test-owner".to_string());
+    let funded_did =
+        std::env::var("WILLOW_TEST_DID").unwrap_or_else(|_| "did:willow:test-owner".to_string());
 
     println!("\nUsing funded DID: {}", funded_did);
 
@@ -69,7 +69,7 @@ async fn fresh_test() {
     let transaction = json!({
         "RegisterSubgrove": {
             "subgrove_id": "posts",
-            
+
             "name": "Blog Posts",
             "schema": schema_json,
             "owner_did": funded_did.clone(),
@@ -115,7 +115,7 @@ async fn fresh_test() {
 
     let fund_tx = json!({
         "FundSubgrove": {
-            
+
             "amount": 10_000_000_000_000_000_000u128,
             "from_did": funded_did.clone(),
             "signature": []
@@ -164,7 +164,7 @@ async fn fresh_test() {
 
     let store_tx = json!({
         "StoreData": {
-            
+
             "subgrove_id": "posts",
             "key": "post1",
             "data": data,

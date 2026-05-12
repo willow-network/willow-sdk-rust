@@ -192,7 +192,6 @@ enum DataCommands {
         #[arg(long)]
         no_verify: bool,
     },
-
 }
 
 #[derive(Subcommand)]
@@ -552,9 +551,7 @@ async fn handle_subgrove_command(
 
             output_result(result, format);
         }
-        SubgroveCommands::Info {
-            subgrove_name,
-        } => {
+        SubgroveCommands::Info { subgrove_name } => {
             let client = create_client(node_url.to_string()).await?;
 
             match client.get_subgrove(&subgrove_name).await {
@@ -669,9 +666,7 @@ async fn handle_data_command(
             let conditions_json: Value = serde_json::from_str(&conditions)?;
 
             let results = if no_verify {
-                client
-                    .query_unverified(&subgrove, conditions_json)
-                    .await?
+                client.query_unverified(&subgrove, conditions_json).await?
             } else {
                 client.query(&subgrove, conditions_json).await?
             };

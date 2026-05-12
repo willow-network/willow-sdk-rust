@@ -13,7 +13,8 @@ use willow_sdk::{
 };
 
 async fn setup_test_environment(
-) -> Result<(WillowClient, ConsensusClient, DidInfo, SigningKey, String), Box<dyn std::error::Error>> {
+) -> Result<(WillowClient, ConsensusClient, DidInfo, SigningKey, String), Box<dyn std::error::Error>>
+{
     // Initialize clients
     let client = WillowClient::new("http://localhost:3031").await?;
     let consensus_client = ConsensusClient::new("http://localhost:26657");
@@ -65,7 +66,8 @@ async fn setup_test_environment(
         }),
         owner_did: did_info.did.clone(),
         admins: vec![],
-        initial_funding: None,        writers: vec![did_info.did.clone()],
+        initial_funding: None,
+        writers: vec![did_info.did.clone()],
         readers: vec![did_info.did.clone()],
         signature: vec![],
         public_key_id: did_info.public_key_id.clone(),
@@ -229,7 +231,6 @@ async fn test_query_with_automatic_proof_verification() {
         store_test_data(
             &consensus,
             &signing_key,
-            
             &subgrove_id,
             key,
             data,
@@ -342,11 +343,7 @@ async fn test_proof_verification_error_handling() {
         };
 
     // Test retrieving non-existent key
-    match client
-        .data()
-        .get(&subgrove_id, "non-existent-key")
-        .await
-    {
+    match client.data().get(&subgrove_id, "non-existent-key").await {
         Ok(_) => panic!("Expected error for non-existent key"),
         Err(WillowError::NotFound(_)) => {
             // Expected error

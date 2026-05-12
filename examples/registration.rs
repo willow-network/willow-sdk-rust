@@ -84,11 +84,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 6. Get a specific subgrove
     println!("\n6. Getting specific subgrove...");
     let subgrove_id = "test-subgrove";
-    match client
-        .registration()
-        .get_subgrove(subgrove_id)
-        .await
-    {
+    match client.registration().get_subgrove(subgrove_id).await {
         Ok(sg) => {
             println!("   Subgrove ID: {}", sg.subgrove_id);
             println!("   Name: {}", sg.name);

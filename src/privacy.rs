@@ -78,10 +78,7 @@ impl PrivacyOperations {
     ///
     /// Returns the encrypted key grant that allows this DID to decrypt
     /// the subgrove's data.
-    pub async fn get_my_key_grant(
-        &self,
-        subgrove_id: &str,
-    ) -> Result<EncryptedKeyGrant> {
+    pub async fn get_my_key_grant(&self, subgrove_id: &str) -> Result<EncryptedKeyGrant> {
         let did = self
             .client
             .get_did()
@@ -105,10 +102,7 @@ impl PrivacyOperations {
     /// List all grantee DIDs for a subgrove.
     ///
     /// Only the subgrove owner or admin can call this.
-    pub async fn list_key_grantees(
-        &self,
-        subgrove_id: &str,
-    ) -> Result<Vec<String>> {
+    pub async fn list_key_grantees(&self, subgrove_id: &str) -> Result<Vec<String>> {
         let response: ApiResponse<Vec<String>> = self
             .client
             .request(
@@ -177,10 +171,7 @@ impl PrivacyOperations {
             }
         });
 
-        self.client
-            .consensus()
-            .submit_raw_transaction(tx)
-            .await
+        self.client.consensus().submit_raw_transaction(tx).await
     }
 
     /// Submit a RevokeSubgroveKey transaction via consensus.
@@ -213,10 +204,7 @@ impl PrivacyOperations {
             }
         });
 
-        self.client
-            .consensus()
-            .submit_raw_transaction(tx)
-            .await
+        self.client.consensus().submit_raw_transaction(tx).await
     }
 
     /// Submit a RotateSubgroveKey transaction via consensus.
@@ -251,9 +239,6 @@ impl PrivacyOperations {
             }
         });
 
-        self.client
-            .consensus()
-            .submit_raw_transaction(tx)
-            .await
+        self.client.consensus().submit_raw_transaction(tx).await
     }
 }

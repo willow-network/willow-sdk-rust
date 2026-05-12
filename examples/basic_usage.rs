@@ -44,11 +44,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 4. Retrieve data without verification (faster)
     println!("\n4. Retrieving data (without verification)...");
-    match client
-        .data()
-        .get_unverified("users", "alice")
-        .await
-    {
+    match client.data().get_unverified("users", "alice").await {
         Ok(data) => {
             println!("   Data retrieved (unverified):");
             println!("   {}", serde_json::to_string_pretty(&data)?);

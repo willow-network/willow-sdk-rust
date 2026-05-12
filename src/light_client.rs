@@ -898,12 +898,9 @@ impl LightClient {
         // headers have a 1-block lag so the latest header's app_hash is always
         // one block behind the current GroveDB state.
         let expected_root = if let Some(h) = height {
-            let header = self
-                .get_header_by_height(h)
-                .await
-                .ok_or_else(|| {
-                    WillowError::LightClient(format!("No verified header at height {}", h))
-                })?;
+            let header = self.get_header_by_height(h).await.ok_or_else(|| {
+                WillowError::LightClient(format!("No verified header at height {}", h))
+            })?;
             header.header.app_hash
         } else {
             self.fetch_current_app_hash().await?

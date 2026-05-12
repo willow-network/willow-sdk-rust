@@ -77,14 +77,12 @@ impl FileOperations {
 
         // Compute chunk hashes and content hash
         let content_hash: [u8; 32] = Sha256::digest(data).into();
-        let chunk_hashes: Vec<[u8; 32]> = chunks
-            .iter()
-            .map(|c| Sha256::digest(c).into())
-            .collect();
+        let chunk_hashes: Vec<[u8; 32]> = chunks.iter().map(|c| Sha256::digest(c).into()).collect();
         let chunk_merkle_root = compute_merkle_root(&chunk_hashes);
 
-        let owner_did = self.client.get_did()
-            .ok_or_else(|| WillowError::Authentication("Set identity before file operations".to_string()))?;
+        let owner_did = self.client.get_did().ok_or_else(|| {
+            WillowError::Authentication("Set identity before file operations".to_string())
+        })?;
         let content_hash_hex = hex::encode(content_hash);
         let content_type = guess_content_type(filename);
 
@@ -93,7 +91,10 @@ impl FileOperations {
         let (signature_bytes, pub_key_id) = if let Some(key) = signing_key {
             let message = format!(
                 "store_file:{}:{}:{}:{}",
-                subgrove_id, file_key, content_hash_hex, data.len()
+                subgrove_id,
+                file_key,
+                content_hash_hex,
+                data.len()
             );
             let signature = key.sign(message.as_bytes());
             (
@@ -107,8 +108,8 @@ impl FileOperations {
         // Submit manifest to consensus via CometBFT RPC.
         // Use the server's StoreFileManifestTx struct directly for correct
         // serialization of [u8; 32] fields (content_hash, chunk_merkle_root).
-        use willow_types::consensus::transactions::StoreFileManifestTx;
         use crate::consensus::ConsensusClient;
+        use willow_types::consensus::transactions::StoreFileManifestTx;
 
         let manifest_tx = StoreFileManifestTx {
             subgrove_id: subgrove_id.to_string(),
@@ -127,7 +128,11 @@ impl FileOperations {
             nonce: tx_nonce,
         };
         let tx_json = ConsensusClient::serialize_tx("StoreFileManifest", &manifest_tx)?;
-        let tx_hash = self.client.consensus().submit_transaction_json(&tx_json).await?;
+        let tx_hash = self
+            .client
+            .consensus()
+            .submit_transaction_json(&tx_json)
+            .await?;
 
         // Wait for the manifest to be committed before uploading chunks.
         // The storage node verifies the on-chain manifest exists before
@@ -144,14 +149,19 @@ impl FileOperations {
                 "{}/upload/{}/{}?chunk_index={}&chunk_count={}&content_hash={}",
                 storage_node_endpoint, subgrove_id, file_key, i, chunk_count, content_hash_hex
             );
-            let resp = http.post(&url).body(chunk.to_vec()).send().await
+            let resp = http
+                .post(&url)
+                .body(chunk.to_vec())
+                .send()
+                .await
                 .map_err(|e| WillowError::Network(format!("Chunk upload failed: {}", e)))?;
 
             if !resp.status().is_success() {
                 let body = resp.text().await.unwrap_or_default();
-                return Err(WillowError::Network(
-                    format!("Chunk {} upload failed: {}", i, body),
-                ));
+                return Err(WillowError::Network(format!(
+                    "Chunk {} upload failed: {}",
+                    i, body
+                )));
             }
         }
 
@@ -200,16 +210,23 @@ impl FileOperations {
                 "{}/chunk/{}/{}/{}?content_hash={}",
                 storage_node_endpoint, subgrove_id, file_key, i, content_hash_hex
             );
-            let resp = http.get(&url).send().await
+            let resp = http
+                .get(&url)
+                .send()
+                .await
                 .map_err(|e| WillowError::Network(format!("Chunk download failed: {}", e)))?;
 
             if !resp.status().is_success() {
-                return Err(WillowError::Network(
-                    format!("Chunk {} download failed: HTTP {}", i, resp.status()),
-                ));
+                return Err(WillowError::Network(format!(
+                    "Chunk {} download failed: HTTP {}",
+                    i,
+                    resp.status()
+                )));
             }
 
-            let chunk_data = resp.bytes().await
+            let chunk_data = resp
+                .bytes()
+                .await
                 .map_err(|e| WillowError::Network(format!("Failed to read chunk {}: {}", i, e)))?;
 
             let chunk_hash: [u8; 32] = Sha256::digest(&chunk_data).into();
@@ -219,8 +236,9 @@ impl FileOperations {
 
         // Verify chunk Merkle root
         let computed_root = compute_merkle_root(&chunk_hashes);
-        let expected_root = hex::decode(&manifest.chunk_merkle_root)
-            .map_err(|e| WillowError::ProofVerificationFailed(format!("Invalid merkle root hex: {}", e)))?;
+        let expected_root = hex::decode(&manifest.chunk_merkle_root).map_err(|e| {
+            WillowError::ProofVerificationFailed(format!("Invalid merkle root hex: {}", e))
+        })?;
 
         if computed_root != expected_root.as_slice() {
             return Err(WillowError::ProofVerificationFailed(
@@ -230,8 +248,9 @@ impl FileOperations {
 
         // Verify content hash
         let computed_hash = Sha256::digest(&file_data);
-        let expected_hash = hex::decode(content_hash_hex)
-            .map_err(|e| WillowError::ProofVerificationFailed(format!("Invalid content hash hex: {}", e)))?;
+        let expected_hash = hex::decode(content_hash_hex).map_err(|e| {
+            WillowError::ProofVerificationFailed(format!("Invalid content hash hex: {}", e))
+        })?;
 
         if computed_hash.as_slice() != expected_hash.as_slice() {
             return Err(WillowError::ProofVerificationFailed(
@@ -243,11 +262,7 @@ impl FileOperations {
     }
 
     /// Get file manifest metadata with GroveDB proof.
-    pub async fn metadata(
-        &self,
-        subgrove_id: &str,
-        file_key: &str,
-    ) -> Result<FileManifest> {
+    pub async fn metadata(&self, subgrove_id: &str, file_key: &str) -> Result<FileManifest> {
         self.client
             .request(
                 "GET",
@@ -259,10 +274,7 @@ impl FileOperations {
     }
 
     /// List all files in a subgrove.
-    pub async fn list(
-        &self,
-        subgrove_id: &str,
-    ) -> Result<Vec<FileManifest>> {
+    pub async fn list(&self, subgrove_id: &str) -> Result<Vec<FileManifest>> {
         let response: FileListResponse = self
             .client
             .request(
@@ -288,15 +300,13 @@ impl FileOperations {
     ) -> Result<()> {
         self.ensure_authenticated()?;
 
-        let owner_did = self.client.get_did()
-            .ok_or_else(|| WillowError::Authentication("Set identity before file operations".to_string()))?;
+        let owner_did = self.client.get_did().ok_or_else(|| {
+            WillowError::Authentication("Set identity before file operations".to_string())
+        })?;
 
         let tx_nonce = self.client.consensus().get_next_nonce(&owner_did).await?;
         let (signature_bytes, pub_key_id) = if let Some(key) = signing_key {
-            let message = format!(
-                "delete_file:{}:{}",
-                subgrove_id, file_key
-            );
+            let message = format!("delete_file:{}:{}", subgrove_id, file_key);
             let signature = key.sign(message.as_bytes());
             (
                 signature.to_bytes().to_vec(),
@@ -306,8 +316,8 @@ impl FileOperations {
             (vec![], String::new())
         };
 
-        use willow_types::consensus::transactions::DeleteFileManifestTx;
         use crate::consensus::ConsensusClient;
+        use willow_types::consensus::transactions::DeleteFileManifestTx;
 
         let delete_tx = DeleteFileManifestTx {
             subgrove_id: subgrove_id.to_string(),
@@ -318,7 +328,10 @@ impl FileOperations {
             nonce: tx_nonce,
         };
         let tx_json = ConsensusClient::serialize_tx("DeleteFileManifest", &delete_tx)?;
-        self.client.consensus().submit_transaction_json(&tx_json).await?;
+        self.client
+            .consensus()
+            .submit_transaction_json(&tx_json)
+            .await?;
 
         Ok(())
     }
@@ -353,7 +366,10 @@ impl FileOperations {
             nonce,
         };
         let tx_json = ConsensusClient::serialize_tx("UnregisterStorageNode", &tx)?;
-        self.client.consensus().submit_transaction_json(&tx_json).await?;
+        self.client
+            .consensus()
+            .submit_transaction_json(&tx_json)
+            .await?;
 
         Ok(())
     }

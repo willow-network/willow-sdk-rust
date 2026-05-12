@@ -18,8 +18,8 @@ async fn light_client_enabled_verification_test() {
     println!("This test demonstrates ACTUAL trustless verification");
 
     // Read the funded DID
-    let funded_did = std::env::var("WILLOW_TEST_DID")
-        .unwrap_or_else(|_| "did:willow:test-owner".to_string());
+    let funded_did =
+        std::env::var("WILLOW_TEST_DID").unwrap_or_else(|_| "did:willow:test-owner".to_string());
 
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -30,7 +30,7 @@ async fn light_client_enabled_verification_test() {
 
     println!("\n📋 Test Configuration:");
     println!("  DID: {}", funded_did);
-    
+
     println!("  Subgrove: {}", subgrove_name);
 
     // Step 1: Create client WITH light client
@@ -113,7 +113,8 @@ async fn light_client_enabled_verification_test() {
         schema: Some(schema),
         owner_did: funded_did.clone(),
         admins: vec![],
-        initial_funding: None,        writers: vec![funded_did.clone()],
+        initial_funding: None,
+        writers: vec![funded_did.clone()],
         readers: vec![funded_did.clone()],
         signature: vec![],
         public_key_id: format!("{}#key-1", funded_did),
@@ -162,11 +163,7 @@ async fn light_client_enabled_verification_test() {
     );
 
     // This will use light client for verification!
-    match client
-        .data()
-        .get(&subgrove_name, "test_entry")
-        .await
-    {
+    match client.data().get(&subgrove_name, "test_entry").await {
         Ok(data) => {
             println!("  ✅ Data retrieved and verified with LIGHT CLIENT!");
             println!("  📄 Message: {}", data["message"].as_str().unwrap_or(""));

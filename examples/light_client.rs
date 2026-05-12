@@ -69,11 +69,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   - GroveDB Merkle proof against consensus app_hash");
     println!("   - Data integrity without trusting any single node\n");
 
-    match client
-        .data()
-        .get("secure-data", "entry-1")
-        .await
-    {
+    match client.data().get("secure-data", "entry-1").await {
         Ok(data) => {
             println!("   Data retrieved and CRYPTOGRAPHICALLY VERIFIED:");
             println!("   {}", serde_json::to_string_pretty(&data)?);

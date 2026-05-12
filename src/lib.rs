@@ -75,12 +75,12 @@ pub mod errors;
 pub mod files;
 pub mod indexers;
 pub mod indexing;
-pub mod subscriptions;
 pub mod light_client;
 pub mod privacy;
 pub mod proof;
 pub mod registration;
 pub mod subgrove_config;
+pub mod subscriptions;
 pub mod token;
 pub mod types;
 pub mod utils;
@@ -89,46 +89,45 @@ pub mod validators;
 pub mod verifiable_rpc;
 
 pub use client::{SeenStateRoot, VerifyMode, WillowClient};
-#[cfg(feature = "verifiable-rpc")]
-pub use verifiable_rpc::{VerifiableRpcOperations, VerificationResult, VerifiedAnswer};
 pub use consensus::{ConsensusClient, Transaction};
 pub use data::{
     CheckpointInfo, DataOperations, HistoricalQueryRequest, HistoricalQueryResponse, QueryResponse,
 };
+pub use erc8004::{
+    AgentReputationSummary, DisputeStats, Erc8004AgentListItem, Erc8004AgentListResponse,
+    Erc8004Client, Erc8004ValidationRecord, Erc8004ValidationStatusResponse,
+    Erc8004ValidationSummary, ReputationAttestation, ReputationHistoryEvent,
+    ReputationHistoryResponse, ValidationStatusBreakdown,
+};
 pub use errors::{Result, WillowError};
 pub use indexers::{QuerySource, RoutedQueryResult, ServedBy, WillowIndexers};
 pub use indexing::IndexingOperations;
-pub use subscriptions::{
-    SubscribeOptions, SubscribeSource, SubscriptionHandle, SubscriptionPayload,
-    WillowSubscriptions,
-};
 #[cfg(not(feature = "no-light-client"))]
 pub use light_client::{
     LightClient, LightClientConfig, LightClientConfigBuilder, TrustedHeader, TrustedState,
 };
+pub use privacy::{CommitmentFrequency, EncryptedKeyGrant, PrivacyConfig, PrivacyOperations};
 pub use proof::{ProofVerifier, QueryResponseExt};
 pub use registration::RegistrationOperations;
+pub use subgrove_config::SubgroveDefinition;
+pub use subscriptions::{
+    SubscribeOptions, SubscribeSource, SubscriptionHandle, SubscriptionPayload, WillowSubscriptions,
+};
 pub use token::TokenOperations;
-pub use willow_types::token::units as token_units;
 pub use types::{
-    ApiResponse, BalanceInfo, BlockVerificationStatus, DidDocument,
-    DidPermissions, EthereumAnchor, FeeSchedule, GraphQLError, GraphQLRequest, GraphQLResponse,
-    HealthStatus, IndexDefinition, IndexerInfo, IndexerStatus, MerkleProof, PathQueryData,
-    PublicKey, QueryProof, RegisterSubgroveRequest, SchemaDefinition,
-    SchemaField, SignatureAlgorithm, SignedRequestHeaders, StakeRequest, StoreDataRequest,
+    ApiResponse, BalanceInfo, BlockVerificationStatus, DidDocument, DidPermissions, EthereumAnchor,
+    FeeSchedule, GraphQLError, GraphQLRequest, GraphQLResponse, HealthStatus, IndexDefinition,
+    IndexerInfo, IndexerStatus, MerkleProof, PathQueryData, PublicKey, QueryProof,
+    RegisterSubgroveRequest, SchemaDefinition, SchemaField, SignatureAlgorithm,
+    SignedRequestHeaders, SqlRequest, SqlResponse, StakeRequest, StoreDataRequest,
     SubgroveBalanceInfo, SubgroveIndexingStatus, SubgroveInfo, SubgroveRegistration,
     SubgroveStatus, TokenInfo, TransferRequest, UnstakeRequest, ValidatorInfo, VerificationStats,
-    SqlRequest, SqlResponse, VerifyProofRequest, VerifyProofResponse,
+    VerifyProofRequest, VerifyProofResponse,
 };
-pub use privacy::{PrivacyOperations, PrivacyConfig, CommitmentFrequency, EncryptedKeyGrant};
-pub use subgrove_config::SubgroveDefinition;
 pub use validators::ValidatorOperations;
-pub use erc8004::{
-    AgentReputationSummary, DisputeStats, Erc8004AgentListItem,
-    Erc8004AgentListResponse, Erc8004Client, Erc8004ValidationRecord,
-    Erc8004ValidationStatusResponse, Erc8004ValidationSummary, ReputationAttestation,
-    ReputationHistoryEvent, ReputationHistoryResponse, ValidationStatusBreakdown,
-};
+#[cfg(feature = "verifiable-rpc")]
+pub use verifiable_rpc::{VerifiableRpcOperations, VerificationResult, VerifiedAnswer};
+pub use willow_types::token::units as token_units;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 

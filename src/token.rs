@@ -24,7 +24,7 @@
 
 use crate::client::WillowClient;
 use crate::errors::{Result, WillowError};
-use crate::types::{ApiResponse, SubgroveBalanceInfo, BalanceInfo, FeeSchedule, TokenInfo};
+use crate::types::{ApiResponse, BalanceInfo, FeeSchedule, SubgroveBalanceInfo, TokenInfo};
 
 /// Operations for token information and balances.
 pub struct TokenOperations {
@@ -81,9 +81,9 @@ impl TokenOperations {
             )
             .await?;
 
-        response
-            .data
-            .ok_or_else(|| WillowError::NotFound(format!("Subgrove balance not found for: {}", subgrove_id)))
+        response.data.ok_or_else(|| {
+            WillowError::NotFound(format!("Subgrove balance not found for: {}", subgrove_id))
+        })
     }
 
     /// Gets the current fee schedule.

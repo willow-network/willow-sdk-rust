@@ -42,11 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 2. Get without verification (faster)
     println!("\n2. Get without verification (unverified)...");
-    match client
-        .data()
-        .get_unverified(dataset_id, "product-2")
-        .await
-    {
+    match client.data().get_unverified(dataset_id, "product-2").await {
         Ok(data) => {
             println!("   Retrieved (unverified):");
             println!("   {}", serde_json::to_string_pretty(&data)?);
@@ -86,11 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "limit": 5
     });
 
-    match client
-        .data()
-        .query_unverified(dataset_id, query)
-        .await
-    {
+    match client.data().query_unverified(dataset_id, query).await {
         Ok(response) => {
             println!(
                 "   Found {} documents (unverified)",

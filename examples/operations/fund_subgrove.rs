@@ -61,7 +61,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Amount: {} tokens", amount);
     println!("From: {}", from_did);
 
-    match client.consensus().fund_subgrove(request, &signing_key).await {
+    match client
+        .consensus()
+        .fund_subgrove(request, &signing_key)
+        .await
+    {
         Ok(tx_hash) => {
             println!("SUCCESS! TX: {}", tx_hash);
             client.consensus().wait_for_transaction(&tx_hash, 5).await?;

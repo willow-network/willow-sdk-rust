@@ -22,8 +22,8 @@ async fn light_client_verification_test() {
     println!("This test verifies trustless data verification using the embedded light client");
 
     // Read the funded DID from the setup
-    let funded_did = std::env::var("WILLOW_TEST_DID")
-        .unwrap_or_else(|_| "did:willow:test-owner".to_string());
+    let funded_did =
+        std::env::var("WILLOW_TEST_DID").unwrap_or_else(|_| "did:willow:test-owner".to_string());
 
     // Generate unique app and subgrove names
     let timestamp = SystemTime::now()
@@ -35,7 +35,7 @@ async fn light_client_verification_test() {
 
     println!("\n📋 Test Configuration:");
     println!("  DID: {}", funded_did);
-    
+
     println!("  Subgrove: {}", subgrove_name);
 
     // Step 1: Create client WITHOUT light client first (for baseline)
@@ -124,7 +124,8 @@ async fn light_client_verification_test() {
         schema: Some(schema),
         owner_did: funded_did.clone(),
         admins: vec![],
-        initial_funding: None,        writers: vec![funded_did.clone()],
+        initial_funding: None,
+        writers: vec![funded_did.clone()],
         readers: vec![funded_did.clone()],
         signature: vec![],
         public_key_id: format!("{}#key-1", funded_did),
@@ -199,11 +200,7 @@ async fn light_client_verification_test() {
     );
 
     // This will automatically verify cryptographic proofs
-    match client
-        .data()
-        .get(&subgrove_name, "test_entry")
-        .await
-    {
+    match client.data().get(&subgrove_name, "test_entry").await {
         Ok(data) => {
             println!("  ✅ Data retrieved and cryptographically verified!");
             println!("  📄 Message: {}", data["message"].as_str().unwrap_or(""));

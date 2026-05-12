@@ -15,8 +15,8 @@ async fn performance_test() {
     println!("This test measures indexing system performance characteristics");
 
     // Read the funded DID
-    let funded_did = std::env::var("WILLOW_TEST_DID")
-        .unwrap_or_else(|_| "did:willow:test-owner".to_string());
+    let funded_did =
+        std::env::var("WILLOW_TEST_DID").unwrap_or_else(|_| "did:willow:test-owner".to_string());
 
     // Generate unique subgrove name with timestamp
     let timestamp = SystemTime::now()
@@ -78,9 +78,7 @@ async fn performance_test() {
                     }
                 } else {
                     // App exists but subgrove doesn't, which is expected
-                    println!(
-                        "  ✅ Subgrove exists (subgrove query returned expected error)"
-                    );
+                    println!("  ✅ Subgrove exists (subgrove query returned expected error)");
                     app_exists = true;
                     break;
                 }
@@ -217,11 +215,7 @@ async fn performance_test() {
         let doc_key = format!("perf_doc_{}", i);
 
         let start = Instant::now();
-        match client
-            .data()
-            .get(&subgrove_name, &doc_key)
-            .await
-        {
+        match client.data().get(&subgrove_name, &doc_key).await {
             Ok(_) => {
                 let elapsed = start.elapsed();
                 read_times.push(elapsed);
@@ -455,22 +449,14 @@ async fn performance_test() {
 
         // Try immediate read
         let read_start = Instant::now();
-        match client
-            .data()
-            .get(&subgrove_name, &doc_key)
-            .await
-        {
+        match client.data().get(&subgrove_name, &doc_key).await {
             Ok(_) => println!("      Immediate read: ✅ ({:?})", read_start.elapsed()),
             Err(_) => {
                 println!("      Immediate read: ❌ ({:?})", read_start.elapsed());
 
                 // Try again after standard delay
                 sleep(Duration::from_secs(15)).await;
-                match client
-                    .data()
-                    .get(&subgrove_name, &doc_key)
-                    .await
-                {
+                match client.data().get(&subgrove_name, &doc_key).await {
                     Ok(_) => println!("      Delayed read: ✅"),
                     Err(_) => println!("      Delayed read: ❌"),
                 }
@@ -530,7 +516,7 @@ async fn register_subgrove(
     let transaction = json!({
         "RegisterSubgrove": {
             "subgrove_id": subgrove_id,
-            
+
             "name": "Performance Test",
             "schema": schema_json,
             "owner_did": owner_did,
@@ -551,7 +537,7 @@ async fn fund_subgrove(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let fund_tx = json!({
         "FundSubgrove": {
-            
+
             "amount": "20000000000000000000", // 20 WILL for performance test
             "from_did": from_did,
             "signature": []
@@ -578,7 +564,7 @@ async fn store_data(
 
     let transaction = json!({
         "StoreData": {
-            
+
             "subgrove_id": subgrove_id,
             "key": key,
             "data": data,

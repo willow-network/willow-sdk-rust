@@ -15,8 +15,8 @@ async fn basic_indexing_test() {
     println!("This test verifies core indexing functionality");
 
     // Read the funded DID
-    let funded_did = std::env::var("WILLOW_TEST_DID")
-        .unwrap_or_else(|_| "did:willow:test-owner".to_string());
+    let funded_did =
+        std::env::var("WILLOW_TEST_DID").unwrap_or_else(|_| "did:willow:test-owner".to_string());
 
     // Generate unique subgrove name with timestamp
     let timestamp = SystemTime::now()
@@ -98,7 +98,7 @@ async fn basic_indexing_test() {
 
     let fund_tx = json!({
         "FundSubgrove": {
-            
+
             "amount": 10_000_000_000_000_000_000u128, // 10 WILL
             "from_did": funded_did.clone(),
             "signature": []
@@ -273,7 +273,7 @@ async fn basic_indexing_test() {
 async fn register_subgrove_direct(
     consensus: &ConsensusClient,
     subgrove_id: &str,
-    
+
     name: &str,
     schema: &serde_json::Value,
     owner_did: &str,
@@ -304,7 +304,7 @@ async fn register_subgrove_direct(
     let transaction = json!({
         "RegisterSubgrove": {
             "subgrove_id": subgrove_id,
-            
+
             "name": name,
             "schema": schema_json,
             "owner_did": owner_did,
@@ -322,7 +322,7 @@ async fn register_subgrove_direct(
 // Helper function to store data directly
 async fn store_data_direct(
     consensus: &ConsensusClient,
-    
+
     subgrove_id: &str,
     key: &str,
     data: serde_json::Value,
@@ -339,7 +339,7 @@ async fn store_data_direct(
 
     let transaction = json!({
         "StoreData": {
-            
+
             "subgrove_id": subgrove_id,
             "key": key,
             "data": data,

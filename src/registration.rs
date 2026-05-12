@@ -48,18 +48,13 @@ impl RegistrationOperations {
     }
 
     /// Gets a specific subgrove by ID.
-    pub async fn get_subgrove(
-        &self,
-        subgrove_id: &str,
-    ) -> Result<SubgroveRegistration> {
+    pub async fn get_subgrove(&self, subgrove_id: &str) -> Result<SubgroveRegistration> {
         let subgroves = self.list_subgroves().await?;
 
         subgroves
             .into_iter()
             .find(|s| s.subgrove_id == subgrove_id)
-            .ok_or_else(|| {
-                WillowError::NotFound(format!("Subgrove not found: {}", subgrove_id))
-            })
+            .ok_or_else(|| WillowError::NotFound(format!("Subgrove not found: {}", subgrove_id)))
     }
 
     /// Gets the permissions for a DID.
