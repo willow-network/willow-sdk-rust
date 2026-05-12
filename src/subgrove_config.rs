@@ -36,7 +36,8 @@ use crate::errors::{Result, WillowError};
 // the same types so callers building a `SubgroveDefinition` produce bytes
 // that round-trip through the consensus validator without translation.
 pub use willow_types::consensus::{
-    DataSource, EventSignature, EvmAddress, SupportedChain, WillowManifest,
+    ChainFamily, DataSource, EventSignature, EvmAddress, EvmDataSource, InstructionDiscriminator,
+    SolanaDataSource, SolanaPubkey, SupportedChain, WillowManifest,
 };
 
 /// Deserialize a u128 from either an integer or a quoted string.
@@ -340,15 +341,18 @@ events = ["Swap(address,address,int256)"]
         assert_eq!(def.execution_mode, "ConsensusExecution");
         assert_eq!(def.manifest.data_sources.len(), 1);
         let ds = &def.manifest.data_sources[0];
-        assert_eq!(ds.name, "TestPool");
-        assert_eq!(ds.network, SupportedChain::Mainnet);
+        let DataSource::Evm(evm) = ds else {
+            panic!("expected EVM data source");
+        };
+        assert_eq!(evm.name, "TestPool");
+        assert_eq!(evm.network, SupportedChain::Mainnet);
         assert_eq!(
-            ds.address.to_canonical_string(),
+            evm.address.to_canonical_string(),
             "0x1234567890abcdef1234567890abcdef12345678"
         );
-        assert_eq!(ds.start_block, 12345678);
-        assert_eq!(ds.events.len(), 1);
-        assert_eq!(ds.events[0].as_str(), "Swap(address,address,int256)");
+        assert_eq!(evm.start_block, 12345678);
+        assert_eq!(evm.events.len(), 1);
+        assert_eq!(evm.events[0].as_str(), "Swap(address,address,int256)");
     }
 
     #[test]

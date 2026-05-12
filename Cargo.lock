@@ -4153,6 +4153,7 @@ name = "willow-types"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "bs58",
  "chrono",
  "ciborium",
  "hex",
