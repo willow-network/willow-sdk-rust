@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["Willow Team"]
 description = "Rust SDK for Willow - decentralized data indexing protocol"
 license = "MIT"
-repository = "https://github.com/willow/willow-rust-sdk"
+repository = "https://github.com/willow-network/willow"
 keywords = ["willow", "web3", "indexing", "did", "decentralized"]
 categories = ["web-programming", "cryptography"]
 

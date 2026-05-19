@@ -26,6 +26,7 @@ struct Args {
     api: String,
     #[arg(long, default_value = "did:willow:validator1")]
     owner_did: String,
+    // Default key_hex is the RFC 8032 §7.1 Test 1 Ed25519 vector.
     #[arg(
         long,
         default_value = "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60"

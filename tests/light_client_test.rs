@@ -12,7 +12,7 @@ use tokio::time::sleep;
 use willow_sdk::types::SignatureAlgorithm;
 use willow_sdk::{ConsensusClient, WillowClient};
 
-// Standard test private key used by the funded DID
+// RFC 8032 §7.1 Test 2 Ed25519 vector — the funded DID for integration tests signs with it.
 const PRIVATE_KEY_HEX: &str = "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb";
 
 #[tokio::test]

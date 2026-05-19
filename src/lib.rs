@@ -171,6 +171,7 @@ pub mod devnet {
 
     /// Validator 1 account for local devnet development.
     /// Has 100,000 WILL staked + 100,000 WILL available for testing.
+    // Private key is the RFC 8032 §7.1 Test 1 Ed25519 vector.
     pub const VALIDATOR_1: ValidatorAccount = ValidatorAccount {
         did: "did:willow:validator1",
         private_key: "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
