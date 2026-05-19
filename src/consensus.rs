@@ -21,6 +21,15 @@ pub struct RegisterDidTx {
     pub nonce: u64,
 }
 
+/// Update an existing DID document (rotate keys).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateDidTx {
+    pub did_document: DidDocument,
+    pub signature: Vec<u8>,
+    pub public_key_id: String,
+    pub nonce: u64,
+}
+
 pub use willow_types::consensus::indexing_transactions::RetentionWindow;
 
 pub use willow_types::consensus::indexing_transactions::SubgroveMode;
@@ -130,6 +139,40 @@ impl ConsensusClient {
         };
 
         let tx_json = Self::serialize_tx("RegisterDid", &register_tx)?;
+        self.submit_transaction(&tx_json).await
+    }
+
+    /// Update (rotate) an existing DID document.
+    ///
+    /// `new_did_document` is the replacement document — its `id` must match
+    /// the on-chain DID being updated. `current_private_key_hex` is the
+    /// **current** signing key (the one already on chain), and
+    /// `current_public_key_id` identifies that current key in the on-chain
+    /// document. After this tx commits, only keys in
+    /// `new_did_document.authentication` are valid for signing as this DID.
+    pub async fn update_did(
+        &self,
+        new_did_document: &DidDocument,
+        current_private_key_hex: &str,
+        current_public_key_id: &str,
+        algorithm: SignatureAlgorithm,
+    ) -> Result<String> {
+        let nonce = self.get_next_nonce(&new_did_document.id).await?;
+        let new_doc_json = serde_json::to_string(new_did_document)?;
+        // Must match the message format that the chain handler verifies. See
+        // crates/consensus/src/willow_cometbft/identity_transactions.rs.
+        let message = format!("UpdateDid\n{}\n{}", new_doc_json, nonce);
+        let signature_hex = sign_challenge(&message, current_private_key_hex, algorithm)?;
+        let signature_bytes = hex::decode(signature_hex)?;
+
+        let update_tx = UpdateDidTx {
+            did_document: new_did_document.clone(),
+            signature: signature_bytes,
+            public_key_id: current_public_key_id.to_string(),
+            nonce,
+        };
+
+        let tx_json = Self::serialize_tx("UpdateDid", &update_tx)?;
         self.submit_transaction(&tx_json).await
     }
 
