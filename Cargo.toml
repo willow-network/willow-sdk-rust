@@ -53,9 +53,8 @@ base64 = "0.22"
 log = "0.4"
 tracing = { version = "0.1", optional = true }
 
-# CLI dependencies
+# Used by examples for arg parsing.
 clap = { version = "4.4", features = ["derive"] }
-dirs = { version = "5.0", optional = true }
 
 # Shared types with the server (token units, transaction types, etc.)
 willow-types = { path = "../../crates/types" }
@@ -111,7 +110,6 @@ env_logger = "0.11"
 
 [features]
 default = []
-cli = ["dirs"]
 tracing = ["dep:tracing"]
 # Disable light client verification for minimal dependency footprint
 # Use this if you trust your node and want faster compile times
@@ -137,11 +135,6 @@ verifiable-rpc-pure = [
     "dep:willow-gkr-verify-pure",
     "willow-gkr-verify/registry",
 ]
-
-[[bin]]
-name = "willow-cli"
-path = "src/bin/cli.rs"
-required-features = ["cli"]
 
 # Operation examples - individual consensus transactions
 [[example]]
