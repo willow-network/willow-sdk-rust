@@ -177,22 +177,22 @@ path = "examples/operations/list_registrations.rs"
 # exists (GPU CUDA kernels not yet upstream) and when we might retire
 # it.
 [patch."https://github.com/PolyhedraZK/Expander"]
-gkr = { git = "https://github.com/willow-network/Expander", rev = "b545402f702ed6cd1f977be4aafb8f038b06f4da" }
-gkr_engine = { git = "https://github.com/willow-network/Expander", rev = "b545402f702ed6cd1f977be4aafb8f038b06f4da" }
-arith = { git = "https://github.com/willow-network/Expander", rev = "b545402f702ed6cd1f977be4aafb8f038b06f4da" }
-transcript = { git = "https://github.com/willow-network/Expander", rev = "b545402f702ed6cd1f977be4aafb8f038b06f4da" }
-poly_commit = { git = "https://github.com/willow-network/Expander", rev = "b545402f702ed6cd1f977be4aafb8f038b06f4da" }
-config_macros = { git = "https://github.com/willow-network/Expander", rev = "b545402f702ed6cd1f977be4aafb8f038b06f4da" }
-circuit = { git = "https://github.com/willow-network/Expander", rev = "b545402f702ed6cd1f977be4aafb8f038b06f4da" }
-sumcheck = { git = "https://github.com/willow-network/Expander", rev = "b545402f702ed6cd1f977be4aafb8f038b06f4da" }
-serdes = { git = "https://github.com/willow-network/Expander", rev = "b545402f702ed6cd1f977be4aafb8f038b06f4da" }
-bin = { git = "https://github.com/willow-network/Expander", rev = "b545402f702ed6cd1f977be4aafb8f038b06f4da" }
-mersenne31 = { git = "https://github.com/willow-network/Expander", rev = "b545402f702ed6cd1f977be4aafb8f038b06f4da" }
-goldilocks = { git = "https://github.com/willow-network/Expander", rev = "b545402f702ed6cd1f977be4aafb8f038b06f4da" }
-babybear = { git = "https://github.com/willow-network/Expander", rev = "b545402f702ed6cd1f977be4aafb8f038b06f4da" }
-gf2 = { git = "https://github.com/willow-network/Expander", rev = "b545402f702ed6cd1f977be4aafb8f038b06f4da" }
-gf2_128 = { git = "https://github.com/willow-network/Expander", rev = "b545402f702ed6cd1f977be4aafb8f038b06f4da" }
-gkr_hashers = { git = "https://github.com/willow-network/Expander", rev = "b545402f702ed6cd1f977be4aafb8f038b06f4da" }
-polynomials = { git = "https://github.com/willow-network/Expander", rev = "b545402f702ed6cd1f977be4aafb8f038b06f4da" }
-utils = { git = "https://github.com/willow-network/Expander", rev = "b545402f702ed6cd1f977be4aafb8f038b06f4da" }
-crosslayer_prototype = { git = "https://github.com/willow-network/Expander", rev = "b545402f702ed6cd1f977be4aafb8f038b06f4da" }
+gkr = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
+gkr_engine = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
+arith = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
+transcript = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
+poly_commit = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
+config_macros = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
+circuit = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
+sumcheck = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
+serdes = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
+bin = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
+mersenne31 = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
+goldilocks = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
+babybear = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
+gf2 = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
+gf2_128 = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
+gkr_hashers = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
+polynomials = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
+utils = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
+crosslayer_prototype = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
