@@ -497,6 +497,7 @@ mod tests {
     #[test]
     fn verify_gkr_proof_rejects_mismatched_root() {
         let proof = GkrProofData {
+            proof_version: CURRENT_PROOF_VERSION,
             proof: vec![0; 64],
             public_inputs: GkrPublicInputs {
                 output_root: [7; 32],
@@ -528,6 +529,7 @@ mod tests {
         let mut full_proof = FULL_HEADER.to_vec();
         full_proof.extend_from_slice(&[0u8; 200]);
         let data = GkrProofData {
+            proof_version: CURRENT_PROOF_VERSION,
             proof: full_proof,
             public_inputs: pi.clone(),
             verification_key_hash: [0x55; 32],
@@ -557,6 +559,7 @@ mod tests {
         let mut full_proof = FULL_HEADER.to_vec();
         full_proof.extend_from_slice(&[0u8; 200]);
         let data = GkrProofData {
+            proof_version: CURRENT_PROOF_VERSION,
             proof: full_proof,
             public_inputs: pi.clone(),
             verification_key_hash: [0x55; 32], // not an embedded circuit
@@ -581,6 +584,7 @@ mod tests {
             config_hash: [3; 32],
         };
         let data = GkrProofData {
+            proof_version: CURRENT_PROOF_VERSION,
             proof: b"SOME_OTHER_FORMAT_....................................".to_vec(),
             public_inputs: pi.clone(),
             verification_key_hash: [0; 32],
