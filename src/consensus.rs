@@ -34,7 +34,8 @@ pub use willow_types::consensus::indexing_transactions::RetentionWindow;
 
 pub use willow_types::consensus::indexing_transactions::SubgroveMode;
 pub use willow_types::consensus::transactions::{
-    DeleteDataTx, DeregisterSubgroveTx, FundSubgroveTx, RegisterSubgroveTx, TransferTx,
+    ClaimSubgroveIndexingTx, DeleteDataTx, DeregisterSubgroveTx, FundSubgroveTx,
+    RegisterSubgroveTx, TransferTx,
 };
 
 /// CometBFT RPC response
@@ -173,6 +174,44 @@ impl ConsensusClient {
         };
 
         let tx_json = Self::serialize_tx("UpdateDid", &update_tx)?;
+        self.submit_transaction(&tx_json).await
+    }
+
+    /// Submit a `ClaimSubgroveIndexing` tx — the indexer's chain-level
+    /// announcement that it has locally started indexing `subgrove_id`.
+    /// Bumps the subgrove's on-chain `active_indexers` list immediately so
+    /// dashboards reflect that work is underway, without waiting for the
+    /// first checkpoint or chain-tip submission.
+    ///
+    /// Idempotent: re-submitting for an already-claimed `(subgrove, indexer)`
+    /// pair is a no-op (per the on-chain `add_indexer_to_subgrove` semantics).
+    pub async fn claim_subgrove_indexing(
+        &self,
+        subgrove_id: &str,
+        indexer_did: &str,
+        indexer_private_key_hex: &str,
+        public_key_id: &str,
+        algorithm: SignatureAlgorithm,
+    ) -> Result<String> {
+        let nonce = self.get_next_nonce(indexer_did).await?;
+        // Must match the message format the chain handler verifies — see
+        // `crates/consensus/src/willow_cometbft/indexing_transactions.rs`.
+        let message = format!(
+            "ClaimSubgroveIndexing\n{}\n{}\n{}",
+            subgrove_id, indexer_did, nonce,
+        );
+        let signature_hex = sign_challenge(&message, indexer_private_key_hex, algorithm)?;
+        let signature_bytes = hex::decode(signature_hex)?;
+
+        let claim_tx = ClaimSubgroveIndexingTx {
+            subgrove_id: subgrove_id.to_string(),
+            indexer_did: indexer_did.to_string(),
+            signature: signature_bytes,
+            public_key_id: public_key_id.to_string(),
+            nonce,
+        };
+
+        let tx_json = Self::serialize_tx("ClaimSubgroveIndexing", &claim_tx)?;
         self.submit_transaction(&tx_json).await
     }
 
