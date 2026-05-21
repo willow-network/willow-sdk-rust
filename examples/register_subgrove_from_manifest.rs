@@ -23,6 +23,13 @@
 //! Solana source: `{name, network: "solana-mainnet", program_id,
 //! start_slot, instructions}`. See
 //! `crates/types/src/consensus/manifest.rs` for the canonical schema.
+//!
+//! For GkrExecution subgroves bound to a circuit template (e.g.
+//! `balance-aggregator-v2`), pass `--template-config-file ./tc.json`
+//! pointing at a JSON `TemplateSubgroveConfig`. Without it,
+//! GkrExecution subgroves register without a template binding and
+//! consensus computes the wrong expected starting state at chain-tip
+//! submission time.
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -31,6 +38,7 @@ use willow_sdk::consensus::ConsensusClient;
 use willow_sdk::subgrove_config::{IndexerConfigDef, SubgroveDefinition};
 use willow_sdk::types::{DeregisterSubgroveRequest, FundSubgroveRequest};
 use willow_types::consensus::WillowManifest;
+use willow_types::storage::TemplateSubgroveConfig;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -74,6 +82,11 @@ struct Args {
         help = "Deregister any existing subgrove with this id before registering."
     )]
     replace_existing: bool,
+    #[arg(
+        long,
+        help = "Path to a JSON file containing a TemplateSubgroveConfig. Required for GkrExecution subgroves bound to a circuit template; otherwise omit."
+    )]
+    template_config_file: Option<String>,
 }
 
 #[tokio::main]
@@ -90,6 +103,17 @@ async fn main() -> Result<()> {
 
     let schema = std::fs::read_to_string(&args.schema_file)
         .with_context(|| format!("read schema {}", args.schema_file))?;
+
+    let template_config: Option<TemplateSubgroveConfig> = match &args.template_config_file {
+        Some(path) => {
+            let tc_str = std::fs::read_to_string(path)
+                .with_context(|| format!("read template-config {}", path))?;
+            let tc: TemplateSubgroveConfig = serde_json::from_str(&tc_str)
+                .with_context(|| format!("parse template-config {} as TemplateSubgroveConfig", path))?;
+            Some(tc)
+        }
+        None => None,
+    };
 
     let key_bytes = hex::decode(&args.key_hex).context("decode --key-hex")?;
     let key_array: [u8; 32] = key_bytes
@@ -133,7 +157,7 @@ async fn main() -> Result<()> {
         },
         schema,
         manifest,
-        template_config: None,
+        template_config,
     };
 
     println!("Registering subgrove '{}' on {}", args.subgrove_id, args.node);
