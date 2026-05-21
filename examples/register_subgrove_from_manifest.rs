@@ -6,7 +6,7 @@
 //! registrar handles every supported chain without a per-family CLI.
 //!
 //! Run with:
-//!   cargo run --release --example register_subgrove -- \
+//!   cargo run --release --example register_subgrove_from_manifest -- \
 //!     --node http://localhost:26657 \
 //!     --api  http://localhost:3031 \
 //!     --subgrove-id my-subgrove \
