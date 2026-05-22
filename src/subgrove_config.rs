@@ -277,6 +277,7 @@ impl SubgroveDefinition {
             privacy: None,
             initial_owner_key_grant: None,
             template_config: self.template_config.clone(),
+            confirmation_depth: 0,
             signature,
             public_key_id: public_key_id.to_string(),
             nonce,
