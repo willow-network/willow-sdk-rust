@@ -319,7 +319,7 @@ use willow_sdk::{WillowClient, utils::RetryConfig};
 use std::time::Duration;
 
 let client = WillowClient::builder()
-    .api_url("https://api.willow.network")
+    .api_url("https://api.willow.tech")
     .timeout(Duration::from_secs(60))
     .retry_config(RetryConfig {
         max_attempts: 5,
