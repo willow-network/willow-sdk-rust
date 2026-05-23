@@ -134,9 +134,7 @@ impl FileOperations {
             .submit_transaction_json(&tx_json)
             .await?;
 
-        // Wait for the manifest to be committed before uploading chunks.
-        // The storage node verifies the on-chain manifest exists before
-        // accepting chunks — without this wait, uploads race finalize_block.
+        // Storage nodes verify the on-chain manifest before accepting chunks.
         self.client
             .consensus()
             .wait_for_transaction(&tx_hash, 15)
