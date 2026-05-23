@@ -86,6 +86,8 @@ pub mod types;
 pub mod utils;
 pub mod validators;
 #[cfg(feature = "verifiable-rpc")]
+pub mod eth_state;
+#[cfg(feature = "verifiable-rpc")]
 pub mod verifiable_rpc;
 
 pub use client::{SeenStateRoot, VerifyMode, WillowClient};
@@ -125,6 +127,11 @@ pub use types::{
     VerifyProofRequest, VerifyProofResponse,
 };
 pub use validators::ValidatorOperations;
+#[cfg(feature = "verifiable-rpc")]
+pub use eth_state::{
+    verify_call_result, verify_state_proof, EthOperations, StateVerifyMode, VerifiedCall,
+    VerifiedStateRead,
+};
 #[cfg(feature = "verifiable-rpc")]
 pub use verifiable_rpc::{VerifiableRpcOperations, VerificationResult, VerifiedAnswer};
 pub use willow_types::token::units as token_units;

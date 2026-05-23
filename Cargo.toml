@@ -81,6 +81,14 @@ willow-gkr-verify-pure = { path = "../../crates/gkr-verify-pure", features = ["r
 grovedb = { version = "3.1.0", default-features = false, features = ["verify"] }
 grovedb-version = "3.1.0"
 
+# Alloy primitives + MPT verifier for verifiable Ethereum state reads.
+# Optional — only pulled when the `verifiable-rpc` feature is on. Range
+# matches willow-network so the workspace resolves a single alloy.
+alloy = { version = ">=1.1, <1.6", features = ["eips", "consensus", "rpc-types-eth"], optional = true }
+alloy-primitives = { version = "1", optional = true }
+alloy-rlp = { version = "0.3", optional = true }
+alloy-trie = { version = "0.9", optional = true }
+
 # On `wasm32-unknown-unknown`, `getrandom` (pulled in transitively
 # via base64 / serde_json / grovedb) needs its `js` feature so it
 # can source entropy from `crypto.getRandomValues`. Without it the
@@ -115,9 +123,16 @@ tracing = ["dep:tracing"]
 # Use this if you trust your node and want faster compile times
 no-light-client = []
 # Enable client-side verification for the verifiable-RPC flow
-# (GET /verifiable-rpc/:subgrove/:key with a GKR proof attached).
+# (GET /verifiable-rpc/:subgrove/:key with a GKR proof attached, plus
+# the eth/state and eth/call routes that ship state proofs).
 # Pure binding-only — fast compile, pure sha2/subtle, mobile-friendly.
-verifiable-rpc = ["dep:willow-gkr-verify"]
+verifiable-rpc = [
+    "dep:willow-gkr-verify",
+    "dep:alloy",
+    "dep:alloy-primitives",
+    "dep:alloy-rlp",
+    "dep:alloy-trie",
+]
 # Extend `verifiable-rpc` with full-soundness GKR verification. Pulls in
 # the Expander verifier subset via willow-gkr-verify's `full` feature
 # (multi-minute cold build, multi-megabyte binary cost). Opt in when

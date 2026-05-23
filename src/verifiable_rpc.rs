@@ -375,6 +375,7 @@ mod tests {
     use sha2::{Digest, Sha256};
     use willow_gkr_verify::{BINDING_FORMAT_VERSION, BINDING_HEADER, FULL_HEADER};
     use willow_types::consensus::indexing_transactions::{GkrProofData, GkrPublicInputs};
+    use willow_types::consensus::CURRENT_PROOF_VERSION;
 
     fn mk_response(state_root: [u8; 32], tip: u64) -> VerifiableRpcResponse {
         VerifiableRpcResponse {
@@ -387,11 +388,13 @@ mod tests {
             block_range: (tip.saturating_sub(100), tip),
             grovedb_proof: vec![0xaa; 64],
             gkr_proofs: vec![GkrProofData {
+                proof_version: CURRENT_PROOF_VERSION,
                 proof: vec![0xbb; 64],
                 public_inputs: GkrPublicInputs {
                     output_root: state_root,
                     block_range: (tip.saturating_sub(100), tip),
                     config_hash: [2; 32],
+                    starting_state_root: [0; 32],
                 },
                 verification_key_hash: [3; 32],
                 proof_size_bytes: 64,
@@ -399,6 +402,7 @@ mod tests {
                 gpu_accelerated: false,
             }],
             completeness_proof: None,
+            state_proofs: Vec::new(),
             served_at_unix_secs: 1_700_000_000,
         }
     }
@@ -503,6 +507,7 @@ mod tests {
                 output_root: [7; 32],
                 block_range: (0, 10),
                 config_hash: [0; 32],
+                starting_state_root: [0; 32],
             },
             verification_key_hash: [0; 32],
             proof_size_bytes: 64,
@@ -525,6 +530,7 @@ mod tests {
             output_root: [2; 32],
             block_range: (0, 1),
             config_hash: [3; 32],
+            starting_state_root: [0; 32],
         };
         let mut full_proof = FULL_HEADER.to_vec();
         full_proof.extend_from_slice(&[0u8; 200]);
@@ -555,6 +561,7 @@ mod tests {
             output_root: [2; 32],
             block_range: (0, 1),
             config_hash: [3; 32],
+            starting_state_root: [0; 32],
         };
         let mut full_proof = FULL_HEADER.to_vec();
         full_proof.extend_from_slice(&[0u8; 200]);
@@ -582,6 +589,7 @@ mod tests {
             output_root: [2; 32],
             block_range: (0, 1),
             config_hash: [3; 32],
+            starting_state_root: [0; 32],
         };
         let data = GkrProofData {
             proof_version: CURRENT_PROOF_VERSION,
@@ -616,6 +624,7 @@ mod tests {
             output_root: [0x99; 32],
             block_range: (10, 20),
             config_hash: [0x77; 32],
+            starting_state_root: [0; 32],
         };
         let cv = [0x55; 32];
         let proof = build_valid_binding_only(&pi, cv);
@@ -629,6 +638,7 @@ mod tests {
             block_range: pi.block_range,
             grovedb_proof: vec![0xab, 0xcd], // placeholder; not verified here
             gkr_proofs: vec![GkrProofData {
+                proof_version: CURRENT_PROOF_VERSION,
                 proof_size_bytes: proof.len() as u64,
                 proof,
                 public_inputs: pi.clone(),
@@ -637,12 +647,13 @@ mod tests {
                 gpu_accelerated: false,
             }],
             completeness_proof: None,
+            state_proofs: Vec::new(),
             served_at_unix_secs: 1_700_000_000,
         };
 
         let json = serde_json::to_string(&response).expect("encode");
         let decoded: VerifiableRpcResponse = serde_json::from_str(&json).expect("decode");
-        verify_gkr_proof(decoded.gkr_proof.as_ref().unwrap(), decoded.state_root)
+        verify_gkr_proof(&decoded.gkr_proofs[0], decoded.state_root)
             .expect("shared verifier accepts round-tripped proof");
     }
 }
