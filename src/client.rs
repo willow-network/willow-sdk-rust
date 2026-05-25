@@ -557,6 +557,7 @@ pub struct WillowClientBuilder {
     api_url: Option<String>,
     consensus_url: Option<String>,
     indexer_url: Option<String>,
+    api_key: Option<String>,
     timeout: Duration,
     retry_config: RetryConfig,
     #[cfg(not(feature = "no-light-client"))]
@@ -569,6 +570,7 @@ impl Default for WillowClientBuilder {
             api_url: None,
             consensus_url: None,
             indexer_url: None,
+            api_key: None,
             timeout: Duration::from_secs(30),
             retry_config: RetryConfig::default(),
             #[cfg(not(feature = "no-light-client"))]
@@ -633,6 +635,17 @@ impl WillowClientBuilder {
         self
     }
 
+    /// Set the managed-tier API key (`wk_…`).
+    ///
+    /// When set, the SDK sends `X-API-Key: <api_key>` on every request as
+    /// a default reqwest header. Mint a key at
+    /// <https://dashboard.willow.tech/account>. Required for queries and
+    /// writes against managed `api.willow.tech` / `indexer.willow.tech`.
+    pub fn api_key(mut self, key: &str) -> Self {
+        self.api_key = Some(key.to_string());
+        self
+    }
+
     /// Set the request timeout
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
@@ -682,8 +695,16 @@ impl WillowClientBuilder {
             .map(|url| parse_api_url(&url))
             .transpose()?;
 
-        let http_client = Client::builder()
-            .timeout(self.timeout)
+        let mut http_builder = Client::builder().timeout(self.timeout);
+        if let Some(api_key) = &self.api_key {
+            let mut headers = reqwest::header::HeaderMap::new();
+            let value = reqwest::header::HeaderValue::from_str(api_key).map_err(|e| {
+                WillowError::Config(format!("invalid API key (non-ASCII header value): {}", e))
+            })?;
+            headers.insert("X-API-Key", value);
+            http_builder = http_builder.default_headers(headers);
+        }
+        let http_client = http_builder
             .build()
             .map_err(|e| WillowError::Config(format!("Failed to build HTTP client: {}", e)))?;
 
