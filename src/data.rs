@@ -112,11 +112,8 @@ impl DataOperations {
             .data
             .ok_or_else(|| WillowError::NotFound(format!("Key not found: {}", key)))?;
 
-        // Always verify proof using light client for trustless verification (default behavior).
-        // The light client auto-initializes with trust-on-first-use if not already configured.
-        //
-        // Important: TODO: When mainnet/testnet launches, the light client will be
-        // initialized with hardcoded checkpoint headers instead of trust-on-first-use.
+        // Verify proof against the light client. Auto-initializes with
+        // trust-on-first-use if no light client is configured.
         #[cfg(not(feature = "no-light-client"))]
         {
             // Get proof for this specific item
@@ -537,11 +534,8 @@ impl DataOperations {
 
     /// Verify proof and compare with consensus root hash.
     ///
-    /// This method always uses the light client for trustless verification.
-    /// The light client auto-initializes with trust-on-first-use if not already configured.
-    ///
-    /// Important: TODO: When mainnet/testnet launches, the light client will be
-    /// initialized with hardcoded checkpoint headers instead of trust-on-first-use.
+    /// Uses the light client for trustless verification. Auto-initializes
+    /// with trust-on-first-use if no light client is configured.
     ///
     /// Only available when light client verification is enabled.
     #[cfg(not(feature = "no-light-client"))]

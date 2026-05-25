@@ -72,6 +72,8 @@ pub mod consensus;
 pub mod data;
 pub mod erc8004;
 pub mod errors;
+#[cfg(feature = "verifiable-rpc")]
+pub mod eth_state;
 pub mod files;
 pub mod indexers;
 pub mod indexing;
@@ -85,8 +87,6 @@ pub mod token;
 pub mod types;
 pub mod utils;
 pub mod validators;
-#[cfg(feature = "verifiable-rpc")]
-pub mod eth_state;
 #[cfg(feature = "verifiable-rpc")]
 pub mod verifiable_rpc;
 
@@ -102,6 +102,11 @@ pub use erc8004::{
     ReputationHistoryResponse, ValidationStatusBreakdown,
 };
 pub use errors::{Result, WillowError};
+#[cfg(feature = "verifiable-rpc")]
+pub use eth_state::{
+    verify_call_result, verify_state_proof, EthOperations, StateVerifyMode, VerifiedCall,
+    VerifiedStateRead,
+};
 pub use indexers::{QuerySource, RoutedQueryResult, ServedBy, WillowIndexers};
 pub use indexing::IndexingOperations;
 #[cfg(not(feature = "no-light-client"))]
@@ -127,11 +132,6 @@ pub use types::{
     VerifyProofRequest, VerifyProofResponse,
 };
 pub use validators::ValidatorOperations;
-#[cfg(feature = "verifiable-rpc")]
-pub use eth_state::{
-    verify_call_result, verify_state_proof, EthOperations, StateVerifyMode, VerifiedCall,
-    VerifiedStateRead,
-};
 #[cfg(feature = "verifiable-rpc")]
 pub use verifiable_rpc::{VerifiableRpcOperations, VerificationResult, VerifiedAnswer};
 pub use willow_types::token::units as token_units;

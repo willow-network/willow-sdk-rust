@@ -211,10 +211,9 @@ impl WillowClient {
     /// creates and initializes one using trust-on-first-use. The initialization
     /// is thread-safe and happens only once.
     ///
-    /// Important: TODO: When mainnet/testnet launches, replace trust-on-first-use
-    /// with hardcoded checkpoint headers for true trustless initialization.
-    /// Trust-on-first-use is secure for subsequent operations but trusts the
-    /// initial block from the connected validators.
+    /// Trust-on-first-use bootstrap: the first verified header is trusted,
+    /// and every subsequent header chains from it cryptographically. Pin a
+    /// known-good checkpoint header in production deployments.
     ///
     /// Returns `None` if `no-light-client` feature is enabled.
     #[cfg(not(feature = "no-light-client"))]
@@ -228,9 +227,6 @@ impl WillowClient {
         let lc = self
             .light_client_once
             .get_or_try_init(|| async {
-                // TODO: When mainnet/testnet launches, use hardcoded checkpoint headers
-                // instead of trust-on-first-use for true trustless initialization from genesis.
-
                 // Derive CometBFT RPC endpoint from API URL (typically :3031 -> :26657)
                 let rpc_endpoint = self.base_url.to_string().replace(":3031", ":26657");
 

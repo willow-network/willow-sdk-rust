@@ -160,8 +160,7 @@ impl ConsensusClient {
     ) -> Result<String> {
         let nonce = self.get_next_nonce(&new_did_document.id).await?;
         let new_doc_json = serde_json::to_string(new_did_document)?;
-        // Must match the message format that the chain handler verifies. See
-        // crates/consensus/src/willow_cometbft/identity_transactions.rs.
+        // Must match the message format the chain handler verifies.
         let message = format!("UpdateDid\n{}\n{}", new_doc_json, nonce);
         let signature_hex = sign_challenge(&message, current_private_key_hex, algorithm)?;
         let signature_bytes = hex::decode(signature_hex)?;
@@ -278,8 +277,7 @@ impl ConsensusClient {
     }
 
     async fn submit_transaction(&self, tx_json: &str) -> Result<String> {
-        // Convert JSON-encoded tx to the bincode wire format the validator
-        // expects. See docs/todo/proposal-bincode-wire.md.
+        // Convert JSON-encoded tx to the bincode wire format the validator expects.
         let tx: willow_types::consensus::transactions::Transaction =
             serde_json::from_str(tx_json).map_err(WillowError::Serialization)?;
         let tx_bytes = bincode::serialize(&tx)

@@ -21,8 +21,8 @@
 //! The manifest JSON must be a valid `WillowManifest`. For an EVM
 //! source: `{name, network, address, abi, start_block, events}`. For a
 //! Solana source: `{name, network: "solana-mainnet", program_id,
-//! start_slot, instructions}`. See
-//! `crates/types/src/consensus/manifest.rs` for the canonical schema.
+//! start_slot, instructions}`. The canonical schema is the
+//! `WillowManifest` type re-exported from `willow_types::consensus::manifest`.
 //!
 //! For GkrExecution subgroves bound to a circuit template (e.g.
 //! `balance-aggregator-v2`), pass `--template-config-file ./tc.json`
@@ -59,7 +59,10 @@ struct Args {
     subgrove_id: String,
     #[arg(long)]
     description: String,
-    #[arg(long, help = "Path to a JSON file containing a canonical WillowManifest")]
+    #[arg(
+        long,
+        help = "Path to a JSON file containing a canonical WillowManifest"
+    )]
     manifest: String,
     #[arg(long, help = "Path to a GraphQL schema file (.graphql)")]
     schema_file: String,
@@ -108,8 +111,9 @@ async fn main() -> Result<()> {
         Some(path) => {
             let tc_str = std::fs::read_to_string(path)
                 .with_context(|| format!("read template-config {}", path))?;
-            let tc: TemplateSubgroveConfig = serde_json::from_str(&tc_str)
-                .with_context(|| format!("parse template-config {} as TemplateSubgroveConfig", path))?;
+            let tc: TemplateSubgroveConfig = serde_json::from_str(&tc_str).with_context(|| {
+                format!("parse template-config {} as TemplateSubgroveConfig", path)
+            })?;
             Some(tc)
         }
         None => None,
@@ -139,7 +143,10 @@ async fn main() -> Result<()> {
                 let _ = consensus.wait_for_transaction(&tx, 20).await?;
             }
             Err(e) => {
-                println!("Deregister failed (subgrove may not exist, continuing): {}", e);
+                println!(
+                    "Deregister failed (subgrove may not exist, continuing): {}",
+                    e
+                );
             }
         }
     }
@@ -160,9 +167,18 @@ async fn main() -> Result<()> {
         template_config,
     };
 
-    println!("Registering subgrove '{}' on {}", args.subgrove_id, args.node);
+    println!(
+        "Registering subgrove '{}' on {}",
+        args.subgrove_id, args.node
+    );
     let reg_tx = consensus
-        .register_blockchain_subgrove(&definition, &args.owner_did, &public_key_id, &signing_key, None)
+        .register_blockchain_subgrove(
+            &definition,
+            &args.owner_did,
+            &public_key_id,
+            &signing_key,
+            None,
+        )
         .await
         .context("register_blockchain_subgrove failed")?;
     println!("Registered. tx_hash = {}", reg_tx);

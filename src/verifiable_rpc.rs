@@ -363,7 +363,7 @@ fn verify_full(_proof: &GkrProofData) -> Result<()> {
          `verifiable-rpc-full` (native) or `verifiable-rpc-pure` \
          (wasm-friendly) cargo feature on the SDK to verify it, \
          or use VerifyMode::GroveDbOnly and anchor state_root via \
-         consensus. See docs/todo/proposal-pure-rust-verifier.md."
+         consensus."
             .into(),
     ))
 }

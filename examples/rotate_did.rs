@@ -1,9 +1,8 @@
 //! Rotate the signing key on an existing Willow DID.
 //!
-//! Submits an UpdateDidTx (see crates/consensus/src/willow_cometbft/
-//! identity_transactions.rs) signed by the *current* on-chain key, swapping
-//! the on-chain DID document to a freshly-generated keypair. After the tx
-//! commits, only the new key can sign as this DID.
+//! Submits an UpdateDidTx signed by the *current* on-chain key, swapping the
+//! on-chain DID document to a freshly-generated keypair. After the tx commits,
+//! only the new key can sign as this DID.
 //!
 //! The new private key is written to `--new-key-out` *before* the tx is
 //! submitted — there is no way to recover it after rotation, so this file
