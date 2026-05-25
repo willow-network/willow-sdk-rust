@@ -295,8 +295,7 @@ impl WillowClient {
     ///
     /// Opens `graphql-transport-ws` WebSockets against either the
     /// validator's or an indexer's `/graphql/ws` endpoint, depending on
-    /// the `source` in [`crate::subscriptions::SubscribeOptions`]. See
-    /// `docs/QUERY_ROUTING.md` for the source-selection matrix.
+    /// the `source` in [`crate::subscriptions::SubscribeOptions`].
     pub fn subscriptions(&self) -> crate::subscriptions::WillowSubscriptions {
         crate::subscriptions::WillowSubscriptions::new(self.base_url.clone(), self.indexers.clone())
     }

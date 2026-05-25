@@ -194,8 +194,7 @@ impl ConsensusClient {
         algorithm: SignatureAlgorithm,
     ) -> Result<String> {
         let nonce = self.get_next_nonce(indexer_did).await?;
-        // Must match the message format the chain handler verifies — see
-        // `crates/consensus/src/willow_cometbft/indexing_transactions.rs`.
+        // Must match the canonical message format the chain handler verifies.
         let message = format!(
             "ClaimSubgroveIndexing\n{}\n{}\n{}",
             subgrove_id, indexer_did, nonce,

@@ -13,8 +13,6 @@
 //! next attempt, so a dead indexer fails over without caller intervention.
 //! Pass `reconnect: false` on `SubscribeOptions` to opt out.
 //!
-//! See `docs/QUERY_ROUTING.md` for the validator vs indexer trust model.
-//!
 //! # Example
 //!
 //! ```rust,no_run
