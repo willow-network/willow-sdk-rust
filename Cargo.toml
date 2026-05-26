@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["Willow Team"]
 description = "Rust SDK for Willow - decentralized data indexing protocol"
 license = "MIT"
-repository = "https://github.com/willow-network/willow"
+repository = "https://github.com/willow-network/willow-sdk-rust"
 keywords = ["willow", "web3", "indexing", "did", "decentralized"]
 categories = ["web-programming", "cryptography"]
 
@@ -101,10 +101,9 @@ alloy-trie = { version = "0.9", optional = true }
 #
 # NB: enabling these is *necessary* for wasm but not *sufficient* —
 # the SDK's native HTTP/WebSocket/tokio-net stack still blocks the
-# full `wasm32-unknown-unknown` build. See
-# docs/todo/proposal-pure-rust-verifier.md for the larger wasm-
-# ification story. For pure verification in browsers today, consume
-# `willow-gkr-verify-pure` directly; it builds clean on wasm.
+# full `wasm32-unknown-unknown` build. For pure verification in
+# browsers today, consume `willow-gkr-verify-pure` directly; it
+# builds clean on wasm.
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
 getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
@@ -137,7 +136,7 @@ verifiable-rpc = [
 # the Expander verifier subset via willow-gkr-verify's `full` feature
 # (multi-minute cold build, multi-megabyte binary cost). Opt in when
 # clients need Phase 2+ permissionless trust over the Phase 1 hosted-
-# service trust model. See docs/todo/proposal-gkr-verify-crate.md.
+# service trust model.
 verifiable-rpc-full = ["verifiable-rpc", "willow-gkr-verify/full"]
 # Full-soundness GKR verification via the pure-Rust port
 # (`willow-gkr-verify-pure`). Same guarantees as `verifiable-rpc-full`
@@ -188,9 +187,7 @@ path = "examples/operations/list_registrations.rs"
 # Patch Expander deps to the willow-network fork so willow-gkr-verify's
 # `full` feature resolves the same type universe the workspace does.
 # Mirror this block with crates/Cargo.toml exactly — the fork rev must
-# match. See docs/todo/proposal-gkr-verify-crate.md for why the fork
-# exists (GPU CUDA kernels not yet upstream) and when we might retire
-# it.
+# match. The fork exists for GPU CUDA kernels not yet upstream.
 [patch."https://github.com/PolyhedraZK/Expander"]
 gkr = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
 gkr_engine = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
