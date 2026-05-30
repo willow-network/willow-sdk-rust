@@ -6,12 +6,10 @@
 //!
 //!  1. **GKR proof** (if present) — confirms the indexer's claimed
 //!     `state_root` is the correct output of transforming committed events.
-//!     Always supports `GKR_PROOF_BINDING_ONLY` (pure SHA-256, no heavy
-//!     deps). With the `verifiable-rpc-full` cargo feature enabled, also
-//!     verifies `GKR_PROOF_FULL` — the SDK embeds the compiled circuit
-//!     bytes at build time via `willow_gkr_verify::circuits` and runs
-//!     the real cryptographic verifier via the `full` feature on the
-//!     thin crate.
+//!     Supports both `GKR_PROOF_BINDING_ONLY` (pure SHA-256, no heavy
+//!     deps) and `GKR_PROOF_FULL` (pure-Rust full-soundness verifier
+//!     via `willow-gkr-verify-pure`; circuit bytes embedded at build
+//!     time via the `registry` feature).
 //!  2. **GroveDB Merkle proof** — confirms `answer` is the value at `key`
 //!     in the tree rooted at `state_root`. Verified via GroveDB's
 //!     lightweight verify-only mode (already shipped with the SDK).
@@ -312,20 +310,10 @@ fn verify_gkr_proof(proof: &GkrProofData, expected_state_root: [u8; 32]) -> Resu
     }
 }
 
-/// Full-GKR verification dispatch.
-///
-/// Routing precedence (first matching cfg wins):
-///
-///  1. `verifiable-rpc-pure` — pure-Rust verifier
-///     (`willow-gkr-verify-pure`), no Expander in the dep graph,
-///     compiles to `wasm32-unknown-unknown`. Same cryptographic
-///     guarantees as the native path; cross-validated byte-for-byte
-///     against Expander via fixtures.
-///  2. `verifiable-rpc-full` — native Expander verifier via
-///     `willow-gkr-verify::full`. Fastest on desktops/servers;
-///     drags in several MB of C-FFI dependencies.
-///  3. Neither → return a precise "not compiled in" error.
-#[cfg(feature = "verifiable-rpc-pure")]
+/// Full-GKR verification — pure-Rust verifier (`willow-gkr-verify-pure`).
+/// No Expander in the dep graph; compiles to `wasm32-unknown-unknown`.
+/// Cross-validated byte-for-byte against the native Expander verifier
+/// via fixtures.
 fn verify_full(proof: &GkrProofData) -> Result<()> {
     willow_gkr_verify_pure::verify_full_proof_with_registry(
         &proof.proof,
@@ -333,39 +321,6 @@ fn verify_full(proof: &GkrProofData) -> Result<()> {
         proof.verification_key_hash,
     )
     .map_err(|e| WillowError::ProofVerificationFailed(e.to_string()))
-}
-
-#[cfg(all(feature = "verifiable-rpc-full", not(feature = "verifiable-rpc-pure")))]
-fn verify_full(proof: &GkrProofData) -> Result<()> {
-    let circuit_bytes = willow_gkr_verify::get_circuit_bytes(&proof.verification_key_hash)
-        .ok_or_else(|| {
-            WillowError::ProofVerificationFailed(format!(
-                "no embedded circuit for verification_key_hash {}; SDK cannot \
-                 verify full GKR proofs for this circuit — rebuild the SDK \
-                 with an updated willow-gkr-verify after re-exporting",
-                hex::encode(&proof.verification_key_hash[..8])
-            ))
-        })?;
-
-    willow_gkr_verify::verify_full_proof(
-        circuit_bytes,
-        &proof.proof,
-        &proof.public_inputs,
-        proof.verification_key_hash,
-    )
-    .map_err(|e| WillowError::ProofVerificationFailed(e.to_string()))
-}
-
-#[cfg(not(any(feature = "verifiable-rpc-full", feature = "verifiable-rpc-pure")))]
-fn verify_full(_proof: &GkrProofData) -> Result<()> {
-    Err(WillowError::ProofVerificationFailed(
-        "indexer returned a GKR_PROOF_FULL proof; enable the \
-         `verifiable-rpc-full` (native) or `verifiable-rpc-pure` \
-         (wasm-friendly) cargo feature on the SDK to verify it, \
-         or use VerifyMode::GroveDbOnly and anchor state_root via \
-         consensus."
-            .into(),
-    ))
 }
 
 #[cfg(test)]
@@ -520,43 +475,12 @@ mod tests {
         assert!(err.to_string().contains("output_root"));
     }
 
-    /// Without the `verifiable-rpc-full` feature, full proofs are
-    /// surfaced with a precise "not compiled in" error so callers can
-    /// decide what to do (drop to GroveDbOnly, recompile, etc.).
-    #[cfg(not(feature = "verifiable-rpc-full"))]
+    /// A full proof with an unknown circuit-version hash has no
+    /// embedded VK bytes and surfaces a "missing circuit bytes" error.
+    /// With a matching hash but garbage payload it fails deserialization
+    /// or cryptographic verification, surfacing one of the upstream errors.
     #[test]
-    fn verify_gkr_proof_rejects_full_format_without_feature() {
-        let pi = GkrPublicInputs {
-            output_root: [2; 32],
-            block_range: (0, 1),
-            config_hash: [3; 32],
-            starting_state_root: [0; 32],
-        };
-        let mut full_proof = FULL_HEADER.to_vec();
-        full_proof.extend_from_slice(&[0u8; 200]);
-        let data = GkrProofData {
-            proof_version: CURRENT_PROOF_VERSION,
-            proof: full_proof,
-            public_inputs: pi.clone(),
-            verification_key_hash: [0x55; 32],
-            proof_size_bytes: 0,
-            generation_time_ms: 0,
-            gpu_accelerated: false,
-        };
-        let err = verify_gkr_proof(&data, pi.output_root)
-            .expect_err("full proof must be rejected when the full feature is off");
-        assert!(err.to_string().contains("GKR_PROOF_FULL"));
-        assert!(err.to_string().contains("verifiable-rpc-full"));
-    }
-
-    /// With the full feature on, a full proof with the wrong
-    /// circuit-version hash has no embedded bytes and surfaces a
-    /// "no embedded circuit" error. With a matching hash but garbage
-    /// payload it fails deserialization or cryptographic verification,
-    /// surfacing one of the upstream errors.
-    #[cfg(feature = "verifiable-rpc-full")]
-    #[test]
-    fn verify_gkr_proof_full_feature_rejects_unknown_circuit() {
+    fn verify_gkr_proof_full_rejects_unknown_circuit() {
         let pi = GkrPublicInputs {
             output_root: [2; 32],
             block_range: (0, 1),
@@ -577,7 +501,7 @@ mod tests {
         let err =
             verify_gkr_proof(&data, pi.output_root).expect_err("unknown circuit must be rejected");
         assert!(
-            err.to_string().contains("no embedded circuit"),
+            err.to_string().contains("circuit_bytes"),
             "unexpected error: {}",
             err
         );

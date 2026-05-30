@@ -664,12 +664,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "anes"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b46cbb362ab8752921c97e041f5e366ee6297bd428a31275b9fcf1e380f7299"
-
-[[package]]
 name = "anstream"
 version = "0.6.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -724,22 +718,6 @@ name = "anyhow"
 version = "1.0.100"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
-
-[[package]]
-name = "arith"
-version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=5222cd40999a81d78de4d7d04d0424bf9f3ab54a#5222cd40999a81d78de4d7d04d0424bf9f3ab54a"
-dependencies = [
- "ark-std 0.4.0",
- "criterion",
- "ethnum",
- "halo2curves",
- "itertools 0.13.0",
- "log",
- "rand 0.8.5",
- "serdes",
- "tynm",
-]
 
 [[package]]
 name = "ark-ff"
@@ -1042,18 +1020,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "babybear"
-version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=5222cd40999a81d78de4d7d04d0424bf9f3ab54a#5222cd40999a81d78de4d7d04d0424bf9f3ab54a"
-dependencies = [
- "arith",
- "ark-std 0.4.0",
- "ethnum",
- "rand 0.8.5",
- "serdes",
-]
-
-[[package]]
 name = "base16ct"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1112,24 +1078,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bindgen"
-version = "0.72.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "993776b509cfb49c750f11b8f07a46fa23e0a1386ffc01fb1e7d343efc387895"
-dependencies = [
- "bitflags 2.10.0",
- "cexpr",
- "clang-sys",
- "itertools 0.13.0",
- "proc-macro2",
- "quote",
- "regex",
- "rustc-hash",
- "shlex",
- "syn 2.0.111",
-]
-
-[[package]]
 name = "bit-set"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1185,26 +1133,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "blake2"
-version = "0.10.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46502ad458c9a52b69d4d4d32775c788b7a1b85e8bc9d482d92250fc0e3f8efe"
-dependencies = [
- "digest 0.10.7",
-]
-
-[[package]]
-name = "blake2b_simd"
-version = "1.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b79834656f71332577234b50bfc009996f7449e0c056884e6a02492ded0ca2f3"
-dependencies = [
- "arrayref",
- "arrayvec",
- "constant_time_eq 0.4.3",
-]
-
-[[package]]
 name = "blake3"
 version = "1.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1214,7 +1142,7 @@ dependencies = [
  "arrayvec",
  "cc",
  "cfg-if",
- "constant_time_eq 0.3.1",
+ "constant_time_eq",
 ]
 
 [[package]]
@@ -1281,15 +1209,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "build-probe-mpi"
-version = "0.1.4"
-source = "git+https://github.com/rsmpi/rsmpi?rev=61796831954b679cbe267c1b704ddbcb7fef3715#61796831954b679cbe267c1b704ddbcb7fef3715"
-dependencies = [
- "pkg-config",
- "shell-words",
-]
-
-[[package]]
 name = "bumpalo"
 version = "3.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1332,12 +1251,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cast"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5"
-
-[[package]]
 name = "cc"
 version = "1.2.49"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1347,15 +1260,6 @@ dependencies = [
  "jobserver",
  "libc",
  "shlex",
-]
-
-[[package]]
-name = "cexpr"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6fac387a98bb7c37292057cffc56d62ecb629900026402633ae9160df93a8766"
-dependencies = [
- "nom",
 ]
 
 [[package]]
@@ -1447,36 +1351,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "circuit"
-version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=5222cd40999a81d78de4d7d04d0424bf9f3ab54a#5222cd40999a81d78de4d7d04d0424bf9f3ab54a"
-dependencies = [
- "arith",
- "ark-std 0.4.0",
- "bytes",
- "ethnum",
- "gkr_engine",
- "gkr_hashers",
- "log",
- "mpi",
- "rand 0.8.5",
- "serdes",
- "thiserror 1.0.69",
- "transcript",
-]
-
-[[package]]
-name = "clang-sys"
-version = "1.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b023947811758c97c59bf9d1c188fd619ad4718dcaa767947df1cadb14f39f4"
-dependencies = [
- "glob",
- "libc",
- "libloading",
-]
-
-[[package]]
 name = "clap"
 version = "4.5.53"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1551,20 +1425,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "config_macros"
-version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=5222cd40999a81d78de4d7d04d0424bf9f3ab54a#5222cd40999a81d78de4d7d04d0424bf9f3ab54a"
-dependencies = [
- "gkr_engine",
- "gkr_hashers",
- "poly_commit",
- "proc-macro2",
- "quote",
- "syn 2.0.111",
- "transcript",
-]
-
-[[package]]
 name = "const-hex"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1608,21 +1468,6 @@ name = "constant_time_eq"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c74b8349d32d297c9134b8c88677813a227df8f779daa29bfc29c183fe3dca6"
-
-[[package]]
-name = "constant_time_eq"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dab3fe76c1571ecd5cfe878b61bce3fedf4adbde5d8a8653b2a7956ffd14628"
-
-[[package]]
-name = "conv"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78ff10625fd0ac447827aa30ea8b861fead473bb60aeb73af6c1c58caf0d1299"
-dependencies = [
- "custom_derive",
-]
 
 [[package]]
 name = "convert_case"
@@ -1702,61 +1547,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "criterion"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2b12d017a929603d80db1831cd3a24082f8137ce19c69e6447f54f5fc8d692f"
-dependencies = [
- "anes",
- "cast",
- "ciborium",
- "clap",
- "criterion-plot",
- "is-terminal",
- "itertools 0.10.5",
- "num-traits",
- "once_cell",
- "oorandom",
- "plotters",
- "rayon",
- "regex",
- "serde",
- "serde_derive",
- "serde_json",
- "tinytemplate",
- "walkdir",
-]
-
-[[package]]
-name = "criterion-plot"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b50826342786a51a89e2da3a28f1c32b06e387201bc2d19791f622c673706b1"
-dependencies = [
- "cast",
- "itertools 0.10.5",
-]
-
-[[package]]
-name = "crossbeam-deque"
-version = "0.8.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9dd111b7b7f7d55b72c0a6ae361660ee5853c9af73f70c3c2ef6858b950e2e51"
-dependencies = [
- "crossbeam-epoch",
- "crossbeam-utils",
-]
-
-[[package]]
-name = "crossbeam-epoch"
-version = "0.9.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b82ac4a3c2ca9c3460964f020e1402edd5753411d7737aa39c3714ad1b5420e"
-dependencies = [
- "crossbeam-utils",
-]
-
-[[package]]
 name = "crossbeam-utils"
 version = "0.8.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1826,12 +1616,6 @@ dependencies = [
  "quote",
  "syn 2.0.111",
 ]
-
-[[package]]
-name = "custom_derive"
-version = "0.1.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef8ae57c4978a2acd8b869ce6b9ca1dfe817bff704c220209fdef2c0b75a01b9"
 
 [[package]]
 name = "darling"
@@ -2191,12 +1975,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ethnum"
-version = "1.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca81e6b4777c89fd810c25a4be2b1bd93ea034fbe58e6a75216a34c6b82c539b"
-
-[[package]]
 name = "event-listener"
 version = "2.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2245,7 +2023,6 @@ version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c0b50bfb653653f9ca9095b427bed08ab8d75a137839d9ad64eb11810d5b6393"
 dependencies = [
- "bitvec",
  "rand_core 0.6.4",
  "subtle",
 ]
@@ -2498,117 +2275,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "gf2"
-version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=5222cd40999a81d78de4d7d04d0424bf9f3ab54a#5222cd40999a81d78de4d7d04d0424bf9f3ab54a"
-dependencies = [
- "arith",
- "ark-std 0.4.0",
- "cfg-if",
- "ethnum",
- "halo2curves",
- "log",
- "rand 0.8.5",
- "raw-cpuid",
- "serdes",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "gf2_128"
-version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=5222cd40999a81d78de4d7d04d0424bf9f3ab54a#5222cd40999a81d78de4d7d04d0424bf9f3ab54a"
-dependencies = [
- "arith",
- "ark-std 0.4.0",
- "ethnum",
- "gf2",
- "rand 0.8.5",
- "serdes",
-]
-
-[[package]]
-name = "gkr"
-version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=5222cd40999a81d78de4d7d04d0424bf9f3ab54a#5222cd40999a81d78de4d7d04d0424bf9f3ab54a"
-dependencies = [
- "arith",
- "ark-std 0.4.0",
- "babybear",
- "circuit",
- "config_macros",
- "env_logger",
- "ethnum",
- "gf2",
- "gf2_128",
- "gkr_engine",
- "gkr_hashers",
- "goldilocks",
- "halo2curves",
- "log",
- "mersenne31",
- "mpi",
- "poly_commit",
- "polynomials",
- "rand 0.8.5",
- "rayon",
- "serdes",
- "sha2",
- "sumcheck",
- "thiserror 1.0.69",
- "transcript",
- "utils",
-]
-
-[[package]]
-name = "gkr_engine"
-version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=5222cd40999a81d78de4d7d04d0424bf9f3ab54a#5222cd40999a81d78de4d7d04d0424bf9f3ab54a"
-dependencies = [
- "arith",
- "babybear",
- "gf2",
- "gf2_128",
- "gkr_hashers",
- "goldilocks",
- "itertools 0.13.0",
- "mersenne31",
- "mpi",
- "polynomials",
- "rand 0.8.5",
- "serdes",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "gkr_hashers"
-version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=5222cd40999a81d78de4d7d04d0424bf9f3ab54a#5222cd40999a81d78de4d7d04d0424bf9f3ab54a"
-dependencies = [
- "arith",
- "halo2curves",
- "serdes",
- "sha2",
- "tiny-keccak",
-]
-
-[[package]]
 name = "glob"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
-
-[[package]]
-name = "goldilocks"
-version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=5222cd40999a81d78de4d7d04d0424bf9f3ab54a#5222cd40999a81d78de4d7d04d0424bf9f3ab54a"
-dependencies = [
- "arith",
- "ark-std 0.4.0",
- "ethnum",
- "rand 0.8.5",
- "serdes",
-]
 
 [[package]]
 name = "group"
@@ -2751,30 +2421,6 @@ dependencies = [
  "cfg-if",
  "crunchy",
  "zerocopy",
-]
-
-[[package]]
-name = "halo2curves"
-version = "0.6.1"
-source = "git+https://github.com/PolyhedraZK/halo2curves#abb020f388b519c1f00033e267faa0709b1249e2"
-dependencies = [
- "blake2",
- "digest 0.10.7",
- "ff",
- "group",
- "lazy_static",
- "num-bigint",
- "num-traits",
- "pairing",
- "pasta_curves",
- "paste",
- "rand 0.8.5",
- "rand_core 0.6.4",
- "rayon",
- "sha2",
- "static_assertions",
- "subtle",
- "unroll",
 ]
 
 [[package]]
@@ -3309,17 +2955,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "is-terminal"
-version = "0.4.17"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
-dependencies = [
- "hermit-abi",
- "libc",
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "is_terminal_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3510,48 +3145,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4933f3f57a8e9d9da04db23fb153356ecaf00cbd14aee46279c33dc80925c37"
 
 [[package]]
-name = "lazy_static"
-version = "1.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
-dependencies = [
- "spin",
-]
-
-[[package]]
 name = "libc"
 version = "0.2.178"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37c93d8daa9d8a012fd8ab92f088405fb202ea0b6ab73ee2482ae66af4f42091"
-
-[[package]]
-name = "libffi"
-version = "4.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0feebbe0ccd382a2790f78d380540500d7b78ed7a3498b68fcfbc1593749a94"
-dependencies = [
- "libc",
- "libffi-sys",
-]
-
-[[package]]
-name = "libffi-sys"
-version = "3.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90c6c6e17136d4bc439d43a2f3c6ccf0731cccc016d897473a29791d3c2160c3"
-dependencies = [
- "cc",
-]
-
-[[package]]
-name = "libloading"
-version = "0.8.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7c4b02199fee7c5d21a5ae7d8cfa79a6ef5bb2fc834d6e9058e89c825efdc55"
-dependencies = [
- "cfg-if",
- "windows-link",
-]
 
 [[package]]
 name = "libm"
@@ -3619,34 +3216,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f52b00d39961fc5b2736ea853c9cc86238e165017a493d1d5c8eac6bdc4cc273"
 
 [[package]]
-name = "mersenne31"
-version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=5222cd40999a81d78de4d7d04d0424bf9f3ab54a#5222cd40999a81d78de4d7d04d0424bf9f3ab54a"
-dependencies = [
- "arith",
- "ark-std 0.4.0",
- "cfg-if",
- "ethnum",
- "gkr_hashers",
- "halo2curves",
- "log",
- "rand 0.8.5",
- "raw-cpuid",
- "serdes",
- "thiserror 1.0.69",
-]
-
-[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
-
-[[package]]
-name = "minimal-lexical"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 
 [[package]]
 name = "miniz_oxide"
@@ -3670,30 +3243,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mpi"
-version = "0.8.0"
-source = "git+https://github.com/rsmpi/rsmpi?rev=61796831954b679cbe267c1b704ddbcb7fef3715#61796831954b679cbe267c1b704ddbcb7fef3715"
-dependencies = [
- "build-probe-mpi",
- "conv",
- "libffi",
- "mpi-sys",
- "once_cell",
- "smallvec",
- "thiserror 2.0.17",
-]
-
-[[package]]
-name = "mpi-sys"
-version = "0.2.2"
-source = "git+https://github.com/rsmpi/rsmpi?rev=61796831954b679cbe267c1b704ddbcb7fef3715#61796831954b679cbe267c1b704ddbcb7fef3715"
-dependencies = [
- "bindgen",
- "build-probe-mpi",
- "cc",
-]
-
-[[package]]
 name = "native-tls"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3708,16 +3257,6 @@ dependencies = [
  "security-framework 2.11.1",
  "security-framework-sys",
  "tempfile",
-]
-
-[[package]]
-name = "nom"
-version = "7.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d273983c5a657a70a3e8f2a01329822f3b8c8172b73826411a55751e404a0a4a"
-dependencies = [
- "memchr",
- "minimal-lexical",
 ]
 
 [[package]]
@@ -3813,12 +3352,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
-name = "oorandom"
-version = "11.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
-
-[[package]]
 name = "opaque-debug"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3872,15 +3405,6 @@ dependencies = [
  "libc",
  "pkg-config",
  "vcpkg",
-]
-
-[[package]]
-name = "pairing"
-version = "0.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81fec4625e73cf41ef4bb6846cafa6d44736525f442ba45e407c4a000a13996f"
-dependencies = [
- "group",
 ]
 
 [[package]]
@@ -3938,21 +3462,6 @@ dependencies = [
  "redox_syscall",
  "smallvec",
  "windows-link",
-]
-
-[[package]]
-name = "pasta_curves"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3e57598f73cc7e1b2ac63c79c517b31a0877cd7c402cdcaa311b5208de7a095"
-dependencies = [
- "blake2b_simd",
- "ff",
- "group",
- "lazy_static",
- "rand 0.8.5",
- "static_assertions",
- "subtle",
 ]
 
 [[package]]
@@ -4026,34 +3535,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
 
 [[package]]
-name = "plotters"
-version = "0.3.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5aeb6f403d7a4911efb1e33402027fc44f29b5bf6def3effcc22d7bb75f2b747"
-dependencies = [
- "num-traits",
- "plotters-backend",
- "plotters-svg",
- "wasm-bindgen",
- "web-sys",
-]
-
-[[package]]
-name = "plotters-backend"
-version = "0.3.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df42e13c12958a16b3f7f4386b9ab1f3e7933914ecea48da7139435263a4172a"
-
-[[package]]
-name = "plotters-svg"
-version = "0.3.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51bae2ac328883f7acdfea3d66a7c35751187f870bc81f94563733a154d7a670"
-dependencies = [
- "plotters-backend",
-]
-
-[[package]]
 name = "poly1305"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4062,45 +3543,6 @@ dependencies = [
  "cpufeatures 0.2.17",
  "opaque-debug",
  "universal-hash",
-]
-
-[[package]]
-name = "poly_commit"
-version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=5222cd40999a81d78de4d7d04d0424bf9f3ab54a#5222cd40999a81d78de4d7d04d0424bf9f3ab54a"
-dependencies = [
- "arith",
- "ark-std 0.4.0",
- "derivative",
- "ethnum",
- "gf2",
- "gkr_engine",
- "halo2curves",
- "itertools 0.13.0",
- "polynomials",
- "rand 0.8.5",
- "rayon",
- "serdes",
- "sumcheck",
- "thiserror 1.0.69",
- "transcript",
- "transpose",
- "tree",
- "utils",
-]
-
-[[package]]
-name = "polynomials"
-version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=5222cd40999a81d78de4d7d04d0424bf9f3ab54a#5222cd40999a81d78de4d7d04d0424bf9f3ab54a"
-dependencies = [
- "arith",
- "ark-std 0.4.0",
- "criterion",
- "halo2curves",
- "itertools 0.13.0",
- "rand 0.8.5",
- "serdes",
 ]
 
 [[package]]
@@ -4424,35 +3866,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5e48930979c155e2f33aa36ab3119b5ee81332beb6482199a8ecd6029b80b59"
 dependencies = [
  "rustversion",
-]
-
-[[package]]
-name = "raw-cpuid"
-version = "11.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "498cd0dc59d73224351ee52a95fee0f1a617a2eae0e7d9d720cc622c73a54186"
-dependencies = [
- "bitflags 2.10.0",
-]
-
-[[package]]
-name = "rayon"
-version = "1.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb39b166781f92d482534ef4b4b1b2568f42613b53e5b6c160e24cfbfa30926d"
-dependencies = [
- "either",
- "rayon-core",
-]
-
-[[package]]
-name = "rayon-core"
-version = "1.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
-dependencies = [
- "crossbeam-deque",
- "crossbeam-utils",
 ]
 
 [[package]]
@@ -5241,27 +4654,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "serdes"
-version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=5222cd40999a81d78de4d7d04d0424bf9f3ab54a#5222cd40999a81d78de4d7d04d0424bf9f3ab54a"
-dependencies = [
- "ethnum",
- "halo2curves",
- "serdes_derive",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "serdes_derive"
-version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=5222cd40999a81d78de4d7d04d0424bf9f3ab54a#5222cd40999a81d78de4d7d04d0424bf9f3ab54a"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.111",
-]
-
-[[package]]
 name = "sha1"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5312,12 +4704,6 @@ dependencies = [
  "cc",
  "cfg-if",
 ]
-
-[[package]]
-name = "shell-words"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc6fe69c597f9c37bfeeeeeb33da3530379845f10be461a66d16d03eca2ded77"
 
 [[package]]
 name = "shlex"
@@ -5402,12 +4788,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "spin"
-version = "0.9.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
-
-[[package]]
 name = "spki"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5428,12 +4808,6 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
-
-[[package]]
-name = "strength_reduce"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe895eb47f22e2ddd4dabc02bce419d2e643c8e3b585c78158b349195bc24d82"
 
 [[package]]
 name = "strsim"
@@ -5467,24 +4841,6 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
-
-[[package]]
-name = "sumcheck"
-version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=5222cd40999a81d78de4d7d04d0424bf9f3ab54a#5222cd40999a81d78de4d7d04d0424bf9f3ab54a"
-dependencies = [
- "arith",
- "circuit",
- "env_logger",
- "gkr_engine",
- "gkr_hashers",
- "log",
- "polynomials",
- "rayon",
- "serdes",
- "transcript",
- "utils",
-]
 
 [[package]]
 name = "syn"
@@ -5688,15 +5044,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tiny-keccak"
-version = "2.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c9d3793400a45f954c52e73d068316d76b6f4e36977e3fcebb13a2721e80237"
-dependencies = [
- "crunchy",
-]
-
-[[package]]
 name = "tinystr"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5704,16 +5051,6 @@ checksum = "42d3e9c45c09de15d06dd8acf5f4e0e399e85927b7f00711024eb7ae10fa4869"
 dependencies = [
  "displaydoc",
  "zerovec",
-]
-
-[[package]]
-name = "tinytemplate"
-version = "1.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be4d6b5f19ff7664e8c98d03e2139cb510db9b0a60b55f8e8709b689d939b6bc"
-dependencies = [
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -6002,42 +5339,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "transcript"
-version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=5222cd40999a81d78de4d7d04d0424bf9f3ab54a#5222cd40999a81d78de4d7d04d0424bf9f3ab54a"
-dependencies = [
- "arith",
- "gkr_engine",
- "gkr_hashers",
- "serdes",
- "sha2",
- "tiny-keccak",
-]
-
-[[package]]
-name = "transpose"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ad61aed86bc3faea4300c7aee358b4c6d0c8d6ccc36524c96e4c92ccf26e77e"
-dependencies = [
- "num-integer",
- "strength_reduce",
-]
-
-[[package]]
-name = "tree"
-version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=5222cd40999a81d78de4d7d04d0424bf9f3ab54a#5222cd40999a81d78de4d7d04d0424bf9f3ab54a"
-dependencies = [
- "arith",
- "ark-std 0.4.0",
- "blake3",
- "rayon",
- "serdes",
- "tiny-keccak",
-]
-
-[[package]]
 name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6072,15 +5373,6 @@ checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
  "cfg-if",
  "static_assertions",
-]
-
-[[package]]
-name = "tynm"
-version = "0.1.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd30d05e69d1478e13fe3e7a853409cfec82cebc2cf9b8d613b3c6b0081781ed"
-dependencies = [
- "nom",
 ]
 
 [[package]]
@@ -6142,16 +5434,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "unroll"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ad948c1cb799b1a70f836077721a92a35ac177d4daddf4c20a633786d4cf618"
-dependencies = [
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
 name = "untrusted"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6186,11 +5468,6 @@ name = "utf8parse"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
-
-[[package]]
-name = "utils"
-version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=5222cd40999a81d78de4d7d04d0424bf9f3ab54a#5222cd40999a81d78de4d7d04d0424bf9f3ab54a"
 
 [[package]]
 name = "uuid"
@@ -6400,22 +5677,12 @@ checksum = "5f20c57d8d7db6d3b86154206ae5d8fba62dd39573114de97c2cb0578251f8e1"
 name = "willow-gkr-verify"
 version = "0.1.0"
 dependencies = [
- "arith",
- "circuit",
  "flate2",
- "getrandom 0.2.16",
- "gkr",
- "gkr_engine",
  "hex",
  "log",
- "poly_commit",
- "rand 0.8.5",
- "rand_chacha 0.3.1",
- "serdes",
  "sha2",
  "subtle",
  "thiserror 1.0.69",
- "transcript",
  "willow-types",
 ]
 
@@ -7004,13 +6271,3 @@ dependencies = [
  "quote",
  "syn 2.0.111",
 ]
-
-[[patch.unused]]
-name = "bin"
-version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=5222cd40999a81d78de4d7d04d0424bf9f3ab54a#5222cd40999a81d78de4d7d04d0424bf9f3ab54a"
-
-[[patch.unused]]
-name = "crosslayer_prototype"
-version = "0.1.0"
-source = "git+https://github.com/willow-network/Expander?rev=5222cd40999a81d78de4d7d04d0424bf9f3ab54a#5222cd40999a81d78de4d7d04d0424bf9f3ab54a"

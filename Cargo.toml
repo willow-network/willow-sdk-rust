@@ -59,21 +59,14 @@ clap = { version = "4.4", features = ["derive"] }
 # Shared types with the server (token units, transaction types, etc.)
 willow-types = { path = "../../crates/types" }
 
-# Thin GKR verifier crate.
-#
-# With just the `verifiable-rpc` feature enabled, this pulls in only the
-# binding-only path — pure sha2/subtle, no Expander transitive deps.
-# With `verifiable-rpc-full` the SDK also pulls the Expander verifier
-# subset via `willow-gkr-verify/full`; those deps are pinned to the
-# `willow-network/Expander` fork via the [patch] block at the bottom of
-# this file (keep in sync with the workspace root Cargo.toml).
+# Binding-only verifier (sha2 + subtle, no heavy deps). Re-exported
+# from `willow-gkr-verify-pure` for the binding-only code path.
 willow-gkr-verify = { path = "../../crates/gkr-verify", optional = true }
 
-# Pure-Rust full-soundness GKR verifier. No Expander in the dep graph,
-# so compiles cleanly to wasm32-unknown-unknown. Enabled via the
-# `verifiable-rpc-pure` feature; mutually exclusive with
-# `verifiable-rpc-full` at runtime (pure takes precedence when both
-# are on — the native Expander backend then becomes dead code).
+# Full-soundness GKR verifier — pure Rust, wasm-friendly. Hand-rolled
+# Fiat-Shamir transcript, M31/M31Ext3 field math, GKR sumcheck, and
+# Orion PCS opening. Same cryptographic guarantees as the in-workspace
+# Expander-backed verifier; cross-validated byte-for-byte via fixtures.
 willow-gkr-verify-pure = { path = "../../crates/gkr-verify-pure", features = ["registry"], optional = true }
 
 # Light client dependencies - uses grovedb verify feature for lightweight proof verification
@@ -124,30 +117,20 @@ no-light-client = []
 # Enable client-side verification for the verifiable-RPC flow
 # (GET /verifiable-rpc/:subgrove/:key with a GKR proof attached, plus
 # the eth/state and eth/call routes that ship state proofs).
-# Pure binding-only — fast compile, pure sha2/subtle, mobile-friendly.
+#
+# Pulls in:
+#  - Binding-only GKR verifier (`willow-gkr-verify`)
+#  - Full-soundness GKR verifier (`willow-gkr-verify-pure`) with the
+#    embedded circuit registry
+#  - Alloy + alloy-rlp/-trie for Ethereum MPT inclusion proofs
 verifiable-rpc = [
     "dep:willow-gkr-verify",
+    "dep:willow-gkr-verify-pure",
+    "willow-gkr-verify/registry",
     "dep:alloy",
     "dep:alloy-primitives",
     "dep:alloy-rlp",
     "dep:alloy-trie",
-]
-# Extend `verifiable-rpc` with full-soundness GKR verification. Pulls in
-# the Expander verifier subset via willow-gkr-verify's `full` feature
-# (multi-minute cold build, multi-megabyte binary cost). Opt in when
-# clients need Phase 2+ permissionless trust over the Phase 1 hosted-
-# service trust model.
-verifiable-rpc-full = ["verifiable-rpc", "willow-gkr-verify/full"]
-# Full-soundness GKR verification via the pure-Rust port
-# (`willow-gkr-verify-pure`). Same guarantees as `verifiable-rpc-full`
-# but no Expander transitive deps — the whole stack (Fiat-Shamir
-# transcript, M31/M31Ext3 field math, GKR sumcheck, Orion PCS opening)
-# is hand-rolled in pure Rust. Target audience: browser + mobile
-# clients that can't compile the Expander C-FFI dependencies.
-verifiable-rpc-pure = [
-    "verifiable-rpc",
-    "dep:willow-gkr-verify-pure",
-    "willow-gkr-verify/registry",
 ]
 
 # Operation examples - individual consensus transactions
@@ -184,27 +167,3 @@ path = "examples/operations/check_balances.rs"
 name = "list_registrations"
 path = "examples/operations/list_registrations.rs"
 
-# Patch Expander deps to the willow-network fork so willow-gkr-verify's
-# `full` feature resolves the same type universe the workspace does.
-# Mirror this block with crates/Cargo.toml exactly — the fork rev must
-# match. The fork exists for GPU CUDA kernels not yet upstream.
-[patch."https://github.com/PolyhedraZK/Expander"]
-gkr = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
-gkr_engine = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
-arith = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
-transcript = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
-poly_commit = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
-config_macros = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
-circuit = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
-sumcheck = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
-serdes = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
-bin = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
-mersenne31 = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
-goldilocks = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
-babybear = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
-gf2 = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
-gf2_128 = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
-gkr_hashers = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
-polynomials = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
-utils = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
-crosslayer_prototype = { git = "https://github.com/willow-network/Expander", rev = "5222cd40999a81d78de4d7d04d0424bf9f3ab54a" }
