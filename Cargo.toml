@@ -56,10 +56,8 @@ tracing = { version = "0.1", optional = true }
 # Used by examples for arg parsing.
 clap = { version = "4.4", features = ["derive"] }
 
-# Shared types with the server (token units, transaction types, etc.)
-willow-types = { path = "../../crates/types" }
-
-willow-gkr-verify = { path = "../../crates/gkr-verify", features = ["registry"], optional = true }
+willow-types = { version = "0.1", path = "../willow-types-extract" }
+willow-gkr-verify = { version = "0.1", path = "../willow-gkr-verify-extract", features = ["registry"], optional = true }
 
 # Light client dependencies - uses grovedb verify feature for lightweight proof verification
 # These are included by default for trustless verification
