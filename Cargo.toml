@@ -101,10 +101,8 @@ tempfile = "3.8"
 env_logger = "0.11"
 
 [features]
-default = []
+default = ["verifiable-rpc"]
 tracing = ["dep:tracing"]
-# Disable light client verification for minimal dependency footprint
-# Use this if you trust your node and want faster compile times
 no-light-client = []
 verifiable-rpc = [
     "dep:willow-gkr-verify",
