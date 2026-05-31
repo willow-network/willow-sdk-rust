@@ -59,15 +59,7 @@ clap = { version = "4.4", features = ["derive"] }
 # Shared types with the server (token units, transaction types, etc.)
 willow-types = { path = "../../crates/types" }
 
-# Binding-only verifier (sha2 + subtle, no heavy deps). Re-exported
-# from `willow-gkr-verify-pure` for the binding-only code path.
-willow-gkr-verify = { path = "../../crates/gkr-verify", optional = true }
-
-# Full-soundness GKR verifier — pure Rust, wasm-friendly. Hand-rolled
-# Fiat-Shamir transcript, M31/M31Ext3 field math, GKR sumcheck, and
-# Orion PCS opening. Same cryptographic guarantees as the in-workspace
-# Expander-backed verifier; cross-validated byte-for-byte via fixtures.
-willow-gkr-verify-pure = { path = "../../crates/gkr-verify-pure", features = ["registry"], optional = true }
+willow-gkr-verify = { path = "../../crates/gkr-verify", features = ["registry"], optional = true }
 
 # Light client dependencies - uses grovedb verify feature for lightweight proof verification
 # These are included by default for trustless verification
@@ -95,7 +87,7 @@ alloy-trie = { version = "0.9", optional = true }
 # NB: enabling these is *necessary* for wasm but not *sufficient* —
 # the SDK's native HTTP/WebSocket/tokio-net stack still blocks the
 # full `wasm32-unknown-unknown` build. For pure verification in
-# browsers today, consume `willow-gkr-verify-pure` directly; it
+# browsers today, consume `willow-gkr-verify` directly; it
 # builds clean on wasm.
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
@@ -114,18 +106,8 @@ tracing = ["dep:tracing"]
 # Disable light client verification for minimal dependency footprint
 # Use this if you trust your node and want faster compile times
 no-light-client = []
-# Enable client-side verification for the verifiable-RPC flow
-# (GET /verifiable-rpc/:subgrove/:key with a GKR proof attached, plus
-# the eth/state and eth/call routes that ship state proofs).
-#
-# Pulls in:
-#  - Binding-only GKR verifier (`willow-gkr-verify`)
-#  - Full-soundness GKR verifier (`willow-gkr-verify-pure`) with the
-#    embedded circuit registry
-#  - Alloy + alloy-rlp/-trie for Ethereum MPT inclusion proofs
 verifiable-rpc = [
     "dep:willow-gkr-verify",
-    "dep:willow-gkr-verify-pure",
     "willow-gkr-verify/registry",
     "dep:alloy",
     "dep:alloy-primitives",

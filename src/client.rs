@@ -64,10 +64,9 @@ pub struct WillowClient {
 pub enum VerifyMode {
     /// Require both a valid GKR proof and a valid GroveDB proof.
     ///
-    /// With the `verifiable-rpc` feature enabled, the SDK verifies both
-    /// `GKR_PROOF_BINDING_ONLY` and `GKR_PROOF_FULL` proofs. Full proofs
-    /// run against compiled-circuit bytes embedded at build time (via
-    /// the embedded `registry`).
+    /// With the `verifiable-rpc` feature enabled, the SDK verifies
+    /// `GKR_PROOF_FULL` proofs end-to-end against compiled-circuit
+    /// bytes embedded at build time (via the embedded `registry`).
     Strict,
     /// Require a GroveDB proof; accept responses without a full GKR
     /// check. The caller is responsible for anchoring `state_root` some

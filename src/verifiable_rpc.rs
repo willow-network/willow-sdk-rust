@@ -5,11 +5,9 @@
 //! two proofs side by side:
 //!
 //!  1. **GKR proof** (if present) — confirms the indexer's claimed
-//!     `state_root` is the correct output of transforming committed events.
-//!     Supports both `GKR_PROOF_BINDING_ONLY` (pure SHA-256, no heavy
-//!     deps) and `GKR_PROOF_FULL` (pure-Rust full-soundness verifier
-//!     via `willow-gkr-verify-pure`; circuit bytes embedded at build
-//!     time via the `registry` feature).
+//!     `state_root` is the correct output of transforming committed
+//!     events. `GKR_PROOF_FULL` is verified locally via `willow-gkr-verify`;
+//!     circuit bytes are embedded at build time via the `registry` feature.
 //!  2. **GroveDB Merkle proof** — confirms `answer` is the value at `key`
 //!     in the tree rooted at `state_root`. Verified via GroveDB's
 //!     lightweight verify-only mode (already shipped with the SDK).
@@ -46,9 +44,7 @@ use crate::errors::{Result, WillowError};
 use grovedb::{GroveDb, PathQuery, Query};
 use grovedb_version::version::GroveVersion;
 use std::time::{SystemTime, UNIX_EPOCH};
-use willow_gkr_verify::{
-    detect_format, verify_binding_only_proof as verify_binding_only, ProofFormat,
-};
+use willow_gkr_verify::FULL_HEADER;
 use willow_types::consensus::indexing_transactions::GkrProofData;
 use willow_types::verifiable_rpc::VerifiableRpcResponse;
 
@@ -278,15 +274,9 @@ fn verify_grovedb_proof(resp: &VerifiableRpcResponse, key: &[u8]) -> Result<()> 
 /// Verify the GKR proof carried in a verifiable-RPC response.
 ///
 /// Cross-checks the proof's claimed `output_root` against the response's
-/// `state_root`, then routes to `willow-gkr-verify` by format:
-///
-///  - `GKR_PROOF_BINDING_ONLY` → pure-sha2 binding check (always
-///    available).
-///  - `GKR_PROOF_FULL` → full GKR verification via the `full` feature.
-///    Needs the serialized circuit bytes for the proof's circuit
-///    version; those are embedded at compile time (see
-///    `willow_gkr_verify::circuits`). Without the feature, surfaces a
-///    precise "not compiled in" error.
+/// `state_root`, then verifies the `GKR_PROOF_FULL` payload via the
+/// pure-Rust verifier (compiles to wasm32; circuit bytes embedded at
+/// compile time via `willow_gkr_verify::registry`).
 fn verify_gkr_proof(proof: &GkrProofData, expected_state_root: [u8; 32]) -> Result<()> {
     if proof.public_inputs.output_root != expected_state_root {
         return Err(WillowError::ProofVerificationFailed(format!(
@@ -296,26 +286,21 @@ fn verify_gkr_proof(proof: &GkrProofData, expected_state_root: [u8; 32]) -> Resu
         )));
     }
 
-    match detect_format(&proof.proof) {
-        ProofFormat::BindingOnly => verify_binding_only(
-            &proof.proof,
-            &proof.public_inputs,
-            proof.verification_key_hash,
-        )
-        .map_err(|e| WillowError::ProofVerificationFailed(e.to_string())),
-        ProofFormat::Full => verify_full(proof),
-        ProofFormat::Unknown => Err(WillowError::ProofVerificationFailed(
-            "GKR proof header is not a recognised format".into(),
-        )),
+    if proof.proof.len() < FULL_HEADER.len() || &proof.proof[..FULL_HEADER.len()] != FULL_HEADER {
+        return Err(WillowError::ProofVerificationFailed(
+            "GKR proof header is not GKR_PROOF_FULL".into(),
+        ));
     }
+
+    verify_full(proof)
 }
 
-/// Full-GKR verification — pure-Rust verifier (`willow-gkr-verify-pure`).
+/// Full-GKR verification — pure-Rust verifier (`willow-gkr-verify`).
 /// No Expander in the dep graph; compiles to `wasm32-unknown-unknown`.
 /// Cross-validated byte-for-byte against the native Expander verifier
 /// via fixtures.
 fn verify_full(proof: &GkrProofData) -> Result<()> {
-    willow_gkr_verify_pure::verify_full_proof_with_registry(
+    willow_gkr_verify::verify_full_proof_with_registry(
         &proof.proof,
         &proof.public_inputs,
         proof.verification_key_hash,
@@ -328,7 +313,7 @@ mod tests {
     use super::*;
     use crate::client::WillowClient;
     use sha2::{Digest, Sha256};
-    use willow_gkr_verify::{BINDING_FORMAT_VERSION, BINDING_HEADER, FULL_HEADER};
+    use willow_gkr_verify::FULL_HEADER;
     use willow_types::consensus::indexing_transactions::{GkrProofData, GkrPublicInputs};
     use willow_types::consensus::CURRENT_PROOF_VERSION;
 
@@ -360,29 +345,6 @@ mod tests {
             state_proofs: Vec::new(),
             served_at_unix_secs: 1_700_000_000,
         }
-    }
-
-    /// Build a binding-only proof in the byte-exact format produced by
-    /// `willow_gkr::prover::GkrProver::generate_binding_only_proof`. The
-    /// verifier crate itself covers the full format-check matrix; here we
-    /// only need to fabricate one valid proof for the SDK dispatch tests.
-    fn build_valid_binding_only(pi: &GkrPublicInputs, circuit_version: [u8; 32]) -> Vec<u8> {
-        let mut proof = Vec::with_capacity(131);
-        proof.extend_from_slice(BINDING_HEADER);
-        proof.push(BINDING_FORMAT_VERSION);
-        proof.extend_from_slice(&circuit_version);
-        proof.extend_from_slice(&willow_gkr_verify::binding_only::compute_public_input_hash(
-            pi,
-        ));
-        proof.extend_from_slice(&1u32.to_be_bytes());
-        proof.extend_from_slice(&2u32.to_be_bytes());
-        proof.extend_from_slice(&3u32.to_be_bytes());
-        let mut hasher = Sha256::new();
-        hasher.update(&proof);
-        hasher.update(b"witness_commitment");
-        let commitment: [u8; 32] = hasher.finalize().into();
-        proof.extend_from_slice(&commitment);
-        proof
     }
 
     async fn test_client() -> WillowClient {
@@ -526,7 +488,7 @@ mod tests {
         };
         let err =
             verify_gkr_proof(&data, pi.output_root).expect_err("unknown format must be rejected");
-        assert!(err.to_string().contains("not a recognised format"));
+        assert!(err.to_string().contains("not GKR_PROOF_FULL"));
     }
 
     #[test]
@@ -536,48 +498,5 @@ mod tests {
         let err = verify_grovedb_proof(&resp, &resp.key.clone())
             .expect_err("empty proof must be rejected");
         assert!(err.to_string().contains("empty"));
-    }
-
-    /// Cross-crate wire-format lock: JSON round-trips through
-    /// `VerifiableRpcResponse` and the embedded binding-only proof
-    /// verifies via the shared crate's verifier. If this test breaks, the
-    /// indexer and SDK have diverged on the on-the-wire format.
-    #[test]
-    fn json_wire_compat_then_binding_only_verifies() {
-        let pi = GkrPublicInputs {
-            output_root: [0x99; 32],
-            block_range: (10, 20),
-            config_hash: [0x77; 32],
-            starting_state_root: [0; 32],
-        };
-        let cv = [0x55; 32];
-        let proof = build_valid_binding_only(&pi, cv);
-        let response = VerifiableRpcResponse {
-            subgrove_id: "sg".into(),
-            key: vec![1, 2, 3],
-            answer: vec![4, 5, 6, 7],
-            answer_exists: true,
-            checkpoint_id: [0x88; 32],
-            state_root: pi.output_root,
-            block_range: pi.block_range,
-            grovedb_proof: vec![0xab, 0xcd], // placeholder; not verified here
-            gkr_proofs: vec![GkrProofData {
-                proof_version: CURRENT_PROOF_VERSION,
-                proof_size_bytes: proof.len() as u64,
-                proof,
-                public_inputs: pi.clone(),
-                verification_key_hash: cv,
-                generation_time_ms: 7,
-                gpu_accelerated: false,
-            }],
-            completeness_proof: None,
-            state_proofs: Vec::new(),
-            served_at_unix_secs: 1_700_000_000,
-        };
-
-        let json = serde_json::to_string(&response).expect("encode");
-        let decoded: VerifiableRpcResponse = serde_json::from_str(&json).expect("decode");
-        verify_gkr_proof(&decoded.gkr_proofs[0], decoded.state_root)
-            .expect("shared verifier accepts round-tripped proof");
     }
 }
