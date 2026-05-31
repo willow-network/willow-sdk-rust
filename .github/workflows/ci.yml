@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: willow-sdk-rust-extract
+      - uses: actions/checkout@v4
+        with:
+          repository: willow-network/willow-types
+          path: willow-types-extract
+      - uses: actions/checkout@v4
+        with:
+          repository: willow-network/willow-gkr-verify
+          path: willow-gkr-verify-extract
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: willow-sdk-rust-extract
+      - working-directory: willow-sdk-rust-extract
+        run: cargo fmt --check
+      - working-directory: willow-sdk-rust-extract
+        run: cargo clippy
+      - working-directory: willow-sdk-rust-extract
+        run: cargo test --lib
