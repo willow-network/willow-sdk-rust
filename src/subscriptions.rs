@@ -217,10 +217,6 @@ impl WillowSubscriptions {
         )
         .await?;
 
-        // Stable across reconnects — the graphql-ws `id` is per-socket
-        // but there's no harm in reusing the same string on each new
-        // subscribe frame. The server treats each as a fresh
-        // subscription; filtering on our side stays consistent.
         let sub_id = format!(
             "sub-{}",
             std::time::SystemTime::now()
@@ -308,11 +304,8 @@ async fn subscription_loop(initial_stream: WsStream, mut state: TaskState) {
             match exit {
                 PumpExit::Cancelled | PumpExit::ServerComplete => return,
                 PumpExit::Disconnected { delivered_payload } => {
-                    // Reset the attempt counter only if we saw real
-                    // data this round. Otherwise a server accepting
-                    // connections and immediately dropping them would
-                    // loop forever at attempts=0 (each reconnect
-                    // resetting before any payload arrives).
+                    // Reset attempts only after real data — else an
+                    // accept-and-drop server loops forever at attempts=0.
                     if delivered_payload {
                         attempts = 0;
                     }
@@ -360,19 +353,13 @@ async fn subscription_loop(initial_stream: WsStream, mut state: TaskState) {
         let (ws_url, new_did) = match resolve {
             Ok(r) => r,
             Err(_) => {
-                // Discovery failed (validator unreachable, empty list,
-                // etc.). Keep retrying — `attempts` increments each
-                // iteration so we'll eventually honor
-                // `max_reconnect_attempts`.
+                // Discovery failed — retry. `attempts` still ticks up.
                 continue;
             }
         };
 
         match connect_and_handshake(&ws_url, &state.sub_id, &state.query, &state.options).await {
             Ok(stream) => {
-                // Connection + handshake succeeded; data-flow determines
-                // whether to reset the attempt counter. See
-                // `PumpExit::Disconnected.delivered_payload`.
                 state.current_indexer_did = new_did;
                 current_stream = Some(stream);
             }

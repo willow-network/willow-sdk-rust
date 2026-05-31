@@ -302,12 +302,7 @@ impl EthOperations {
             WillowError::ProofVerificationFailed("uni_v2_reserves: empty storage_proofs".into())
         })?;
         let bytes: [u8; 32] = value.to_be_bytes::<32>();
-        // Packed: reserve0 (112 bits) | reserve1 (112 bits) | blockTimestampLast (32 bits)
-        // Layout in storage (low → high): timestamp(4 bytes) | reserve1(14 bytes) | reserve0(14 bytes)
-        // In big-endian on-the-wire bytes (which is what to_be_bytes gives):
-        // bytes[0..14] = reserve0  (high) — wait no, this needs careful analysis
-        // Solidity packs from the high-order side: bytes[0..4] = blockTimestampLast,
-        // bytes[4..18] = reserve1, bytes[18..32] = reserve0
+        // Packed big-endian: [0..4]=timestamp32, [4..18]=reserve1(14), [18..32]=reserve0(14).
         let block_timestamp_last = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
         let mut r1_bytes = [0u8; 16];
         r1_bytes[2..].copy_from_slice(&bytes[4..18]);
