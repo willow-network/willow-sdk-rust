@@ -358,18 +358,19 @@ cargo test test_generate_did
 
 The SDK provides three levels of security:
 
-1. **Full Trustless** (with light client configured)
-   - Verifies 2/3+ validator signatures on block headers
+1. **Full Trustless** (default — `VerifyMode::Strict`)
+   - Light client verifies 2/3+ validator signatures on block headers
    - Extracts trusted `app_hash` from consensus
    - Verifies GroveDB proofs against `app_hash`
+   - Verifies GKR proofs end-to-end against the embedded circuit registry
    - No trust in any single node required
 
-2. **Root Hash Verification** (default)
-   - Verifies GroveDB proofs locally
-   - Compares against `/state/root-hash/verified` endpoint
-   - Trusts that the API returns correct consensus state
+2. **GroveDB-Only** (opt-in via `VerifyMode::GroveDbOnly`)
+   - Verifies GroveDB proofs locally against the response's `state_root`
+   - Caller anchors `state_root` out-of-band (e.g. via the consensus light client)
+   - Useful when the GKR-proof check is too expensive for the workload
 
-3. **Unverified** (opt-in via `_unverified` methods)
+3. **Unverified** (opt-in via `_unverified` methods or `VerifyMode::Disabled`)
    - Trusts the node completely
    - Maximum performance
    - Use only with trusted nodes
