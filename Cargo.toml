@@ -74,21 +74,8 @@ alloy-primitives = { version = "1", optional = true }
 alloy-rlp = { version = "0.3", optional = true }
 alloy-trie = { version = "0.9", optional = true }
 
-# On `wasm32-unknown-unknown`, `getrandom` (pulled in transitively
-# via base64 / serde_json / grovedb) needs its `js` feature so it
-# can source entropy from `crypto.getRandomValues`. Without it the
-# build fails with a `compile_error!` inside getrandom itself.
-# Similarly `uuid`'s wasm backend needs its `js` feature —
-# `"v4"` alone isn't sufficient on wasm32.
-#
-# Two `getrandom` versions pinned because the workspace has both
-# major lines in the graph; each emits its own incompatible feature.
-#
-# NB: enabling these is *necessary* for wasm but not *sufficient* —
-# the SDK's native HTTP/WebSocket/tokio-net stack still blocks the
-# full `wasm32-unknown-unknown` build. For pure verification in
-# browsers today, consume `willow-gkr-verify` directly; it
-# builds clean on wasm.
+# Both major lines of getrandom appear transitively; both need their
+# JS feature on wasm32 to source entropy from `crypto.getRandomValues`.
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
 getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }

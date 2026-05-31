@@ -153,8 +153,8 @@ impl EthOperations {
             }
         }
 
-        // `answer` is the ABI-encoded result piggybacking on the legacy
-        // envelope field — server-side wraps it in `eth_state::build_envelope`.
+        // `answer` carries the ABI-encoded result; server-side wraps it
+        // in `eth_state::build_envelope`.
         let result = raw.answer.clone();
         let state_root = raw.state_root;
         let block_number_resp = raw.block_range.0;

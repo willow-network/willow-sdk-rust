@@ -224,11 +224,10 @@ impl DataOperations {
         Ok(query_response)
     }
 
-    /// Execute a SQL query against a subgrove.
-    ///
-    /// Legacy signature: targets [`WillowClient::indexer_base_url`] — the
-    /// explicit `indexer_url` override if set, else the validator. For
-    /// source-routed queries use [`Self::sql_with_source`].
+    /// Execute a SQL query against a subgrove. Sends to
+    /// [`WillowClient::indexer_base_url`] — the explicit `indexer_url`
+    /// override if set, else the validator. For source-routed queries
+    /// use [`Self::sql_with_source`].
     ///
     /// Works with both DataStorage and BlockchainIndexing subgroves.
     /// For DataStorage, the table name in FROM is ignored — all documents

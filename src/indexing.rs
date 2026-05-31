@@ -61,49 +61,12 @@ impl IndexingOperations {
         Self { client }
     }
 
-    /// Executes a GraphQL query against an indexed subgrove.
-    ///
-    /// Legacy signature: always targets [`WillowClient::indexer_base_url`] —
-    /// the explicit `indexer_url` override if set, else the validator. For
-    /// source-routed queries (auto-discovery, explicit validator fallback,
-    /// etc.) use [`Self::graphql_query_with_source`].
+    /// Executes a GraphQL query against an indexed subgrove. Sends to
+    /// [`WillowClient::indexer_base_url`] — the explicit `indexer_url`
+    /// override if set, else the validator. For source-routed queries
+    /// (auto-discovery, explicit validator fallback, etc.) use
+    /// [`Self::graphql_query_with_source`].
     pub async fn graphql_query(
-        &self,
-        subgrove_id: &str,
-        query: &str,
-        variables: Option<serde_json::Value>,
-    ) -> Result<GraphQLResponse> {
-        self.graphql_query_legacy(subgrove_id, query, variables)
-            .await
-    }
-
-    /// Executes a GraphQL query with explicit source selection.
-    ///
-    /// The `source` argument makes the trust model part of the API: callers
-    /// declare whether they want consensus-verified chain-tip data
-    /// ([`QuerySource::Validator`]), historical/analytics data
-    /// ([`QuerySource::Indexer`]), or "best effort with fallback"
-    /// ([`QuerySource::Auto`], usually what you want).
-    ///
-    /// The returned [`RoutedQueryResult`] tells the caller which backend
-    /// actually served the query so UIs can surface it to users.
-    pub async fn graphql_query_with_source(
-        &self,
-        subgrove_id: &str,
-        query: &str,
-        variables: Option<serde_json::Value>,
-        source: QuerySource,
-    ) -> Result<RoutedQueryResult<GraphQLResponse>> {
-        let request = GraphQLRequest {
-            query: query.to_string(),
-            variables,
-        };
-        self.route("graphql", subgrove_id, &request, source).await
-    }
-
-    /// Original (pre-source-routing) GraphQL implementation, preserved so
-    /// the legacy `graphql_query(..)` method's semantics don't change.
-    async fn graphql_query_legacy(
         &self,
         subgrove_id: &str,
         query: &str,
@@ -145,6 +108,30 @@ impl IndexingOperations {
                 message: text,
             })
         }
+    }
+
+    /// Executes a GraphQL query with explicit source selection.
+    ///
+    /// The `source` argument makes the trust model part of the API: callers
+    /// declare whether they want consensus-verified chain-tip data
+    /// ([`QuerySource::Validator`]), historical/analytics data
+    /// ([`QuerySource::Indexer`]), or "best effort with fallback"
+    /// ([`QuerySource::Auto`], usually what you want).
+    ///
+    /// The returned [`RoutedQueryResult`] tells the caller which backend
+    /// actually served the query so UIs can surface it to users.
+    pub async fn graphql_query_with_source(
+        &self,
+        subgrove_id: &str,
+        query: &str,
+        variables: Option<serde_json::Value>,
+        source: QuerySource,
+    ) -> Result<RoutedQueryResult<GraphQLResponse>> {
+        let request = GraphQLRequest {
+            query: query.to_string(),
+            variables,
+        };
+        self.route("graphql", subgrove_id, &request, source).await
     }
 
     /// Shared source-routing helper for both `/graphql/:sg` and `/sql/:sg`.
