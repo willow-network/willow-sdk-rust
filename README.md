@@ -32,6 +32,18 @@ To disable proof verification (if you trust your node):
 willow-sdk = { version = "0.1.0", features = ["no-light-client"] }
 ```
 
+### Building from source
+
+This repo uses path dependencies on two companion crates checked out as siblings
+(the same layout CI uses — see `.github/workflows/ci.yml`). Clone them next to
+this repo before building:
+
+```bash
+git clone https://github.com/willow-network/willow-types.git      ../willow-types-extract
+git clone https://github.com/willow-network/willow-gkr-verify.git ../willow-gkr-verify-extract
+cargo build
+```
+
 ## Transaction submission
 
 Transactions submitted through this SDK go to the API server's

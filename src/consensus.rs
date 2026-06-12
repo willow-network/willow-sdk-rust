@@ -88,34 +88,74 @@ impl ConsensusClient {
         }
     }
 
-    /// Fetch the next valid nonce for a DID from the API server.
+    /// Fetch the next valid nonce for a DID, returning `base + 1`.
+    ///
+    /// When an API URL is configured (the gateway path) it uses the
+    /// `/account/{did}/nonce` endpoint; otherwise it reads the base nonce
+    /// straight from chain state via the CometBFT RPC
+    /// (`abci_query /store/account_nonce/{did}`), so the client also works
+    /// against a raw validator (e.g. a local devnet) with no API server.
     pub async fn get_next_nonce(&self, did: &str) -> Result<u64> {
-        let api_url = self.api_url.as_ref().ok_or_else(|| {
-            WillowError::Config(
-                "API URL not configured — needed for nonce auto-management".to_string(),
-            )
-        })?;
+        if let Some(api_url) = self.api_url.as_ref() {
+            let url = format!("{}/account/{}/nonce", api_url.trim_end_matches('/'), did);
+            let resp = self
+                .http_client
+                .get(&url)
+                .send()
+                .await
+                .map_err(|e| WillowError::Network(format!("Failed to fetch nonce: {}", e)))?;
+            let body: serde_json::Value = resp.json().await.map_err(|e| {
+                WillowError::Network(format!("Failed to parse nonce response: {}", e))
+            })?;
+            // Response format: {"success": true, "data": {"did": "...", "nonce": N}}
+            let base_nonce = body
+                .get("data")
+                .and_then(|d| d.get("nonce"))
+                .and_then(|n| n.as_u64())
+                .unwrap_or(0);
+            return Ok(base_nonce + 1);
+        }
+        self.next_nonce_via_rpc(did).await
+    }
 
-        let url = format!("{}/account/{}/nonce", api_url.trim_end_matches('/'), did);
-        let resp = self
+    /// Read the base nonce from chain state via the CometBFT RPC and return
+    /// `base + 1`. `abci_query` returns the base as an 8-byte big-endian u64 in
+    /// `result.response.value` (base64); empty = fresh account (base 0).
+    async fn next_nonce_via_rpc(&self, did: &str) -> Result<u64> {
+        let body = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "abci_query",
+            "params": {
+                "path": format!("/store/account_nonce/{}", did),
+                "data": "",
+                "height": "0",
+                "prove": false,
+            }
+        });
+        let resp: serde_json::Value = self
             .http_client
-            .get(&url)
+            .post(&self.consensus_rpc_url)
+            .json(&body)
             .send()
             .await
-            .map_err(|e| WillowError::Network(format!("Failed to fetch nonce: {}", e)))?;
-        let body: serde_json::Value = resp
+            .map_err(|e| WillowError::Network(format!("Failed to fetch nonce: {}", e)))?
             .json()
             .await
             .map_err(|e| WillowError::Network(format!("Failed to parse nonce response: {}", e)))?;
-
-        // Response format: {"success": true, "data": {"did": "...", "nonce": N}}
-        let base_nonce = body
-            .get("data")
-            .and_then(|d| d.get("nonce"))
-            .and_then(|n| n.as_u64())
-            .unwrap_or(0);
-
-        Ok(base_nonce + 1)
+        let value_b64 = resp["result"]["response"]["value"].as_str().unwrap_or("");
+        if value_b64.is_empty() {
+            return Ok(1);
+        }
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(value_b64)
+            .map_err(|e| WillowError::Network(format!("nonce base64 decode: {}", e)))?;
+        if bytes.len() < 8 {
+            return Ok(1);
+        }
+        let mut buf = [0u8; 8];
+        buf.copy_from_slice(&bytes[..8]);
+        Ok(u64::from_be_bytes(buf) + 1)
     }
 
     /// Register a DID through consensus
