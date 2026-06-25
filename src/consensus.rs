@@ -38,6 +38,16 @@ pub use willow_types::consensus::transactions::{
     RegisterSubgroveTx, TransferTx,
 };
 
+/// JSON shape of the on-chain completeness anchor stored at
+/// `/store/events_commitment/{subgrove}/{block}`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventsCommitmentAnchor {
+    pub subgrove_id: String,
+    pub block_number: u64,
+    /// 64-hex chars = the 32-byte commitment.
+    pub events_commitment: String,
+}
+
 /// CometBFT RPC response
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CometBftResponse {
@@ -156,6 +166,72 @@ impl ConsensusClient {
         let mut buf = [0u8; 8];
         buf.copy_from_slice(&bytes[..8]);
         Ok(u64::from_be_bytes(buf) + 1)
+    }
+
+    /// Read a block's on-chain completeness anchor — the 32-byte
+    /// `events_commitment` — from chain state via the CometBFT RPC.
+    ///
+    /// Queries the validator's ABCI store at
+    /// `/store/events_commitment/{subgrove_id}/{block_number}`. On a hit
+    /// (`response.code == 0`) the value bytes are JSON
+    /// `{ "subgrove_id", "block_number", "events_commitment": "<64-hex>" }`;
+    /// the 32-byte commitment is the hex-decoded `events_commitment`.
+    ///
+    /// Returns `Ok(None)` when the chain has no commitment for the block
+    /// (a non-zero ABCI code, e.g. "No events commitment for block N", or an
+    /// empty value) — the block is not completeness-verifiable.
+    pub async fn events_commitment(
+        &self,
+        subgrove_id: &str,
+        block_number: u64,
+    ) -> Result<Option<[u8; 32]>> {
+        let body = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "abci_query",
+            "params": {
+                "path": format!("/store/events_commitment/{}/{}", subgrove_id, block_number),
+                "data": "",
+                "height": "0",
+                "prove": false,
+            }
+        });
+        let resp: serde_json::Value = self
+            .http_client
+            .post(&self.consensus_rpc_url)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| WillowError::Network(format!("Failed to fetch events_commitment: {}", e)))?
+            .json()
+            .await
+            .map_err(|e| {
+                WillowError::Network(format!("Failed to parse events_commitment response: {}", e))
+            })?;
+
+        let response = &resp["result"]["response"];
+        let code = response["code"].as_u64().unwrap_or(0);
+        if code != 0 {
+            return Ok(None);
+        }
+        let value_b64 = response["value"].as_str().unwrap_or("");
+        if value_b64.is_empty() {
+            return Ok(None);
+        }
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(value_b64)
+            .map_err(|e| WillowError::Network(format!("events_commitment base64 decode: {}", e)))?;
+        let anchor: EventsCommitmentAnchor = serde_json::from_slice(&bytes)?;
+        let commitment_bytes = hex::decode(&anchor.events_commitment)?;
+        if commitment_bytes.len() != 32 {
+            return Err(WillowError::Validation(format!(
+                "events_commitment is {} bytes, expected 32",
+                commitment_bytes.len()
+            )));
+        }
+        let mut out = [0u8; 32];
+        out.copy_from_slice(&commitment_bytes);
+        Ok(Some(out))
     }
 
     /// Register a DID through consensus

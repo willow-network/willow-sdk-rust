@@ -92,7 +92,9 @@ pub mod validators;
 pub mod verifiable_rpc;
 
 pub use client::{SeenStateRoot, VerifyMode, WillowClient};
-pub use completeness::{canonical_event_set_hash, verify_served_events, Log as MatchedLog};
+pub use completeness::{
+    canonical_event_set_hash, parse_matched_logs, verify_served_events, Log as MatchedLog,
+};
 pub use consensus::{ConsensusClient, Transaction};
 pub use data::{
     CheckpointInfo, DataOperations, HistoricalQueryRequest, HistoricalQueryResponse, QueryResponse,
