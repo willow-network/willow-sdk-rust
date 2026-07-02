@@ -126,9 +126,9 @@ pub use subscriptions::{
 };
 pub use token::TokenOperations;
 pub use types::{
-    ApiResponse, BalanceInfo, BlockVerificationStatus, DidDocument, DidPermissions, EthereumAnchor,
-    FeeSchedule, GraphQLError, GraphQLRequest, GraphQLResponse, HealthStatus, IndexDefinition,
-    IndexerInfo, IndexerStatus, MerkleProof, PathQueryData, PublicKey, QueryProof,
+    ApiResponse, BalanceInfo, BlockVerificationStatus, DidDocument, DidInfo, DidPermissions,
+    EthereumAnchor, FeeSchedule, GraphQLError, GraphQLRequest, GraphQLResponse, HealthStatus,
+    IndexDefinition, IndexerInfo, IndexerStatus, MerkleProof, PathQueryData, PublicKey, QueryProof,
     RegisterSubgroveRequest, SchemaDefinition, SchemaField, SignatureAlgorithm,
     SignedRequestHeaders, SqlRequest, SqlResponse, StakeRequest, StoreDataRequest,
     SubgroveBalanceInfo, SubgroveIndexingStatus, SubgroveInfo, SubgroveRegistration,

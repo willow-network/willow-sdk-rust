@@ -179,6 +179,10 @@ let tx_hash = consensus_client.store_data(request, &signing_key).await?;
 
 ### Generate DIDs
 
+Willow DIDs are **self-certifying**: the id is derived from the public key as
+`did:willow:z` + base58btc(SHA3-256(multicodec_prefix || public_key)), so it
+cannot be chosen.
+
 ```rust
 use willow_sdk::{auth::generate_did, types::SignatureAlgorithm};
 
@@ -188,9 +192,14 @@ let ed25519_did = generate_did(SignatureAlgorithm::Ed25519)?;
 // Secp256k1 (Ethereum/Bitcoin compatible)
 let secp256k1_did = generate_did(SignatureAlgorithm::Secp256k1)?;
 
-println!("DID: {}", ed25519_did.did);
+println!("DID: {}", ed25519_did.did); // e.g. did:willow:zDZ1Qqspppayjd9LF3Pke...
 println!("Private Key: {}", ed25519_did.private_key_hex());
 ```
+
+Because the id is bound to the key, a new DID must be **funded before it is
+registered**: generate the keypair, have an existing account transfer at least
+the registration fee to the derived `did`, then call
+`client.consensus().register_did(...)` (the fee is paid from that balance).
 
 ### Manual Signing
 

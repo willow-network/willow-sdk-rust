@@ -99,7 +99,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 7. Summary
     println!("\n7. Registration summary...");
-    println!("   DID generation: generate_did(algorithm)");
+    println!("   DID generation: generate_did(algorithm) -> self-certifying did:willow:z...");
+    println!("   Pre-fund: transfer >= the registration fee to the derived DID first");
     println!("   DID registration: client.consensus().register_did(...)");
     println!("   Query subgroves: client.registration().list_subgroves()");
     println!("\n   Note: Creating subgroves requires consensus transactions");
