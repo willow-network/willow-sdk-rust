@@ -10,7 +10,7 @@ use crate::indexing::IndexingOperations;
 use crate::light_client::{LightClient, LightClientConfig};
 use crate::registration::RegistrationOperations;
 use crate::token::TokenOperations;
-use crate::types::{ApiResponse, HealthStatus, SignatureAlgorithm};
+use crate::types::{ApiResponse, DidInfo, HealthStatus, SignatureAlgorithm};
 use crate::utils::{parse_api_url, RetryConfig};
 use crate::validators::ValidatorOperations;
 use reqwest::{Client, StatusCode};
@@ -109,8 +109,35 @@ impl WillowClient {
     /// Set identity for per-request signing.
     ///
     /// All subsequent requests will include signature headers automatically.
+    ///
+    /// The signing algorithm is inferred from `did` via
+    /// [`detect_algorithm_from_did`](crate::auth::detect_algorithm_from_did),
+    /// which defaults to Ed25519. Self-certifying `did:willow:z...` ids do **not**
+    /// encode their algorithm in the string, so this convenience method assumes
+    /// Ed25519 for them. A secp256k1 (Ethereum/wallet) identity backed by a
+    /// self-certifying id **must** instead use
+    /// [`set_identity_with_algorithm`](Self::set_identity_with_algorithm) or
+    /// [`set_identity_from_did_info`](Self::set_identity_from_did_info); otherwise
+    /// per-request auth would be signed with the wrong algorithm and rejected.
     pub fn set_identity(&self, did: &str, private_key_hex: &str, public_key_id: &str) {
         let algorithm = detect_algorithm_from_did(did);
+        self.set_identity_with_algorithm(did, private_key_hex, public_key_id, algorithm);
+    }
+
+    /// Set identity for per-request signing with an explicit signing algorithm.
+    ///
+    /// Use this when the algorithm cannot be inferred from the DID string, which
+    /// is always the case for self-certifying `did:willow:z...` ids. Pass the
+    /// algorithm that matches `private_key_hex` (e.g.
+    /// [`SignatureAlgorithm::Secp256k1`] for an Ethereum/wallet key) so that
+    /// per-request auth is signed with the correct scheme.
+    pub fn set_identity_with_algorithm(
+        &self,
+        did: &str,
+        private_key_hex: &str,
+        public_key_id: &str,
+        algorithm: SignatureAlgorithm,
+    ) {
         let mut identity_lock = self.identity.write().unwrap();
         *identity_lock = Some(ClientIdentity {
             did: did.to_string(),
@@ -118,6 +145,22 @@ impl WillowClient {
             public_key_id: public_key_id.to_string(),
             algorithm,
         });
+    }
+
+    /// Set identity for per-request signing directly from a [`DidInfo`].
+    ///
+    /// This is the recommended path: [`DidInfo`] already carries the correct
+    /// [`SignatureAlgorithm`], so the signing algorithm is taken from it rather
+    /// than guessed from the (self-certifying) DID string. Works correctly for
+    /// both Ed25519 and secp256k1 identities produced by
+    /// [`generate_did`](crate::auth::generate_did).
+    pub fn set_identity_from_did_info(&self, did_info: &DidInfo) {
+        self.set_identity_with_algorithm(
+            &did_info.did,
+            &did_info.private_key_hex(),
+            &did_info.public_key_id,
+            did_info.algorithm,
+        );
     }
 
     /// Check if an identity is set for signing.
@@ -852,6 +895,147 @@ mod tests {
             "did:willow:Ed25519:abc123#key-1",
         );
         assert!(client.require_auth().is_ok());
+    }
+
+    /// Reconstruct the message that `sign_request` signed from the headers it
+    /// emitted, so a test can independently verify the produced signature.
+    fn message_from_headers(method: &str, path: &str, headers: &[(String, String)]) -> String {
+        let map: std::collections::HashMap<_, _> = headers
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        format!("{}:{}:{}", method, path, map["X-Timestamp"])
+    }
+
+    fn header<'a>(headers: &'a [(String, String)], name: &str) -> &'a str {
+        headers
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.as_str())
+            .unwrap()
+    }
+
+    /// A self-certifying secp256k1 identity must sign with secp256k1, not the
+    /// Ed25519 default. `did:willow:z...` ids do not encode their algorithm, so
+    /// the explicit-algorithm setter is what makes this correct.
+    #[tokio::test]
+    async fn test_set_identity_with_algorithm_selects_secp256k1() {
+        let client = WillowClient::new("http://localhost:3031").await.unwrap();
+        let did_info = crate::auth::generate_did(SignatureAlgorithm::Secp256k1).unwrap();
+        // Sanity: the id is self-certifying (no parseable algorithm).
+        assert!(did_info.did.starts_with("did:willow:z"));
+
+        client.set_identity_with_algorithm(
+            &did_info.did,
+            &did_info.private_key_hex(),
+            &did_info.public_key_id,
+            SignatureAlgorithm::Secp256k1,
+        );
+
+        // The stored identity carries secp256k1, not the Ed25519 default.
+        let stored = client.identity.read().unwrap().as_ref().unwrap().algorithm;
+        assert_eq!(stored, SignatureAlgorithm::Secp256k1);
+
+        // End-to-end: the per-request signature verifies under secp256k1.
+        let headers = client
+            .sign_request("GET", "/v1/data")
+            .expect("signed headers");
+        let message = message_from_headers("GET", "/v1/data", &headers);
+        assert!(crate::auth::verify_signature(
+            &message,
+            header(&headers, "X-Signature"),
+            &did_info.public_key_hex(),
+            SignatureAlgorithm::Secp256k1,
+        )
+        .unwrap());
+    }
+
+    /// `set_identity_from_did_info` takes the algorithm straight from `DidInfo`,
+    /// so a secp256k1 identity signs with secp256k1 without any string parsing.
+    #[tokio::test]
+    async fn test_set_identity_from_did_info_secp256k1() {
+        let client = WillowClient::new("http://localhost:3031").await.unwrap();
+        let did_info = crate::auth::generate_did(SignatureAlgorithm::Secp256k1).unwrap();
+
+        client.set_identity_from_did_info(&did_info);
+
+        let stored = client.identity.read().unwrap().as_ref().unwrap().algorithm;
+        assert_eq!(stored, SignatureAlgorithm::Secp256k1);
+
+        let headers = client
+            .sign_request("POST", "/v1/store")
+            .expect("signed headers");
+        let message = message_from_headers("POST", "/v1/store", &headers);
+        assert!(crate::auth::verify_signature(
+            &message,
+            header(&headers, "X-Signature"),
+            &did_info.public_key_hex(),
+            SignatureAlgorithm::Secp256k1,
+        )
+        .unwrap());
+    }
+
+    /// Regression guard for the bug this fix addresses: routing a secp256k1 key
+    /// through the algorithm-guessing `set_identity` on a self-certifying id
+    /// defaults to Ed25519 and therefore signs with the WRONG scheme — the
+    /// resulting signature does not verify as secp256k1. This is exactly why the
+    /// explicit-algorithm setters exist.
+    #[tokio::test]
+    async fn test_default_set_identity_mis_signs_secp256k1_key() {
+        let client = WillowClient::new("http://localhost:3031").await.unwrap();
+        let did_info = crate::auth::generate_did(SignatureAlgorithm::Secp256k1).unwrap();
+
+        client.set_identity(
+            &did_info.did,
+            &did_info.private_key_hex(),
+            &did_info.public_key_id,
+        );
+
+        // The guess defaulted to Ed25519 for the self-certifying id.
+        let stored = client.identity.read().unwrap().as_ref().unwrap().algorithm;
+        assert_eq!(stored, SignatureAlgorithm::Ed25519);
+
+        // So the request is signed as Ed25519 and does NOT verify as secp256k1.
+        let headers = client
+            .sign_request("GET", "/v1/data")
+            .expect("signed headers");
+        let message = message_from_headers("GET", "/v1/data", &headers);
+        let secp_ok = crate::auth::verify_signature(
+            &message,
+            header(&headers, "X-Signature"),
+            &did_info.public_key_hex(),
+            SignatureAlgorithm::Secp256k1,
+        )
+        .unwrap_or(false);
+        assert!(!secp_ok);
+    }
+
+    /// Ed25519 still defaults correctly through the plain `set_identity`.
+    #[tokio::test]
+    async fn test_set_identity_defaults_ed25519_for_self_certifying() {
+        let client = WillowClient::new("http://localhost:3031").await.unwrap();
+        let did_info = crate::auth::generate_did(SignatureAlgorithm::Ed25519).unwrap();
+
+        client.set_identity(
+            &did_info.did,
+            &did_info.private_key_hex(),
+            &did_info.public_key_id,
+        );
+
+        let stored = client.identity.read().unwrap().as_ref().unwrap().algorithm;
+        assert_eq!(stored, SignatureAlgorithm::Ed25519);
+
+        let headers = client
+            .sign_request("GET", "/v1/data")
+            .expect("signed headers");
+        let message = message_from_headers("GET", "/v1/data", &headers);
+        assert!(crate::auth::verify_signature(
+            &message,
+            header(&headers, "X-Signature"),
+            &did_info.public_key_hex(),
+            SignatureAlgorithm::Ed25519,
+        )
+        .unwrap());
     }
 
     // ========================================================================
