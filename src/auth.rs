@@ -317,7 +317,10 @@ mod tests {
             hex::decode("a003201e65e47d578ad9bb17cb1d3590e9f504f55eac6ee40002e3ab9517c49c")
                 .unwrap();
         let did = did_from_public_key(SignatureAlgorithm::Ed25519, &public_key).unwrap();
-        assert_eq!(did, "did:willow:zDZ1Qqspppayjd9LF3Pkebq64Fa2PuK8zFQDDc11citB2");
+        assert_eq!(
+            did,
+            "did:willow:zDZ1Qqspppayjd9LF3Pkebq64Fa2PuK8zFQDDc11citB2"
+        );
     }
 
     /// secp256k1 derivation must be invariant across compressed / uncompressed
