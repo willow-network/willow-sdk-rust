@@ -238,7 +238,9 @@ impl DataOperations {
 
         let request = crate::types::SqlRequest {
             query: query.to_string(),
-            include_proof: None,
+            // Display/SQL path is an unverified read: opt out of proofs on the
+            // wire so the server doesn't default to include_proof=true.
+            include_proof: Some(false),
         };
 
         let base = self.client.indexer_base_url();
@@ -282,7 +284,9 @@ impl DataOperations {
 
         let request = crate::types::SqlRequest {
             query: query.to_string(),
-            include_proof: None,
+            // Unverified SQL read: opt out of proofs on the wire so the server
+            // doesn't default to include_proof=true.
+            include_proof: Some(false),
         };
 
         // The shared routing helper lives on IndexingOperations so both

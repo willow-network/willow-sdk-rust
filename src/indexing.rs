@@ -75,6 +75,9 @@ impl IndexingOperations {
         let request = GraphQLRequest {
             query: query.to_string(),
             variables,
+            // Unverified display path: opt out of proofs on the wire so the
+            // server doesn't default to include_proof=true.
+            include_proof: Some(false),
         };
 
         let base = self.client.indexer_base_url();
@@ -130,6 +133,9 @@ impl IndexingOperations {
         let request = GraphQLRequest {
             query: query.to_string(),
             variables,
+            // Unverified display path: opt out of proofs on the wire so the
+            // server doesn't default to include_proof=true.
+            include_proof: Some(false),
         };
         self.route("graphql", subgrove_id, &request, source).await
     }
