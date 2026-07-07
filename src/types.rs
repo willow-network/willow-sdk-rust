@@ -285,6 +285,11 @@ pub struct GraphQLRequest {
     /// Optional variables for the query
     #[serde(skip_serializing_if = "Option::is_none")]
     pub variables: Option<serde_json::Value>,
+    /// Whether to request a cryptographic proof. Omitted from the wire when
+    /// `None`; the server defaults an absent flag to `true`, so unverified
+    /// display paths set `Some(false)` to opt out explicitly.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_proof: Option<bool>,
 }
 
 /// GraphQL query response
@@ -730,6 +735,51 @@ mod tests {
         assert_eq!(field.field_type, deserialized.field_type);
         assert_eq!(field.required, deserialized.required);
         assert_eq!(field.indexed, deserialized.indexed);
+    }
+
+    // ========================================================================
+    // Unverified read-path proof-flag Tests
+    // ========================================================================
+
+    /// The display/GraphQL/SQL read paths must put `include_proof: false` on the
+    /// wire (server defaults an *absent* flag to true), while an explicit opt-in
+    /// still serializes `true` and a `None` flag is omitted entirely.
+    #[test]
+    fn test_request_include_proof_serialization() {
+        // GraphQL display path: Some(false) => explicit "include_proof":false
+        let gql = GraphQLRequest {
+            query: "query { swaps { id } }".to_string(),
+            variables: None,
+            include_proof: Some(false),
+        };
+        let v: serde_json::Value = serde_json::to_value(&gql).unwrap();
+        assert_eq!(v["include_proof"], serde_json::json!(false));
+
+        // Caller opt-in: Some(true) => "include_proof":true on the wire
+        let gql_proof = GraphQLRequest {
+            query: "query { swaps { id } }".to_string(),
+            variables: None,
+            include_proof: Some(true),
+        };
+        let vp: serde_json::Value = serde_json::to_value(&gql_proof).unwrap();
+        assert_eq!(vp["include_proof"], serde_json::json!(true));
+
+        // None => field omitted (would let the server default to true)
+        let gql_absent = GraphQLRequest {
+            query: "query { swaps { id } }".to_string(),
+            variables: None,
+            include_proof: None,
+        };
+        let va: serde_json::Value = serde_json::to_value(&gql_absent).unwrap();
+        assert!(va.get("include_proof").is_none());
+
+        // SQL display path mirrors the same contract.
+        let sql = SqlRequest {
+            query: "SELECT * FROM t".to_string(),
+            include_proof: Some(false),
+        };
+        let s: serde_json::Value = serde_json::to_value(&sql).unwrap();
+        assert_eq!(s["include_proof"], serde_json::json!(false));
     }
 
     // ========================================================================
