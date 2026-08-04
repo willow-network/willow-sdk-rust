@@ -15,13 +15,16 @@ A Rust SDK for interacting with the Willow decentralized data infrastructure pro
 - **Async/Await**: Built on Tokio for high performance
 - **Zero-Cost Abstractions**: Rust native with minimal overhead
 
+> **Install from source.** Willow's SDKs are not yet published to package registries.
+> The commands below install directly from this repository and work today.
+
 ## Installation
 
 Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-willow-sdk = "0.1.0"
+willow-sdk = { git = "https://github.com/willow-network/willow-sdk-rust" }
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -29,7 +32,7 @@ To disable proof verification (if you trust your node):
 
 ```toml
 [dependencies]
-willow-sdk = { version = "0.1.0", features = ["no-light-client"] }
+willow-sdk = { git = "https://github.com/willow-network/willow-sdk-rust", features = ["no-light-client"] }
 ```
 
 ### Building from source
@@ -179,10 +182,6 @@ let tx_hash = consensus_client.store_data(request, &signing_key).await?;
 
 ### Generate DIDs
 
-Willow DIDs are **self-certifying**: the id is derived from the public key as
-`did:willow:z` + base58btc(SHA3-256(multicodec_prefix || public_key)), so it
-cannot be chosen.
-
 ```rust
 use willow_sdk::{auth::generate_did, types::SignatureAlgorithm};
 
@@ -192,14 +191,9 @@ let ed25519_did = generate_did(SignatureAlgorithm::Ed25519)?;
 // Secp256k1 (Ethereum/Bitcoin compatible)
 let secp256k1_did = generate_did(SignatureAlgorithm::Secp256k1)?;
 
-println!("DID: {}", ed25519_did.did); // e.g. did:willow:zDZ1Qqspppayjd9LF3Pke...
+println!("DID: {}", ed25519_did.did);
 println!("Private Key: {}", ed25519_did.private_key_hex());
 ```
-
-Because the id is bound to the key, a new DID must be **funded before it is
-registered**: generate the keypair, have an existing account transfer at least
-the registration fee to the derived `did`, then call
-`client.consensus().register_did(...)` (the fee is paid from that balance).
 
 ### Manual Signing
 
