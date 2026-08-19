@@ -48,6 +48,15 @@ pub struct EventsCommitmentAnchor {
     pub events_commitment: String,
 }
 
+/// What a block reported about a committed transaction.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TxOutcome {
+    pub height: i64,
+    /// 0 = executed successfully.
+    pub code: u32,
+    pub log: String,
+}
+
 /// CometBFT RPC response
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CometBftResponse {
@@ -275,9 +284,28 @@ impl ConsensusClient {
         algorithm: SignatureAlgorithm,
     ) -> Result<String> {
         let nonce = self.get_next_nonce(&new_did_document.id).await?;
-        let new_doc_json = serde_json::to_string(new_did_document)?;
-        // Must match the message format the chain handler verifies.
-        let message = format!("UpdateDid\n{}\n{}", new_doc_json, nonce);
+        self.update_did_with_nonce(
+            new_did_document,
+            current_private_key_hex,
+            current_public_key_id,
+            algorithm,
+            nonce,
+        )
+        .await
+    }
+
+    /// Same as [`ConsensusClient::update_did`] with the nonce supplied instead
+    /// of fetched. Lets a caller resolve the nonce, show the operator the exact
+    /// message that will be signed, and then submit that same message.
+    pub async fn update_did_with_nonce(
+        &self,
+        new_did_document: &DidDocument,
+        current_private_key_hex: &str,
+        current_public_key_id: &str,
+        algorithm: SignatureAlgorithm,
+        nonce: u64,
+    ) -> Result<String> {
+        let message = crate::did_rotation::update_did_signing_message(new_did_document, nonce)?;
         let signature_hex = sign_challenge(&message, current_private_key_hex, algorithm)?;
         let signature_bytes = hex::decode(signature_hex)?;
 
@@ -290,6 +318,77 @@ impl ConsensusClient {
 
         let tx_json = Self::serialize_tx("UpdateDid", &update_tx)?;
         self.submit_transaction(&tx_json).await
+    }
+
+    /// Read a DID document from chain state.
+    ///
+    /// Uses the REST API when one is configured and falls back to the CometBFT
+    /// RPC's ABCI store query, mirroring [`ConsensusClient::get_next_nonce`].
+    /// Both read the same GroveDB slot.
+    pub async fn get_did_document(&self, did: &str) -> Result<DidDocument> {
+        if let Some(api_url) = self.api_url.as_ref() {
+            let url = format!("{}/did/{}", api_url.trim_end_matches('/'), did);
+            if let Ok(resp) = self.http_client.get(&url).send().await {
+                if let Ok(body) = resp.json::<serde_json::Value>().await {
+                    // Response format: {"success": true, "data": {<DidDocument>}}
+                    if let Some(data) = body.get("data") {
+                        if let Ok(doc) = serde_json::from_value::<DidDocument>(data.clone()) {
+                            return Ok(doc);
+                        }
+                    }
+                }
+            }
+        }
+        self.did_document_via_rpc(did).await
+    }
+
+    /// Read a DID document via the CometBFT RPC. `abci_query` on
+    /// `/store/did/{did}` returns the stored document JSON as base64 in
+    /// `result.response.value`.
+    async fn did_document_via_rpc(&self, did: &str) -> Result<DidDocument> {
+        let body = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "abci_query",
+            "params": {
+                "path": format!("/store/did/{}", did),
+                "data": "",
+                "height": "0",
+                "prove": false,
+            }
+        });
+        let resp: serde_json::Value = self
+            .http_client
+            .post(&self.consensus_rpc_url)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| WillowError::Network(format!("Failed to fetch DID document: {}", e)))?
+            .json()
+            .await
+            .map_err(|e| {
+                WillowError::Network(format!("Failed to parse DID document response: {}", e))
+            })?;
+
+        let response = &resp["result"]["response"];
+        if response["code"].as_u64().unwrap_or(0) != 0 {
+            return Err(WillowError::NotFound(format!(
+                "DID {}: {}",
+                did,
+                response["log"].as_str().unwrap_or("not found")
+            )));
+        }
+        let value_b64 = response["value"].as_str().unwrap_or("");
+        if value_b64.is_empty() {
+            return Err(WillowError::NotFound(format!(
+                "DID {} has no document",
+                did
+            )));
+        }
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(value_b64)
+            .map_err(|e| WillowError::Network(format!("DID document base64 decode: {}", e)))?;
+        serde_json::from_slice(&bytes).map_err(WillowError::Serialization)
     }
 
     /// Submit a `ClaimSubgroveIndexing` tx — the indexer's chain-level
@@ -459,6 +558,70 @@ impl ConsensusClient {
         let bytes = hex::decode(bare)
             .map_err(|e| WillowError::Custom(format!("Invalid tx hash hex: {}", e)))?;
         Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
+    }
+
+    /// Poll until the tx is in a block, returning what the block said about it.
+    ///
+    /// `broadcast_tx_sync` only reports CheckTx, so a tx can be accepted into
+    /// the mempool and still fail during execution. `Ok(None)` means the tx was
+    /// still not in a block after `max_attempts`.
+    pub async fn wait_for_tx_outcome(
+        &self,
+        tx_hash: &str,
+        max_attempts: u32,
+    ) -> Result<Option<TxOutcome>> {
+        let hash = Self::tx_hash_to_base64(tx_hash)?;
+        for _ in 0..max_attempts {
+            let query_request = json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tx",
+                "params": {
+                    "hash": hash,
+                    "prove": false
+                }
+            });
+
+            if let Ok(response) = self
+                .http_client
+                .post(&self.consensus_rpc_url)
+                .json(&query_request)
+                .send()
+                .await
+            {
+                if let Ok(body) = response.json::<serde_json::Value>().await {
+                    if let Some(outcome) = Self::parse_tx_outcome(&body) {
+                        return Ok(Some(outcome));
+                    }
+                }
+            }
+
+            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+        }
+
+        Ok(None)
+    }
+
+    /// Pull a [`TxOutcome`] out of a CometBFT `tx` response.
+    ///
+    /// A tx that is not in a block yet answers with an error or a null result,
+    /// so only a parseable height counts as inclusion — otherwise a pending tx
+    /// would read as "height 0, code 0", i.e. a success that never happened.
+    /// CometBFT encodes height as a string, and omits `code` when it is 0.
+    fn parse_tx_outcome(body: &serde_json::Value) -> Option<TxOutcome> {
+        let result = &body["result"];
+        let height = result["height"]
+            .as_str()
+            .and_then(|h| h.parse::<i64>().ok())
+            .or_else(|| result["height"].as_i64())?;
+        Some(TxOutcome {
+            height,
+            code: result["tx_result"]["code"].as_u64().unwrap_or(0) as u32,
+            log: result["tx_result"]["log"]
+                .as_str()
+                .unwrap_or("")
+                .to_string(),
+        })
     }
 
     /// Wait for transaction to be included in a block
@@ -838,6 +1001,51 @@ mod tests {
     fn test_consensus_client_creation() {
         let client = ConsensusClient::new("http://localhost:26657");
         assert_eq!(client.consensus_rpc_url, "http://localhost:26657");
+    }
+
+    // ========================================================================
+    // Transaction Inclusion Tests
+    // ========================================================================
+
+    #[test]
+    fn parse_tx_outcome_reads_height_and_code() {
+        let body = json!({
+            "jsonrpc": "2.0", "id": 1,
+            "result": {
+                "hash": "ABC",
+                "height": "12345",
+                "tx_result": { "code": 0, "log": "DID updated: did:willow:validator1" }
+            }
+        });
+        let outcome = ConsensusClient::parse_tx_outcome(&body).unwrap();
+        assert_eq!(outcome.height, 12345);
+        assert_eq!(outcome.code, 0);
+        assert_eq!(outcome.log, "DID updated: did:willow:validator1");
+    }
+
+    #[test]
+    fn parse_tx_outcome_reads_a_failed_execution() {
+        let body = json!({
+            "result": {
+                "height": "77",
+                "tx_result": { "code": 1, "log": "Invalid signature for UpdateDid" }
+            }
+        });
+        let outcome = ConsensusClient::parse_tx_outcome(&body).unwrap();
+        assert_eq!(outcome.code, 1);
+        assert_eq!(outcome.log, "Invalid signature for UpdateDid");
+    }
+
+    #[test]
+    fn parse_tx_outcome_does_not_read_a_pending_tx_as_success() {
+        // "tx not found" — an error, or a null result, depending on the node.
+        let not_found = json!({
+            "jsonrpc": "2.0", "id": 1,
+            "error": { "code": -32603, "message": "Internal error", "data": "tx not found" }
+        });
+        assert!(ConsensusClient::parse_tx_outcome(&not_found).is_none());
+        assert!(ConsensusClient::parse_tx_outcome(&json!({ "result": null })).is_none());
+        assert!(ConsensusClient::parse_tx_outcome(&json!({})).is_none());
     }
 
     // ========================================================================
