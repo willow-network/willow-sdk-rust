@@ -32,3 +32,5 @@ jobs:
         run: cargo clippy
       - working-directory: willow-sdk-rust-extract
         run: cargo test --lib
+      - working-directory: willow-sdk-rust-extract
+        run: cargo check --examples

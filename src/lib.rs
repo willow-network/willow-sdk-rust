@@ -71,6 +71,7 @@ pub mod client;
 pub mod completeness;
 pub mod consensus;
 pub mod data;
+pub mod did_rotation;
 pub mod erc8004;
 pub mod errors;
 #[cfg(feature = "verifiable-rpc")]

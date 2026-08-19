@@ -205,6 +205,38 @@ let signature = sign_challenge(message, &private_key_hex, SignatureAlgorithm::Ed
 let is_valid = verify_signature(message, &signature, &public_key_hex, SignatureAlgorithm::Ed25519)?;
 ```
 
+### Rotate a DID's signing key
+
+`examples/rotate_did.rs` swaps a DID's on-chain key for a fresh one, signing the
+`UpdateDid` transaction with the key being retired. It derives the replacement
+document from the live on-chain document, writes the new private key out mode
+0600 before any network call, and refuses to broadcast unless a probe signed
+with that key verifies against the replacement's authentication set — a
+replacement naming a key nobody holds would brick the DID permanently.
+
+It is a dry run unless `--broadcast` is passed:
+
+```bash
+# Rehearse: writes the new key, prints the replacement document, the exact
+# bytes the chain will verify, and the nonce. Submits nothing.
+cargo run --release --example rotate_did -- \
+  --did did:willow:validator1 \
+  --current-key-file ~/.willow/keys/validator1.key \
+  --current-key-id did:willow:validator1#key-1 \
+  --new-key-out ~/.willow/keys/validator1.new.key
+
+# Submit, using the key the rehearsal wrote.
+cargo run --release --example rotate_did -- \
+  --did did:willow:validator1 \
+  --current-key-file ~/.willow/keys/validator1.key \
+  --current-key-id did:willow:validator1#key-1 \
+  --new-key-in ~/.willow/keys/validator1.new.key \
+  --broadcast
+```
+
+The building blocks are in [`willow_sdk::did_rotation`](src/did_rotation.rs) if
+you need them outside the example.
+
 ## GraphQL Indexing
 
 Query indexed blockchain data with cryptographic proofs:
