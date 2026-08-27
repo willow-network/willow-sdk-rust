@@ -578,6 +578,10 @@ impl DataOperations {
         let path_query = PathQuery::new_unsized(path, query);
         let grove_version = grovedb_version::version::GroveVersion::default();
 
+        // The envelope must descend the whole path first (a dropped subtree
+        // layer otherwise verifies as "no data" under the same root).
+        crate::grovedb_envelope::check_envelope(&proof_bytes, &path_query.path)?;
+
         // Strict verify_query — proves completeness: the server returned ALL
         // data in the subgrove. If any item was omitted or fabricated, this fails.
         let (computed_root_bytes, _verified_items) =

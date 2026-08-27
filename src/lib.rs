@@ -77,6 +77,8 @@ pub mod errors;
 #[cfg(feature = "verifiable-rpc")]
 pub mod eth_state;
 pub mod files;
+#[cfg(not(feature = "no-light-client"))]
+pub mod grovedb_envelope;
 pub mod indexers;
 pub mod indexing;
 pub mod light_client;

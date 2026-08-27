@@ -255,6 +255,9 @@ fn verify_grovedb_proof(resp: &VerifiableRpcResponse, key: &[u8]) -> Result<()> 
     let path_query = PathQuery::new_unsized(empty_path, query);
     let version = GroveVersion::latest();
 
+    // Envelope must match the (root-level) path exactly (dropped-layer omission guard).
+    crate::grovedb_envelope::check_envelope(&resp.grovedb_proof, &path_query.path)?;
+
     let (root_hash, _verified) = GroveDb::verify_query(&resp.grovedb_proof, &path_query, version)
         .map_err(|e| {
         WillowError::ProofVerificationFailed(format!("GroveDB verify_query failed: {}", e))

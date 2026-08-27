@@ -47,6 +47,9 @@ impl ProofVerifier {
         let path_query = PathQuery::new_unsized(empty_path, query);
         let grove_version = grovedb_version::version::GroveVersion::default();
 
+        // Envelope must match the (root-level) path exactly (dropped-layer omission guard).
+        crate::grovedb_envelope::check_envelope(&proof_bytes, &path_query.path)?;
+
         match GroveDb::verify_query(&proof_bytes, &path_query, &grove_version) {
             Ok((root_hash, _verified_items)) => Ok(hex::encode(root_hash)),
             Err(e) => Err(WillowError::ProofVerificationFailed(format!(
@@ -95,6 +98,9 @@ impl ProofVerifier {
         query.insert_key(key.as_bytes().to_vec());
         let path_query = PathQuery::new_unsized(empty_path, query);
         let grove_version = grovedb_version::version::GroveVersion::default();
+
+        // Envelope must match the (root-level) path exactly (dropped-layer omission guard).
+        crate::grovedb_envelope::check_envelope(&proof_bytes, &path_query.path)?;
 
         match GroveDb::verify_query(&proof_bytes, &path_query, &grove_version) {
             Ok((root_hash, _)) => Ok(hex::encode(root_hash)),
