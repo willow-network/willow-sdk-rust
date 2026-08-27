@@ -907,6 +907,9 @@ impl LightClient {
 
         let grove_version = grovedb_version::version::GroveVersion::default();
 
+        // Envelope must descend every path segment (dropped-layer omission guard).
+        crate::grovedb_envelope::check_envelope(proof, path)?;
+
         match GroveDb::verify_query(proof, &path_query, &grove_version) {
             Ok((computed_root, _verified_items)) => {
                 if computed_root.as_slice() != expected_root.as_slice() {

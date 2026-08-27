@@ -63,6 +63,8 @@ willow-gkr-verify = { version = "0.1", path = "../willow-gkr-verify-extract", fe
 # These are included by default for trustless verification
 grovedb = { version = "3.1.0", default-features = false, features = ["verify"] }
 grovedb-version = "3.1.0"
+# grovedb's bincode line (the SDK's own `bincode` is 1.x); decodes the proof envelope
+bincode2 = { package = "bincode", version = "=2.0.0-rc.3" }
 
 alloy = { version = ">=1.1, <1.6", features = ["eips", "consensus", "rpc-types-eth"], optional = true }
 alloy-primitives = { version = "1", optional = true }
