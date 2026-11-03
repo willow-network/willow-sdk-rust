@@ -197,7 +197,7 @@ impl WillowClient {
     /// Sign a request in the older `{METHOD}:{PATH}:{TIMESTAMP}` form and return the
     /// headers. PATH is the path alone: any query string is left out, as the server
     /// verifies it (see [`crate::auth::legacy_request_message`]). This form carries no
-    /// read rights; requests to the API use [`Self::sign_request_with_nonce`].
+    /// read rights; reads of subgrove data use [`Self::sign_request_with_nonce`].
     pub(crate) fn sign_request(&self, method: &str, path: &str) -> Option<Vec<(String, String)>> {
         let identity_lock = self.identity.read().unwrap();
         let identity = identity_lock.as_ref()?;
@@ -743,7 +743,8 @@ impl WillowClientBuilder {
     ///
     /// When set, GraphQL and SQL queries are routed to this indexer node
     /// instead of the validator API. This enables querying indexed data
-    /// directly from a decentralized indexer.
+    /// directly from a decentralized indexer. The indexer-only routes
+    /// (`eth()`, `verifiable_rpc()`, and `verify_block_completeness`) need it.
     ///
     /// # Example
     /// ```rust,no_run
@@ -1133,6 +1134,49 @@ mod tests {
             received_header(&received[1], "x-nonce"),
             "a retry must carry a new nonce"
         );
+    }
+
+    /// GraphQL sent to the API is nonce-signed over its body; sent to an indexer it
+    /// carries no nonce.
+    #[tokio::test]
+    async fn graphql_is_nonce_signed_only_toward_the_api() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/graphql/sg"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {}})))
+            .mount(&server)
+            .await;
+        let seed = "0303030303030303030303030303030303030303030303030303030303030303";
+        let public_key = "ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d1";
+
+        let to_api = WillowClient::new(&server.uri()).await.unwrap();
+        let to_indexer = WillowClient::builder()
+            .api_url("http://127.0.0.1:1")
+            .indexer_url(&server.uri())
+            .build()
+            .await
+            .unwrap();
+        for client in [&to_api, &to_indexer] {
+            client.set_identity_with_algorithm(
+                "did:willow:a",
+                seed,
+                "did:willow:a#key-1",
+                SignatureAlgorithm::Ed25519,
+            );
+            client
+                .indexing()
+                .graphql_query("sg", "{ items { id } }", None)
+                .await
+                .unwrap();
+        }
+
+        let received = server.received_requests().await.unwrap();
+        assert_eq!(received.len(), 2);
+        assert_nonce_signed(&received[0], public_key);
+        assert_eq!(received_header(&received[1], "x-nonce"), "");
     }
 
     #[test]

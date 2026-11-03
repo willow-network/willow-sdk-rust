@@ -73,7 +73,7 @@ fn secp256k1_compressed(public_key: &[u8]) -> Result<Vec<u8>> {
     let parsed = match public_key.len() {
         // Compressed (0x02/0x03 prefix) or uncompressed (0x04 prefix).
         33 | 65 => Secp256k1PublicKey::from_slice(public_key)?,
-        // Uncompressed without the leading 0x04 tag (as stored by `generate_did`).
+        // Uncompressed without the leading 0x04 tag (as older `generate_did` stored it).
         64 => {
             let mut with_prefix = Vec::with_capacity(65);
             with_prefix.push(0x04);
