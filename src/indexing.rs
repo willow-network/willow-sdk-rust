@@ -86,11 +86,22 @@ impl IndexingOperations {
             .join(&path)
             .map_err(|e| WillowError::Config(format!("Invalid URL: {}", e)))?;
 
-        let mut req_builder = self.client.http_client.post(url).json(&request);
-        if let Some(headers) = self.client.sign_request("POST", &format!("/{}", path)) {
-            for (key, value) in headers {
-                req_builder = req_builder.header(&key, &value);
-            }
+        let body = serde_json::to_vec(&request)?;
+        // Sent to the API, it is nonce-signed so it carries the identity's read
+        // rights; an indexer verifies neither form.
+        let headers = if self.client.queries_go_to_api() {
+            self.client.sign_request_with_nonce("POST", &url, &body)?
+        } else {
+            self.client.sign_request("POST", &format!("/{}", path))
+        };
+        let mut req_builder = self
+            .client
+            .http_client
+            .post(url)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(body);
+        for (key, value) in headers.into_iter().flatten() {
+            req_builder = req_builder.header(&key, &value);
         }
 
         let http_resp = req_builder.send().await?;
@@ -248,8 +259,15 @@ impl IndexingOperations {
             .join(path)
             .map_err(|e| WillowError::Config(format!("Invalid URL: {}", e)))?;
 
-        let mut req = self.client.http_client.post(url).json(body);
-        if let Some(headers) = self.client.sign_request("POST", &format!("/{}", path)) {
+        let body = serde_json::to_vec(body)?;
+        let mut req = self
+            .client
+            .http_client
+            .post(url.clone())
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(body.clone());
+        // Nonce-signed, so the request carries the identity's read rights.
+        if let Some(headers) = self.client.sign_request_with_nonce("POST", &url, &body)? {
             for (k, v) in headers {
                 req = req.header(&k, &v);
             }

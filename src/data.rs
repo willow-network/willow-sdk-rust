@@ -248,13 +248,22 @@ impl DataOperations {
             .join(&format!("sql/{}", subgrove_id))
             .map_err(|e| WillowError::Config(format!("Invalid URL: {}", e)))?;
 
-        let http_resp = self
+        let body = serde_json::to_vec(&request)?;
+        let mut req = self
             .client
             .http_client
-            .post(url)
-            .json(&request)
-            .send()
-            .await?;
+            .post(url.clone())
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(body.clone());
+        // Sent to the API, it is nonce-signed so it carries the identity's read rights.
+        if self.client.queries_go_to_api() {
+            if let Some(headers) = self.client.sign_request_with_nonce("POST", &url, &body)? {
+                for (k, v) in headers {
+                    req = req.header(&k, &v);
+                }
+            }
+        }
+        let http_resp = req.send().await?;
 
         let status = http_resp.status();
         let text = http_resp.text().await?;

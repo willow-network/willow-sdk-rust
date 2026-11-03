@@ -161,7 +161,7 @@ impl VerifiableRpcOperations {
         let path = format!("verifiable-rpc/{}/{}", subgrove_id, hex_key);
         let url = self
             .client
-            .indexer_base_url()
+            .require_indexer_url()?
             .join(&path)
             .map_err(|e| WillowError::Config(format!("invalid verifiable-rpc URL: {}", e)))?;
 

@@ -21,8 +21,15 @@ pub fn parse_api_url(url: &str) -> Result<url::Url, crate::errors::WillowError> 
         url = format!("http://{}", url);
     }
 
-    url::Url::parse(&url)
-        .map_err(|e| crate::errors::WillowError::Config(format!("Invalid API URL: {}", e)))
+    let mut url = url::Url::parse(&url)
+        .map_err(|e| crate::errors::WillowError::Config(format!("Invalid API URL: {}", e)))?;
+    // End the path with "/" so `Url::join` keeps a path prefix such as
+    // `https://host/indexer` instead of replacing its last segment.
+    if !url.path().ends_with('/') {
+        let path = format!("{}/", url.path());
+        url.set_path(&path);
+    }
+    Ok(url)
 }
 
 /// Retry configuration
@@ -97,6 +104,13 @@ mod tests {
 
         let url = parse_api_url("https://api.willow.dev/").unwrap();
         assert_eq!(url.scheme(), "https");
+
+        // A path prefix survives joining.
+        let url = parse_api_url("https://api.willow.dev/indexer").unwrap();
+        assert_eq!(
+            url.join("graphql/sg").unwrap().as_str(),
+            "https://api.willow.dev/indexer/graphql/sg"
+        );
     }
 
     #[test]

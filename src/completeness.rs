@@ -177,12 +177,11 @@ impl WillowClient {
     ///
     /// A `true` result proves the indexer served the complete, untampered
     /// filter-matched set the chain attests to. Uses the client's existing
-    /// consensus RPC client and HTTP client; the GET targets
-    /// [`WillowClient::indexer_base_url`] (set via `indexer_url(..)` on the
-    /// builder, else the validator API base).
+    /// consensus RPC client and HTTP client; the GET targets the indexer set via
+    /// `indexer_url(..)` on the builder (only indexers serve matched logs).
     ///
     /// # Errors
-    /// - `Config` if no consensus URL was configured (the anchor is unreadable).
+    /// - `Config` if no consensus URL or no indexer URL was configured.
     /// - `NotFound` if the chain has no commitment for the block, or the indexer
     ///   has no retained matched logs / hasn't finalized the block — the block
     ///   is not completeness-verifiable.
@@ -207,7 +206,7 @@ impl WillowClient {
                 ))
             })?;
 
-        let url = self.indexer_base_url().join(&format!(
+        let url = self.require_indexer_url()?.join(&format!(
             "completeness/{subgrove_id}/{block_number}/matched-logs"
         ))?;
         let response = self.http_client.get(url).send().await?;
@@ -440,12 +439,27 @@ mod wrapper_tests {
         // consensus RPC, so both mocked routes are reachable.
         let client = WillowClient::builder()
             .api_url(&server.uri())
+            .indexer_url(&server.uri())
             .consensus_url(&server.uri())
             .build()
             .await
             .unwrap();
 
         assert!(client.verify_block_completeness("sg", 7).await.unwrap());
+
+        // Only indexers serve matched logs: without an indexer URL there is no
+        // fallback to the API.
+        let no_indexer = WillowClient::builder()
+            .api_url(&server.uri())
+            .consensus_url(&server.uri())
+            .build()
+            .await
+            .unwrap();
+        let err = no_indexer
+            .verify_block_completeness("sg", 7)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, WillowError::Config(_)), "got {err:?}");
     }
 
     /// A non-zero ABCI code (no commitment for the block) surfaces as

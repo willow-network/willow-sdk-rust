@@ -205,6 +205,41 @@ let signature = sign_challenge(message, &private_key_hex, SignatureAlgorithm::Ed
 let is_valid = verify_signature(message, &signature, &public_key_hex, SignatureAlgorithm::Ed25519)?;
 ```
 
+### Request Signing
+
+With an identity set, the client signs each read of subgrove data it sends to the API (`GET /data/{sg}/{key}`, `GET /proof/{sg}/{key}`, and `POST /query`, `/sql`, `/graphql`, and `/a2a`) with a one-time nonce over the whole request. Only this form carries the DID's read rights: a Reader permission on a subgrove, or a place on a priced subgrove's free-reader list. Other requests it signs use the older form below, which the server also accepts in the first 30 s after it restarts, when it refuses nonce-signed requests.
+
+The headers are `X-DID`, `X-Public-Key-ID`, `X-Signature`, `X-Timestamp`, and `X-Nonce`. The signature is over eight lines:
+
+```text
+willow-request-v2
+<DID>
+<public key id>
+<METHOD>
+<path and query, exactly as sent>
+<Unix timestamp>
+<nonce>
+<hex SHA-256 of the body>
+```
+
+- The server accepts a timestamp up to 300 s old and 30 s ahead of its clock, and each (DID, nonce) once. The client signs each retry with a new nonce.
+- A nonce is 16 to 128 characters of `A-Z a-z 0-9 - _`. `auth::new_request_nonce` makes one of 32 hex characters.
+- Ed25519 signatures are sent as hex. secp256k1 signatures are over the Keccak-256 of the message and are sent as `0x`-prefixed hex. A generated secp256k1 DID document, and `DidInfo::public_key`, carry the 33-byte compressed key.
+- Requests sent to an indexer (`indexer_url`) are not signed this way.
+
+To sign a request you send yourself:
+
+```rust
+use willow_sdk::auth::sign_request_with_nonce;
+
+let headers = sign_request_with_nonce(
+    &did, &public_key_id, &private_key_hex, SignatureAlgorithm::Ed25519,
+    "POST", "/query/my-subgrove", body_bytes,
+)?;
+```
+
+`auth::legacy_request_message(method, path, timestamp)` is the older `{METHOD}:{PATH}:{TIMESTAMP}` form, over the path without its query string. It proves the DID but carries none of its read rights, and it can be replayed with any body until the timestamp expires.
+
 ### Rotate a DID's signing key
 
 `examples/rotate_did.rs` swaps a DID's on-chain key for a fresh one, signing the

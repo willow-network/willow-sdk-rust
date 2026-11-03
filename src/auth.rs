@@ -73,7 +73,7 @@ fn secp256k1_compressed(public_key: &[u8]) -> Result<Vec<u8>> {
     let parsed = match public_key.len() {
         // Compressed (0x02/0x03 prefix) or uncompressed (0x04 prefix).
         33 | 65 => Secp256k1PublicKey::from_slice(public_key)?,
-        // Uncompressed without the leading 0x04 tag (as stored by `generate_did`).
+        // Uncompressed without the leading 0x04 tag (as older `generate_did` stored it).
         64 => {
             let mut with_prefix = Vec::with_capacity(65);
             with_prefix.push(0x04);
@@ -113,9 +113,9 @@ pub fn generate_did(algorithm: SignatureAlgorithm) -> Result<DidInfo> {
             let secret_key = SecretKey::new(&mut OsRng);
             let public_key = Secp256k1PublicKey::from_secret_key(&secp, &secret_key);
 
-            // Store uncompressed public key (without 0x04 prefix)
-            let public_key_bytes = public_key.serialize_uncompressed();
-            let public_key_vec = public_key_bytes[1..].to_vec(); // Remove 0x04 prefix
+            // The 33-byte compressed key: the chain parses a DID document's
+            // secp256k1 key as compressed (33 bytes) or 0x04-tagged (65 bytes).
+            let public_key_vec = public_key.serialize().to_vec();
 
             (
                 secret_key.secret_bytes().to_vec(),
@@ -125,9 +125,8 @@ pub fn generate_did(algorithm: SignatureAlgorithm) -> Result<DidInfo> {
         }
     };
 
-    // Derive the self-certifying DID from the public key. For secp256k1 the stored
-    // `public_key` is the uncompressed key without its 0x04 tag; `did_from_public_key`
-    // normalizes it to the 33-byte compressed form the chain hashes.
+    // Derive the self-certifying DID from the public key (for secp256k1, the 33-byte
+    // compressed form the chain hashes).
     let did = did_from_public_key(algorithm, &public_key)?;
     let public_key_id = format!("{}#key-1", did);
 
@@ -202,6 +201,127 @@ pub fn sign_challenge(
     Ok(hex::encode(signature))
 }
 
+/// The message a nonce-signed request signs: a version line, then one per line the
+/// DID, its key's id, the method, the path and query exactly as sent, the Unix
+/// timestamp, the nonce, and the hex SHA-256 of the body (of no bytes, for a request
+/// without one).
+///
+/// Only a request signed this way carries the DID's read rights: a Reader permission,
+/// or a place on a priced subgrove's free-reader list.
+pub fn signed_request_message(
+    did: &str,
+    public_key_id: &str,
+    method: &str,
+    path_and_query: &str,
+    timestamp: &str,
+    nonce: &str,
+    body: &[u8],
+) -> String {
+    format!(
+        "willow-request-v2\n{did}\n{public_key_id}\n{method}\n{path_and_query}\n{timestamp}\n{nonce}\n{}",
+        hex::encode(sha2::Sha256::digest(body))
+    )
+}
+
+/// The message the older signature form signs: `{METHOD}:{PATH}:{TIMESTAMP}`, where
+/// PATH is the path alone (the server verifies the request's path without its query),
+/// so anything from the first `?` is dropped.
+///
+/// This form proves the DID but carries none of its read rights, and it can be
+/// replayed with any body until the timestamp expires.
+pub fn legacy_request_message(method: &str, path: &str, timestamp: &str) -> String {
+    let path = path.split('?').next().unwrap_or(path);
+    format!("{method}:{path}:{timestamp}")
+}
+
+/// A fresh nonce for a nonce-signed request: 32 hex characters from 16 random bytes.
+/// The server accepts 16 to 128 characters of `A-Z a-z 0-9 - _`, and each
+/// (DID, nonce) once.
+pub fn new_request_nonce() -> String {
+    hex::encode(rand::random::<[u8; 16]>())
+}
+
+/// Signs a request message and encodes the signature as the server decodes
+/// `X-Signature`: Ed25519 as hex, secp256k1 as `0x`-prefixed hex (the server reads
+/// an unprefixed secp256k1 signature as base64 first, and most hex strings are valid
+/// base64).
+pub fn sign_request_message(
+    message: &str,
+    private_key_hex: &str,
+    algorithm: SignatureAlgorithm,
+) -> Result<String> {
+    let signature = sign_challenge(message, private_key_hex, algorithm)?;
+    Ok(match algorithm {
+        SignatureAlgorithm::Secp256k1 => format!("0x{signature}"),
+        SignatureAlgorithm::Ed25519 => signature,
+    })
+}
+
+/// Headers for a request signed with a one-time nonce: `X-DID`, `X-Public-Key-ID`,
+/// `X-Signature`, `X-Timestamp`, and `X-Nonce`, over [`signed_request_message`].
+///
+/// `path_and_query` is the request target exactly as the server receives it, query
+/// string included, and `body` the exact bytes sent. The server accepts the timestamp
+/// for 300 seconds and each nonce once, so sign every attempt of a retried request
+/// anew.
+pub fn sign_request_with_nonce(
+    did: &str,
+    public_key_id: &str,
+    private_key_hex: &str,
+    algorithm: SignatureAlgorithm,
+    method: &str,
+    path_and_query: &str,
+    body: &[u8],
+) -> Result<Vec<(String, String)>> {
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| WillowError::Crypto("system clock is before 1970".to_string()))?
+        .as_secs()
+        .to_string();
+    sign_request_with_nonce_at(
+        did,
+        public_key_id,
+        private_key_hex,
+        algorithm,
+        method,
+        path_and_query,
+        body,
+        &timestamp,
+        &new_request_nonce(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn sign_request_with_nonce_at(
+    did: &str,
+    public_key_id: &str,
+    private_key_hex: &str,
+    algorithm: SignatureAlgorithm,
+    method: &str,
+    path_and_query: &str,
+    body: &[u8],
+    timestamp: &str,
+    nonce: &str,
+) -> Result<Vec<(String, String)>> {
+    let message = signed_request_message(
+        did,
+        public_key_id,
+        method,
+        path_and_query,
+        timestamp,
+        nonce,
+        body,
+    );
+    let signature = sign_request_message(&message, private_key_hex, algorithm)?;
+    Ok(vec![
+        ("X-DID".to_string(), did.to_string()),
+        ("X-Public-Key-ID".to_string(), public_key_id.to_string()),
+        ("X-Signature".to_string(), signature),
+        ("X-Timestamp".to_string(), timestamp.to_string()),
+        ("X-Nonce".to_string(), nonce.to_string()),
+    ])
+}
+
 /// Verify a signature
 pub fn verify_signature(
     message: &str,
@@ -209,8 +329,8 @@ pub fn verify_signature(
     public_key_hex: &str,
     algorithm: SignatureAlgorithm,
 ) -> Result<bool> {
-    let signature_bytes = hex::decode(signature_hex)?;
-    let public_key_bytes = hex::decode(public_key_hex)?;
+    let signature_bytes = hex::decode(signature_hex.trim_start_matches("0x"))?;
+    let public_key_bytes = hex::decode(public_key_hex.trim_start_matches("0x"))?;
     let message_bytes = message.as_bytes();
 
     match algorithm {
@@ -238,11 +358,9 @@ pub fn verify_signature(
         SignatureAlgorithm::Secp256k1 => {
             let secp = Secp256k1::new();
 
-            // Add 0x04 prefix for uncompressed public key
-            let mut full_public_key = vec![0x04];
-            full_public_key.extend_from_slice(&public_key_bytes);
-
-            let public_key = Secp256k1PublicKey::from_slice(&full_public_key)?;
+            // 33-byte compressed, 65-byte tagged, or 64-byte untagged uncompressed.
+            let public_key =
+                Secp256k1PublicKey::from_slice(&secp256k1_compressed(&public_key_bytes)?)?;
 
             // Hash message with Keccak256
             let mut hasher = Keccak256::new();
@@ -252,7 +370,9 @@ pub fn verify_signature(
             let message = Message::from_digest_slice(&message_hash)
                 .map_err(|_| WillowError::Crypto("Failed to create message".to_string()))?;
 
-            let signature = secp256k1::ecdsa::Signature::from_compact(&signature_bytes)?;
+            // Like the server: 64-byte compact, else DER; verify_ecdsa takes lower-S only.
+            let signature = secp256k1::ecdsa::Signature::from_compact(&signature_bytes)
+                .or_else(|_| secp256k1::ecdsa::Signature::from_der(&signature_bytes))?;
 
             Ok(secp.verify_ecdsa(&message, &signature, &public_key).is_ok())
         }
@@ -281,6 +401,112 @@ pub fn detect_algorithm_from_did(did: &str) -> SignatureAlgorithm {
 mod tests {
     use super::*;
 
+    /// The api-server's test vector (`the_signed_message_is_eight_lines`), byte for byte.
+    const SIGNED_MESSAGE_VECTOR: &str = "willow-request-v2\ndid:willow:a\ndid:willow:a#key-1\nPOST\n/query/sg?x=1\n1700000000\nabcdefghijklmnop\n44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a";
+
+    /// The key whose seed is 32 bytes of 0x03, for both algorithms.
+    const VECTOR_SEED: &str = "0303030303030303030303030303030303030303030303030303030303030303";
+
+    /// Signatures over the vector, from an independent implementation of the
+    /// server's verification.
+    const VECTOR_ED25519_SIGNATURE: &str = "c117313c0d01641340e398d9a7a9ff024a1c6672bca16bbcb99e6fe2738f82e77870bd2c30dc62d6c50cea32a3b21086730d9c25297831dd83bc797c5b394d0d";
+    const VECTOR_SECP256K1_SIGNATURE: &str = "bfbad8ec000c66ed30349070db245db0c45249293c545e35dc997d6427d3223830787244d5b3bb7e8a1b39bdba0c62261e02344a515f5e8e89f678e17d4b976d";
+
+    fn vector_headers(algorithm: SignatureAlgorithm) -> Vec<(String, String)> {
+        sign_request_with_nonce_at(
+            "did:willow:a",
+            "did:willow:a#key-1",
+            VECTOR_SEED,
+            algorithm,
+            "POST",
+            "/query/sg?x=1",
+            b"{}",
+            "1700000000",
+            "abcdefghijklmnop",
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn signed_request_message_matches_the_server_vector() {
+        assert_eq!(
+            signed_request_message(
+                "did:willow:a",
+                "did:willow:a#key-1",
+                "POST",
+                "/query/sg?x=1",
+                "1700000000",
+                "abcdefghijklmnop",
+                b"{}",
+            ),
+            SIGNED_MESSAGE_VECTOR
+        );
+    }
+
+    #[test]
+    fn nonce_signed_headers_ed25519_known_answer() {
+        let headers = vector_headers(SignatureAlgorithm::Ed25519);
+        let expected: Vec<(String, String)> = [
+            ("X-DID", "did:willow:a"),
+            ("X-Public-Key-ID", "did:willow:a#key-1"),
+            ("X-Signature", VECTOR_ED25519_SIGNATURE),
+            ("X-Timestamp", "1700000000"),
+            ("X-Nonce", "abcdefghijklmnop"),
+        ]
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        assert_eq!(headers, expected);
+    }
+
+    #[test]
+    fn nonce_signed_headers_secp256k1_known_answer() {
+        let headers = vector_headers(SignatureAlgorithm::Secp256k1);
+        let signature = &headers.iter().find(|(k, _)| k == "X-Signature").unwrap().1;
+        // 0x-prefixed: the server reads an unprefixed secp256k1 signature as base64 first.
+        assert_eq!(signature, &format!("0x{VECTOR_SECP256K1_SIGNATURE}"));
+        assert!(verify_signature(
+            SIGNED_MESSAGE_VECTOR,
+            signature,
+            "02531fe6068134503d2723133227c867ac8fa6c83c537e9a44c3c5bdbdcb1fe337",
+            SignatureAlgorithm::Secp256k1,
+        )
+        .unwrap());
+        // The same signature in DER verifies too, as on the server.
+        assert!(verify_signature(
+            SIGNED_MESSAGE_VECTOR,
+            "3045022100bfbad8ec000c66ed30349070db245db0c45249293c545e35dc997d6427d32238022030787244d5b3bb7e8a1b39bdba0c62261e02344a515f5e8e89f678e17d4b976d",
+            "02531fe6068134503d2723133227c867ac8fa6c83c537e9a44c3c5bdbdcb1fe337",
+            SignatureAlgorithm::Secp256k1,
+        )
+        .unwrap());
+    }
+
+    #[test]
+    fn legacy_request_message_signs_the_path_alone() {
+        assert_eq!(
+            legacy_request_message("GET", "/data/sg/k?include_proof=true", "1700000000"),
+            "GET:/data/sg/k:1700000000"
+        );
+        assert_eq!(
+            legacy_request_message("GET", "/data/sg/k", "1700000000"),
+            "GET:/data/sg/k:1700000000"
+        );
+    }
+
+    #[test]
+    fn request_nonces_are_wellformed_and_fresh() {
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..100 {
+            let nonce = new_request_nonce();
+            assert!((16..=128).contains(&nonce.len()));
+            assert!(nonce
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'));
+            assert!(seen.insert(nonce));
+        }
+    }
+
     #[test]
     fn test_generate_ed25519_did() {
         let did_info = generate_did(SignatureAlgorithm::Ed25519).unwrap();
@@ -306,7 +532,7 @@ mod tests {
             did_from_public_key(SignatureAlgorithm::Secp256k1, &did_info.public_key).unwrap()
         );
         assert_eq!(did_info.private_key.len(), 32);
-        assert_eq!(did_info.public_key.len(), 64); // Uncompressed without prefix
+        assert_eq!(did_info.public_key.len(), 33); // Compressed, as the chain parses it
     }
 
     /// MANDATORY acceptance vector: this exact Ed25519 key MUST derive this exact DID.

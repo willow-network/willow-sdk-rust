@@ -1,6 +1,9 @@
 //! Main client for interacting with Willow
 
-use crate::auth::{detect_algorithm_from_did, sign_challenge};
+use crate::auth::{
+    detect_algorithm_from_did, legacy_request_message, sign_request_message,
+    sign_request_with_nonce,
+};
 use crate::consensus::ConsensusClient;
 use crate::data::DataOperations;
 use crate::errors::{Result, WillowError};
@@ -191,7 +194,10 @@ impl WillowClient {
         Ok(())
     }
 
-    /// Sign a request and return the headers map.
+    /// Sign a request in the older `{METHOD}:{PATH}:{TIMESTAMP}` form and return the
+    /// headers. PATH is the path alone: any query string is left out, as the server
+    /// verifies it (see [`crate::auth::legacy_request_message`]). This form carries no
+    /// read rights; reads of subgrove data use [`Self::sign_request_with_nonce`].
     pub(crate) fn sign_request(&self, method: &str, path: &str) -> Option<Vec<(String, String)>> {
         let identity_lock = self.identity.read().unwrap();
         let identity = identity_lock.as_ref()?;
@@ -201,10 +207,10 @@ impl WillowClient {
             .unwrap()
             .as_secs()
             .to_string();
-        let message = format!("{}:{}:{}", method, path, timestamp);
+        let message = legacy_request_message(method, path, &timestamp);
 
         let signature =
-            sign_challenge(&message, &identity.private_key_hex, identity.algorithm).ok()?;
+            sign_request_message(&message, &identity.private_key_hex, identity.algorithm).ok()?;
 
         Some(vec![
             ("X-DID".to_string(), identity.did.clone()),
@@ -215,6 +221,62 @@ impl WillowClient {
             ("X-Signature".to_string(), signature),
             ("X-Timestamp".to_string(), timestamp),
         ])
+    }
+
+    /// Sign a request to the API with a one-time nonce over its method, path and
+    /// query, and body, when an identity is set. Only this form carries the DID's read
+    /// rights. `body` must be the exact bytes sent; each call draws a fresh nonce, so
+    /// sign every attempt anew.
+    pub(crate) fn sign_request_with_nonce(
+        &self,
+        method: &str,
+        url: &Url,
+        body: &[u8],
+    ) -> Result<Option<Vec<(String, String)>>> {
+        let identity_lock = self.identity.read().unwrap();
+        let Some(identity) = identity_lock.as_ref() else {
+            return Ok(None);
+        };
+        sign_request_with_nonce(
+            &identity.did,
+            &identity.public_key_id,
+            &identity.private_key_hex,
+            identity.algorithm,
+            method,
+            &self.api_target(url),
+            body,
+        )
+        .map(Some)
+    }
+
+    /// The path and query the API receives for `url`: what the request line carries,
+    /// less any path the API base URL adds (a proxy mounted under a path strips it).
+    pub(crate) fn api_target(&self, url: &Url) -> String {
+        let mut target = url.path().to_string();
+        if let Some(query) = url.query() {
+            target.push('?');
+            target.push_str(query);
+        }
+        let base = self.base_url.path().trim_end_matches('/');
+        if !base.is_empty() && target.starts_with(&format!("{base}/")) {
+            target.drain(..base.len());
+        }
+        target
+    }
+
+    /// The configured indexer URL; indexer-only routes have no API fallback.
+    pub(crate) fn require_indexer_url(&self) -> Result<&Url> {
+        self.indexer_url.as_ref().ok_or_else(|| {
+            WillowError::Config(
+                "this route is served by indexers only: set indexer_url on the client builder"
+                    .to_string(),
+            )
+        })
+    }
+
+    /// Whether GraphQL/SQL reads sent to [`Self::indexer_base_url`] go to the API.
+    pub(crate) fn queries_go_to_api(&self) -> bool {
+        self.indexer_url.is_none()
     }
 
     /// Get data operations
@@ -533,18 +595,35 @@ impl WillowClient {
             url.clone(),
         );
 
-        // Add signature headers if identity is set
-        if let Some(headers) = self.sign_request(method, path) {
-            for (key, value) in headers {
-                request = request.header(&key, &value);
+        // The body is serialized here so the signature covers the exact bytes sent.
+        let body_bytes = match body {
+            Some(body_data) => Some(serde_json::to_vec(body_data)?),
+            None => None,
+        };
+
+        // A read with rights is signed with a fresh nonce on every attempt; any
+        // other request keeps the older form, which the server also accepts in
+        // the first 30 s after a restart, when it refuses nonce-signed requests.
+        let target = self.api_target(&url);
+        let headers = if carries_read_rights(method, &target) {
+            self.sign_request_with_nonce(method, &url, body_bytes.as_deref().unwrap_or(&[]))?
+        } else {
+            self.sign_request(method, &target)
+        };
+        match headers {
+            Some(headers) => {
+                for (key, value) in headers {
+                    request = request.header(&key, &value);
+                }
             }
-        } else if authenticated {
-            return Err(WillowError::NotAuthenticated);
+            None if authenticated => return Err(WillowError::NotAuthenticated),
+            None => {}
         }
 
-        // Add body if provided
-        if let Some(body_data) = body {
-            request = request.json(body_data);
+        if let Some(bytes) = body_bytes {
+            request = request
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .body(bytes);
         }
 
         // Send request
@@ -585,6 +664,21 @@ impl WillowClient {
             }
         }
     }
+}
+
+/// Whether a request is a read of subgrove data, the reads the API can gate by a
+/// DID's read rights: `GET /data/{sg}/{key}`, `GET /proof/{sg}/{key}`,
+/// `POST /query/{sg}`, `/sql/{sg}`, `/graphql/{sg}`, and `POST /a2a`. Only these are
+/// nonce-signed.
+pub(crate) fn carries_read_rights(method: &str, target: &str) -> bool {
+    let path = target.split('?').next().unwrap_or(target);
+    let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+    matches!(
+        (method, segments.as_slice()),
+        ("GET", ["data" | "proof", _, _])
+            | ("POST", ["query" | "sql" | "graphql", _])
+            | ("POST", ["a2a"])
+    )
 }
 
 /// Builder for WillowClient
@@ -649,7 +743,8 @@ impl WillowClientBuilder {
     ///
     /// When set, GraphQL and SQL queries are routed to this indexer node
     /// instead of the validator API. This enables querying indexed data
-    /// directly from a decentralized indexer.
+    /// directly from a decentralized indexer. The indexer-only routes
+    /// (`eth()`, `verifiable_rpc()`, and `verify_block_completeness`) need it.
     ///
     /// # Example
     /// ```rust,no_run
@@ -895,6 +990,228 @@ mod tests {
             "did:willow:Ed25519:abc123#key-1",
         );
         assert!(client.require_auth().is_ok());
+    }
+
+    fn received_header(req: &wiremock::Request, name: &str) -> String {
+        req.headers
+            .iter()
+            .find(|(k, _)| k.as_str().eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.last().as_str().to_string())
+            .unwrap_or_default()
+    }
+
+    /// What the server verifies: the eight lines rebuilt from the request it got.
+    fn assert_nonce_signed(req: &wiremock::Request, public_key_hex: &str) {
+        let mut target = req.url.path().to_string();
+        if let Some(q) = req.url.query() {
+            target.push('?');
+            target.push_str(q);
+        }
+        let message = crate::auth::signed_request_message(
+            &received_header(req, "x-did"),
+            &received_header(req, "x-public-key-id"),
+            &req.method.to_string(),
+            &target,
+            &received_header(req, "x-timestamp"),
+            &received_header(req, "x-nonce"),
+            &req.body,
+        );
+        assert!(
+            crate::auth::verify_signature(
+                &message,
+                &received_header(req, "x-signature"),
+                public_key_hex,
+                SignatureAlgorithm::Ed25519,
+            )
+            .unwrap(),
+            "signature does not cover {} {} as received",
+            req.method,
+            target
+        );
+    }
+
+    /// Requests to the API are signed with a one-time nonce over the request as
+    /// sent, and a retried request is signed anew.
+    #[tokio::test]
+    async fn api_requests_are_nonce_signed_and_retries_resigned() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/query/sg"))
+            .respond_with(ResponseTemplate::new(502))
+            .up_to_n_times(1)
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/query/sg"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/data/sg/k"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/subgroves"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&server)
+            .await;
+
+        let client = WillowClient::builder()
+            .api_url(&server.uri())
+            .retry_config(RetryConfig {
+                max_attempts: 3,
+                initial_delay: Duration::from_millis(1),
+                max_delay: Duration::from_millis(1),
+                exponential_base: 1.0,
+            })
+            .build()
+            .await
+            .unwrap();
+        let seed = "0303030303030303030303030303030303030303030303030303030303030303";
+        client.set_identity_with_algorithm(
+            "did:willow:a",
+            seed,
+            "did:willow:a#key-1",
+            SignatureAlgorithm::Ed25519,
+        );
+        let public_key = "ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d1";
+
+        let _: serde_json::Value = client
+            .request(
+                "POST",
+                "/query/sg?x=1",
+                Some(&serde_json::json!({"limit": 1})),
+                true,
+            )
+            .await
+            .unwrap();
+        let _: serde_json::Value = client
+            .request::<_, ()>("GET", "/data/sg/k", None, true)
+            .await
+            .unwrap();
+
+        let _: serde_json::Value = client
+            .request::<_, ()>("GET", "/subgroves?x=1", None, true)
+            .await
+            .unwrap();
+
+        let received = server.received_requests().await.unwrap();
+        assert_eq!(
+            received.len(),
+            4,
+            "the failed POST, its retry, the GET, and the listing"
+        );
+        for req in &received[..3] {
+            assert_nonce_signed(req, public_key);
+        }
+        // Not a read with rights: the older form, over the path without its query.
+        let listing = &received[3];
+        assert_eq!(received_header(listing, "x-nonce"), "");
+        let message = crate::auth::legacy_request_message(
+            "GET",
+            listing.url.path(),
+            &received_header(listing, "x-timestamp"),
+        );
+        assert!(crate::auth::verify_signature(
+            &message,
+            &received_header(listing, "x-signature"),
+            public_key,
+            SignatureAlgorithm::Ed25519,
+        )
+        .unwrap());
+        assert_eq!(received[0].body, br#"{"limit":1}"#.to_vec());
+        assert_eq!(
+            received[1].body, received[0].body,
+            "the retry keeps its body"
+        );
+        assert_ne!(
+            received_header(&received[0], "x-nonce"),
+            received_header(&received[1], "x-nonce"),
+            "a retry must carry a new nonce"
+        );
+    }
+
+    /// GraphQL sent to the API is nonce-signed over its body; sent to an indexer it
+    /// carries no nonce.
+    #[tokio::test]
+    async fn graphql_is_nonce_signed_only_toward_the_api() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/graphql/sg"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {}})))
+            .mount(&server)
+            .await;
+        let seed = "0303030303030303030303030303030303030303030303030303030303030303";
+        let public_key = "ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d1";
+
+        let to_api = WillowClient::new(&server.uri()).await.unwrap();
+        let to_indexer = WillowClient::builder()
+            .api_url("http://127.0.0.1:1")
+            .indexer_url(&server.uri())
+            .build()
+            .await
+            .unwrap();
+        for client in [&to_api, &to_indexer] {
+            client.set_identity_with_algorithm(
+                "did:willow:a",
+                seed,
+                "did:willow:a#key-1",
+                SignatureAlgorithm::Ed25519,
+            );
+            client
+                .indexing()
+                .graphql_query("sg", "{ items { id } }", None)
+                .await
+                .unwrap();
+        }
+
+        let received = server.received_requests().await.unwrap();
+        assert_eq!(received.len(), 2);
+        assert_nonce_signed(&received[0], public_key);
+        assert_eq!(received_header(&received[1], "x-nonce"), "");
+    }
+
+    #[test]
+    fn only_reads_with_rights_are_nonce_signed() {
+        for (method, target, want) in [
+            ("GET", "/data/sg/k", true),
+            ("GET", "/data/sg/k?x=1", true),
+            ("GET", "/proof/sg/k", true),
+            ("POST", "/query/sg", true),
+            ("POST", "/sql/sg", true),
+            ("POST", "/graphql/sg", true),
+            ("POST", "/a2a", true),
+            ("GET", "/proof/key-grant/sg/did:willow:a", false),
+            ("GET", "/proof/file/sg/k", false),
+            ("GET", "/subgroves", false),
+            ("PUT", "/data/sg/k", false),
+            ("POST", "/tx/submit", false),
+            ("GET", "/did/did:willow:a/permissions", false),
+        ] {
+            assert_eq!(
+                carries_read_rights(method, target),
+                want,
+                "{method} {target}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn api_target_drops_the_base_url_path() {
+        let client = WillowClient::new("https://proxy.example/willow")
+            .await
+            .unwrap();
+        let url = client.base_url.join("data/sg/k?x=1").unwrap();
+        assert_eq!(url.as_str(), "https://proxy.example/willow/data/sg/k?x=1");
+        assert_eq!(client.api_target(&url), "/data/sg/k?x=1");
     }
 
     /// Reconstruct the message that `sign_request` signed from the headers it

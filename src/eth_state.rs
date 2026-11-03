@@ -321,7 +321,7 @@ impl EthOperations {
     ) -> Result<VerifiableRpcResponse> {
         let url = self
             .client
-            .indexer_base_url()
+            .require_indexer_url()?
             .join("verifiable-rpc/eth/state")
             .map_err(|e| WillowError::Config(format!("invalid url: {}", e)))?;
 
@@ -350,7 +350,7 @@ impl EthOperations {
     ) -> Result<VerifiableRpcResponse> {
         let url = self
             .client
-            .indexer_base_url()
+            .require_indexer_url()?
             .join("verifiable-rpc/eth/call")
             .map_err(|e| WillowError::Config(format!("invalid url: {}", e)))?;
 
