@@ -403,7 +403,8 @@ async fn resolve_ws_url(
                 .effective_query_endpoint()
                 .trim_end_matches('/')
                 .to_string();
-            Ok((http_to_ws(&endpoint) + "/graphql/ws", Some(did)))
+            // http_to_ws ends the URL with "/".
+            Ok((http_to_ws(&endpoint) + "graphql/ws", Some(did)))
         }
     }
 }
