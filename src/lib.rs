@@ -85,6 +85,7 @@ pub mod light_client;
 pub mod privacy;
 pub mod proof;
 pub mod registration;
+pub mod signed_messages;
 pub mod subgrove_config;
 pub mod subscriptions;
 pub mod token;

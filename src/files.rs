@@ -57,8 +57,9 @@ impl FileOperations {
     /// Upload a file to a FileStorage subgrove.
     ///
     /// When `signing_key` is provided, the manifest transaction is signed with
-    /// the given Ed25519 key. The `public_key_id` and `nonce` are required for
-    /// signed transactions.
+    /// the given Ed25519 key over [`crate::signed_messages::store_file_manifest`],
+    /// which binds every manifest field and the nonce fetched here. The
+    /// `public_key_id` is required for signed transactions.
     pub async fn upload(
         &self,
         subgrove_id: &str,
@@ -86,32 +87,19 @@ impl FileOperations {
         let content_hash_hex = hex::encode(content_hash);
         let content_type = guess_content_type(filename);
 
-        // Sign the transaction if a signing key is provided
         let tx_nonce = self.client.consensus().get_next_nonce(&owner_did).await?;
-        let (signature_bytes, pub_key_id) = if let Some(key) = signing_key {
-            let message = format!(
-                "store_file:{}:{}:{}:{}",
-                subgrove_id,
-                file_key,
-                content_hash_hex,
-                data.len()
-            );
-            let signature = key.sign(message.as_bytes());
-            (
-                signature.to_bytes().to_vec(),
-                public_key_id.unwrap_or("").to_string(),
-            )
-        } else {
-            (vec![], String::new())
+        let pub_key_id = match signing_key {
+            Some(_) => public_key_id.unwrap_or("").to_string(),
+            None => String::new(),
         };
 
         // Submit manifest to consensus via CometBFT RPC.
         // Use the server's StoreFileManifestTx struct directly for correct
         // serialization of [u8; 32] fields (content_hash, chunk_merkle_root).
         use crate::consensus::ConsensusClient;
-        use willow_types::consensus::transactions::StoreFileManifestTx;
+        use crate::signed_messages::{self, StoreFileManifestTx};
 
-        let manifest_tx = StoreFileManifestTx {
+        let mut manifest_tx = StoreFileManifestTx {
             subgrove_id: subgrove_id.to_string(),
             file_key: file_key.to_string(),
             filename: filename.to_string(),
@@ -123,10 +111,14 @@ impl FileOperations {
             chunk_merkle_root,
             owner_did: owner_did.clone(),
             encryption: None,
-            signature: signature_bytes,
+            signature: vec![],
             public_key_id: pub_key_id,
             nonce: tx_nonce,
         };
+        if let Some(key) = signing_key {
+            let message = signed_messages::store_file_manifest(&manifest_tx)?;
+            manifest_tx.signature = key.sign(message.as_bytes()).to_bytes().to_vec();
+        }
         let tx_json = ConsensusClient::serialize_tx("StoreFileManifest", &manifest_tx)?;
         let tx_hash = self
             .client
@@ -288,7 +280,8 @@ impl FileOperations {
 
     /// Delete a file (submits DeleteFileManifestTx to consensus).
     ///
-    /// When `signing_key` is provided, the delete transaction is signed.
+    /// When `signing_key` is provided, the delete transaction is signed over
+    /// [`crate::signed_messages::delete_file_manifest`] with the nonce fetched here.
     pub async fn delete(
         &self,
         subgrove_id: &str,
@@ -303,28 +296,26 @@ impl FileOperations {
         })?;
 
         let tx_nonce = self.client.consensus().get_next_nonce(&owner_did).await?;
-        let (signature_bytes, pub_key_id) = if let Some(key) = signing_key {
-            let message = format!("delete_file:{}:{}", subgrove_id, file_key);
-            let signature = key.sign(message.as_bytes());
-            (
-                signature.to_bytes().to_vec(),
-                public_key_id.unwrap_or("").to_string(),
-            )
-        } else {
-            (vec![], String::new())
+        let pub_key_id = match signing_key {
+            Some(_) => public_key_id.unwrap_or("").to_string(),
+            None => String::new(),
         };
 
         use crate::consensus::ConsensusClient;
-        use willow_types::consensus::transactions::DeleteFileManifestTx;
+        use crate::signed_messages::{self, DeleteFileManifestTx};
 
-        let delete_tx = DeleteFileManifestTx {
+        let mut delete_tx = DeleteFileManifestTx {
             subgrove_id: subgrove_id.to_string(),
             file_key: file_key.to_string(),
             owner_did: owner_did.clone(),
-            signature: signature_bytes,
+            signature: vec![],
             public_key_id: pub_key_id,
             nonce: tx_nonce,
         };
+        if let Some(key) = signing_key {
+            let message = signed_messages::delete_file_manifest(&delete_tx)?;
+            delete_tx.signature = key.sign(message.as_bytes()).to_bytes().to_vec();
+        }
         let tx_json = ConsensusClient::serialize_tx("DeleteFileManifest", &delete_tx)?;
         self.client
             .consensus()

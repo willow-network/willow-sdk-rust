@@ -4,7 +4,7 @@ use ed25519_dalek::SigningKey;
 use serde_json::json;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::time::sleep;
-use willow_sdk::{ConsensusClient, WillowClient};
+use willow_sdk::{signed_messages, ConsensusClient, WillowClient};
 
 // RFC 8032 §7.1 Test 2 Ed25519 vector.
 const PRIVATE_KEY_HEX: &str = "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb";
@@ -592,24 +592,20 @@ async fn store_data(
 ) -> Result<String, Box<dyn std::error::Error>> {
     use ed25519_dalek::Signer;
 
-    let data_json = serde_json::to_string(&data)?;
-    let message = format!("{}:{}:{}", subgrove_id, key, data_json);
-    let signature = signing_key.sign(message.as_bytes());
+    let mut tx = signed_messages::StoreDataTx {
+        subgrove_id: subgrove_id.to_string(),
+        key: key.to_string(),
+        data: serde_json::to_vec(&data)?,
+        owner_did: owner_did.to_string(),
+        signature: vec![],
+        public_key_id: format!("{}#key-1", owner_did),
+        nonce,
+    };
+    let message = signed_messages::store_data(&tx)?;
+    tx.signature = signing_key.sign(message.as_bytes()).to_bytes().to_vec();
 
-    let transaction = json!({
-        "StoreData": {
-
-            "subgrove_id": subgrove_id,
-            "key": key,
-            "data": data,
-            "owner_did": owner_did,
-            "signature": signature.to_bytes().to_vec(),
-            "public_key_id": format!("{}#key-1", owner_did),
-            "nonce": nonce
-        }
-    });
-
-    submit_transaction(consensus, &transaction).await
+    let tx_json = ConsensusClient::serialize_tx("StoreData", &tx)?;
+    Ok(consensus.submit_transaction_json(&tx_json).await?)
 }
 
 async fn submit_transaction(
