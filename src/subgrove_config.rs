@@ -21,6 +21,7 @@
 //!     "did:willow:owner",
 //!     "did:willow:owner#key-1",
 //!     &signing_key,
+//!     None, // initial funding
 //! ).await?;
 //! # Ok(())
 //! # }
@@ -87,7 +88,7 @@ pub struct SubgroveDefinition {
     /// Human-readable description.
     pub description: String,
 
-    /// Execution mode: "ConsensusExecution", "IndexerExecution", "TeeExecution", or "GkrExecution".
+    /// Execution mode: "ConsensusExecution", "IndexerExecution", or "TeeExecution".
     #[serde(default = "default_execution_mode")]
     pub execution_mode: String,
 
@@ -96,8 +97,8 @@ pub struct SubgroveDefinition {
     pub sampling_rate_percent: Option<u8>,
 
     /// TEE requirement for checkpoint verification.
-    /// Absent or empty means no TEE required (optimistic-only).
-    /// Set to "AwsNitro" or "IntelSgx" to require TEE attestation.
+    /// Absent means no TEE required (optimistic-only).
+    /// Set to "AwsNitro", "IntelSgx", or "AmdSev" to require TEE attestation.
     #[serde(default)]
     pub required_tee: Option<String>,
 
@@ -112,7 +113,7 @@ pub struct SubgroveDefinition {
     /// through `WillowManifest::from_bytes` — see `willow-types`.
     pub manifest: WillowManifest,
 
-    /// ZK-template binding for GkrExecution mode.
+    /// Optional ZK-template binding, carried in the registration as given.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub template_config: Option<willow_types::storage::TemplateSubgroveConfig>,
 }
@@ -188,65 +189,77 @@ impl SubgroveDefinition {
             .map_err(|e| WillowError::Custom(format!("Failed to parse TOML: {}", e)))
     }
 
-    /// Build the execution mode JSON value for the transaction.
-    pub fn execution_mode_json(&self) -> serde_json::Value {
+    /// The execution mode the registration carries. An unknown name is refused rather than
+    /// registered as another mode.
+    pub fn execution_mode(
+        &self,
+    ) -> Result<willow_types::consensus::indexing_transactions::ExecutionMode> {
+        use willow_types::consensus::indexing_transactions::ExecutionMode;
         match self.execution_mode.as_str() {
-            "IndexerExecution" => serde_json::json!({
-                "IndexerExecution": {
-                    "sampling_rate_percent": self.sampling_rate_percent.unwrap_or(5)
-                }
+            "ConsensusExecution" => Ok(ExecutionMode::ConsensusExecution),
+            "IndexerExecution" => Ok(ExecutionMode::IndexerExecution {
+                sampling_rate_percent: self.sampling_rate_percent.unwrap_or(5),
             }),
-            "TeeExecution" => serde_json::json!({
-                "TeeExecution": {
-                    "tee_type": "AwsNitro"
-                }
+            "TeeExecution" => Ok(ExecutionMode::TeeExecution {
+                tee_type: willow_types::tee::TeeType::AwsNitro,
             }),
-            "GkrExecution" => serde_json::json!("GkrExecution"),
-            _ => serde_json::json!("ConsensusExecution"),
+            other => Err(WillowError::Validation(format!(
+                "Unknown execution_mode {other:?}: use ConsensusExecution, IndexerExecution, or \
+                 TeeExecution"
+            ))),
         }
+    }
+
+    /// Build the execution mode JSON value for the transaction.
+    pub fn execution_mode_json(&self) -> Result<serde_json::Value> {
+        Ok(serde_json::to_value(self.execution_mode()?)?)
+    }
+
+    /// The checkpoint verification config the registration carries: `required_tee` as given.
+    pub fn checkpoint_verification(
+        &self,
+    ) -> Result<willow_types::consensus::indexing_transactions::CheckpointVerificationConfig> {
+        use willow_types::tee::TeeType;
+        let required_tee = match self.required_tee.as_deref() {
+            None => None,
+            Some("AwsNitro") => Some(TeeType::AwsNitro),
+            Some("IntelSgx") => Some(TeeType::IntelSgx),
+            Some("AmdSev") => Some(TeeType::AmdSev),
+            Some(other) => {
+                return Err(WillowError::Validation(format!(
+                    "Unknown required_tee {other:?}: use AwsNitro, IntelSgx, or AmdSev"
+                )))
+            }
+        };
+        Ok(
+            willow_types::consensus::indexing_transactions::CheckpointVerificationConfig {
+                required_tee,
+            },
+        )
     }
 
     /// Build the checkpoint verification config JSON value.
-    pub fn checkpoint_verification_json(&self) -> serde_json::Value {
-        match &self.required_tee {
-            Some(tee_type) => serde_json::json!({
-                "required_tee": tee_type
-            }),
-            None => serde_json::json!({
-                "required_tee": null
-            }),
-        }
+    pub fn checkpoint_verification_json(&self) -> Result<serde_json::Value> {
+        Ok(serde_json::to_value(self.checkpoint_verification()?)?)
     }
 
-    /// Build the complete `RegisterSubgrove` transaction JSON.
-    ///
-    /// The returned value can be submitted directly via
-    /// `ConsensusClient::submit_raw_transaction()`.
-    pub fn to_register_transaction(
+    /// The unsigned `RegisterSubgrove` transaction for this definition, with every field set
+    /// explicitly: a BlockchainIndexing mode with no WASM modules, an indefinite retention
+    /// window, no completeness bond, BFT-equivalent historical auth, and an epoch length of 100;
+    /// no admins, privacy, or owner key grant; a confirmation depth of 0; and no cryptographic
+    /// completeness. Sign [`crate::signed_messages::register_subgrove`] over it, then set
+    /// `signature`.
+    pub fn register_transaction(
         &self,
         owner_did: &str,
         public_key_id: &str,
-        signature: Vec<u8>,
         nonce: u64,
         initial_funding: Option<u128>,
-    ) -> String {
+    ) -> Result<willow_types::consensus::transactions::RegisterSubgroveTx> {
         use willow_types::consensus::indexing_transactions::{
-            ExecutionMode, HistoricalAuthMode, IndexerConfig, RetentionWindow, SubgroveMode,
+            HistoricalAuthMode, IndexerConfig, RetentionWindow, SubgroveMode,
         };
         use willow_types::consensus::transactions::RegisterSubgroveTx;
-
-        let manifest_content = serde_json::to_vec(&self.manifest).unwrap_or_default();
-
-        let execution_mode = match self.execution_mode.as_str() {
-            "IndexerExecution" => ExecutionMode::IndexerExecution {
-                sampling_rate_percent: self.sampling_rate_percent.unwrap_or(5),
-            },
-            "TeeExecution" => ExecutionMode::TeeExecution {
-                tee_type: willow_types::tee::TeeType::AwsNitro,
-            },
-            "GkrExecution" => ExecutionMode::GkrExecution,
-            _ => ExecutionMode::ConsensusExecution,
-        };
 
         let indexer_config = IndexerConfig {
             min_indexers: self.indexer_config.min_indexers,
@@ -256,7 +269,7 @@ impl SubgroveDefinition {
             min_indexer_stake: self.indexer_config.min_indexer_stake,
         };
 
-        let register_tx = RegisterSubgroveTx {
+        Ok(RegisterSubgroveTx {
             subgrove_id: self.subgrove_id.clone(),
             name: self.subgrove_id.clone(),
             description: self.description.clone(),
@@ -264,43 +277,67 @@ impl SubgroveDefinition {
             owner_did: owner_did.to_string(),
             admins: vec![],
             initial_funding,
+            checkpoint_verification: self.checkpoint_verification()?,
             mode: SubgroveMode::BlockchainIndexing {
-                manifest_content,
+                manifest_content: serde_json::to_vec(&self.manifest)?,
                 wasm_modules: vec![],
-                execution_mode,
+                execution_mode: self.execution_mode()?,
                 indexer_config,
-                retention_window: RetentionWindow::default(),
+                retention_window: RetentionWindow::Indefinite,
                 completeness: None,
-                historical_auth_mode: HistoricalAuthMode::default(),
+                historical_auth_mode: HistoricalAuthMode::BftEquivalent,
             },
-            checkpoint_verification: Default::default(),
             privacy: None,
             initial_owner_key_grant: None,
             template_config: self.template_config.clone(),
             confirmation_depth: 0,
-            signature,
+            signature: vec![],
             public_key_id: public_key_id.to_string(),
             nonce,
-        };
-
-        crate::consensus::ConsensusClient::serialize_tx("RegisterSubgrove", &register_tx)
-            .unwrap_or_default()
+            cryptographic_completeness: false,
+        })
     }
 
-    /// Build the canonical signing payload for BlockchainIndexing subgroves.
+    /// Build the complete `RegisterSubgrove` transaction JSON, carrying `signature`.
     ///
-    /// Format: `RegisterSubgrove:{subgrove_id}:{owner_did}:{nonce}`
-    pub fn signing_payload(&self, owner_did: &str, nonce: u64) -> String {
-        format!(
-            "RegisterSubgrove:{}:{}:{}",
-            self.subgrove_id, owner_did, nonce
-        )
+    /// `signature` must be over [`Self::signing_payload`] with the same arguments. The returned
+    /// value can be submitted via `ConsensusClient::submit_transaction_json()`.
+    pub fn to_register_transaction(
+        &self,
+        owner_did: &str,
+        public_key_id: &str,
+        signature: Vec<u8>,
+        nonce: u64,
+        initial_funding: Option<u128>,
+    ) -> Result<String> {
+        let mut register_tx =
+            self.register_transaction(owner_did, public_key_id, nonce, initial_funding)?;
+        register_tx.signature = signature;
+        crate::consensus::ConsensusClient::serialize_tx("RegisterSubgrove", &register_tx)
+    }
+
+    /// The message a registration of this definition signs:
+    /// [`crate::signed_messages::register_subgrove`] over [`Self::register_transaction`].
+    pub fn signing_payload(
+        &self,
+        owner_did: &str,
+        public_key_id: &str,
+        nonce: u64,
+        initial_funding: Option<u128>,
+    ) -> Result<String> {
+        crate::signed_messages::register_subgrove(&self.register_transaction(
+            owner_did,
+            public_key_id,
+            nonce,
+            initial_funding,
+        )?)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sha2::Digest;
 
     const SAMPLE_TOML: &str = r#"
 subgrove_id = "test-swaps"
@@ -367,28 +404,123 @@ events = ["Swap(address,address,int256)"]
             .expect("SDK-produced manifest bytes must round-trip through canonical validator");
     }
 
+    /// The payload is the Config form over exactly the transaction the definition builds.
     #[test]
     fn test_signing_payload() {
         let def = SubgroveDefinition::from_toml(SAMPLE_TOML).unwrap();
-        let payload = def.signing_payload("did:willow:owner", 1);
-        assert_eq!(payload, "RegisterSubgrove:test-swaps:did:willow:owner:1");
+        let payload = def
+            .signing_payload("did:willow:owner", "did:willow:owner#key-1", 1, Some(7))
+            .unwrap();
+        let tx = def
+            .register_transaction("did:willow:owner", "did:willow:owner#key-1", 1, Some(7))
+            .unwrap();
+        let unsigned = bincode::serialize(&tx).unwrap();
+        assert_eq!(
+            payload,
+            format!(
+                "RegisterSubgrove\nSubgrove: test-swaps\nOwner: did:willow:owner\nConfig: {}\nNonce: 1",
+                hex::encode(sha2::Sha256::digest(&unsigned))
+            )
+        );
+        // The funding, key id, and nonce are each bound.
+        for other in [
+            def.signing_payload("did:willow:owner", "did:willow:owner#key-1", 1, Some(8)),
+            def.signing_payload("did:willow:owner", "did:willow:owner#key-2", 1, Some(7)),
+            def.signing_payload("did:willow:owner", "did:willow:owner#key-1", 2, Some(7)),
+        ] {
+            assert_ne!(other.unwrap(), payload);
+        }
+    }
+
+    #[test]
+    fn the_registration_carries_every_definition_setting() {
+        use willow_types::consensus::indexing_transactions::{
+            ExecutionMode, HistoricalAuthMode, RetentionWindow, SubgroveMode,
+        };
+        let mut def = SubgroveDefinition::from_toml(SAMPLE_TOML).unwrap();
+        def.execution_mode = "IndexerExecution".into();
+        def.sampling_rate_percent = Some(10);
+        def.required_tee = Some("IntelSgx".into());
+        let tx = def
+            .register_transaction("did:willow:owner", "did:willow:owner#key-1", 3, None)
+            .unwrap();
+        assert!(tx.signature.is_empty());
+        assert_eq!(tx.nonce, 3);
+        assert_eq!(
+            tx.checkpoint_verification.required_tee,
+            Some(willow_types::tee::TeeType::IntelSgx)
+        );
+        let SubgroveMode::BlockchainIndexing {
+            manifest_content,
+            wasm_modules,
+            execution_mode,
+            indexer_config,
+            retention_window,
+            completeness,
+            historical_auth_mode,
+        } = &tx.mode
+        else {
+            panic!("expected BlockchainIndexing, got {:?}", tx.mode);
+        };
+        WillowManifest::from_bytes(manifest_content).unwrap();
+        assert!(wasm_modules.is_empty());
+        assert_eq!(
+            *execution_mode,
+            ExecutionMode::IndexerExecution {
+                sampling_rate_percent: 10
+            }
+        );
+        assert_eq!(indexer_config.reward_per_epoch, 100_000_000_000_000_000);
+        assert_eq!(indexer_config.epoch_length, 100);
+        assert!(matches!(retention_window, RetentionWindow::Indefinite));
+        assert!(completeness.is_none());
+        assert!(matches!(
+            historical_auth_mode,
+            HistoricalAuthMode::BftEquivalent
+        ));
+    }
+
+    #[test]
+    fn an_unknown_execution_mode_or_tee_is_refused() {
+        let mut def = SubgroveDefinition::from_toml(SAMPLE_TOML).unwrap();
+        def.execution_mode = "GkrExecution".into();
+        let err = def
+            .register_transaction("did:willow:owner", "did:willow:owner#key-1", 1, None)
+            .unwrap_err();
+        assert!(
+            matches!(&err, WillowError::Validation(m) if m.contains("GkrExecution")),
+            "{err}"
+        );
+        assert!(def
+            .signing_payload("did:willow:owner", "did:willow:owner#key-1", 1, None)
+            .is_err());
+
+        let mut def = SubgroveDefinition::from_toml(SAMPLE_TOML).unwrap();
+        def.required_tee = Some("Sgx".into());
+        assert!(def
+            .register_transaction("did:willow:owner", "did:willow:owner#key-1", 1, None)
+            .is_err());
     }
 
     #[test]
     fn test_to_register_transaction() {
         let def = SubgroveDefinition::from_toml(SAMPLE_TOML).unwrap();
-        let tx = def.to_register_transaction(
-            "did:willow:owner",
-            "did:willow:owner#key-1",
-            vec![1, 2, 3],
-            1,
-            None,
-        );
+        let tx = def
+            .to_register_transaction(
+                "did:willow:owner",
+                "did:willow:owner#key-1",
+                vec![1, 2, 3],
+                1,
+                None,
+            )
+            .unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&tx).unwrap();
         let reg = &parsed["RegisterSubgrove"];
         assert_eq!(reg["subgrove_id"], "test-swaps");
         assert_eq!(reg["owner_did"], "did:willow:owner");
         assert!(reg["mode"]["BlockchainIndexing"].is_object());
+        assert_eq!(reg["signature"], serde_json::json!([1, 2, 3]));
+        assert_eq!(reg["cryptographic_completeness"], false);
     }
 
     #[test]
@@ -439,7 +571,7 @@ start_block = 1
 events = ["Event()"]
 "#;
         let def = SubgroveDefinition::from_toml(toml_str).unwrap();
-        let mode = def.execution_mode_json();
+        let mode = def.execution_mode_json().unwrap();
         assert_eq!(mode["IndexerExecution"]["sampling_rate_percent"], 10);
     }
 }

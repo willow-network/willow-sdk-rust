@@ -25,7 +25,7 @@ async fn fresh_test() {
     println!("\nUsing funded DID: {}", funded_did);
 
     let client = WillowClient::new("http://localhost:3031").await.unwrap();
-    let _consensus = ConsensusClient::new("http://localhost:26657");
+    let consensus = ConsensusClient::new("http://localhost:26657");
 
     let private_key_bytes = hex::decode(PRIVATE_KEY_HEX).expect("Invalid private key hex");
     let signing_key =
@@ -34,7 +34,6 @@ async fn fresh_test() {
     // Step 1: Register subgrove with nonce 3
     println!("\nStep 1: Registering subgrove with nonce 3...");
 
-    use sha3::{Digest, Keccak256};
     let schema = json!({
         "version": 1,
         "fields": {
@@ -47,65 +46,43 @@ async fn fresh_test() {
         "required_fields": ["title", "content", "author", "timestamp"]
     });
 
-    let schema_json = serde_json::to_string(&schema).unwrap();
-
-    // Hash the schema
-    let mut hasher = Keccak256::new();
-    hasher.update(schema_json.as_bytes());
-    let schema_hash = hasher.finalize();
-    let schema_hash_hex = hex::encode(schema_hash);
-
-    // Create message to sign
-    let message = format!(
-        "RegisterSubgrove\nID: posts\nName: Blog Posts\nSchemaHash: {}\nOwner: {}\nWriters: \nReaders: \nNonce: 3",
-        schema_hash_hex,
-        funded_did
-    );
-
-    // Sign with Ed25519 key
+    // Every field is sent explicitly; the signature binds them all through `Config`.
     use ed25519_dalek::Signer;
-    let signature = signing_key.sign(message.as_bytes());
+    use willow_sdk::consensus::SubgroveMode;
+    use willow_sdk::signed_messages::{self, RegisterSubgroveTx};
+    let mut register_tx = RegisterSubgroveTx {
+        subgrove_id: "posts".to_string(),
+        name: "Blog Posts".to_string(),
+        description: String::new(),
+        schema: serde_json::to_string(&schema).unwrap(),
+        owner_did: funded_did.clone(),
+        admins: vec![],
+        initial_funding: None,
+        checkpoint_verification: Default::default(),
+        mode: SubgroveMode::DataStorage {
+            name: "Blog Posts".to_string(),
+            writers: vec![],
+            free_readers: vec![],
+            read_pricing: None,
+        },
+        privacy: None,
+        initial_owner_key_grant: None,
+        template_config: None,
+        confirmation_depth: 0,
+        signature: vec![],
+        public_key_id: format!("{}#key-1", funded_did),
+        nonce: 3,
+        cryptographic_completeness: false,
+    };
+    let message = signed_messages::register_subgrove(&register_tx).unwrap();
+    register_tx.signature = signing_key.sign(message.as_bytes()).to_bytes().to_vec();
 
-    // Create transaction directly
-    let transaction = json!({
-        "RegisterSubgrove": {
-            "subgrove_id": "posts",
+    let tx_json = ConsensusClient::serialize_tx("RegisterSubgrove", &register_tx).unwrap();
+    let response = consensus.submit_transaction_json(&tx_json).await;
+    println!("Subgrove registration response: {:?}", response);
 
-            "name": "Blog Posts",
-            "schema": schema_json,
-            "owner_did": funded_did.clone(),
-            "writers": [],
-            "readers": [],
-            "signature": signature.to_bytes().to_vec(),
-            "public_key_id": format!("{}#key-1", funded_did),
-            "nonce": 3,
-        }
-    });
-
-    // Submit directly
-    let tx_json = serde_json::to_string(&transaction).unwrap();
     use base64::Engine as _;
-    let tx_base64 = base64::engine::general_purpose::STANDARD.encode(tx_json.as_bytes());
-
-    let rpc_request = json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "broadcast_tx_sync",
-        "params": {
-            "tx": tx_base64
-        }
-    });
-
     let http_client = reqwest::Client::new();
-    let response = http_client
-        .post("http://localhost:26657")
-        .json(&rpc_request)
-        .send()
-        .await
-        .unwrap();
-
-    let response_text = response.text().await.unwrap();
-    println!("Subgrove registration response: {}", response_text);
 
     // Wait for transaction to be processed and indexed
     println!("Waiting for subgrove to be fully initialized...");

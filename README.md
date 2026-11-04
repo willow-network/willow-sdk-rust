@@ -49,13 +49,7 @@ cargo build
 
 ## Transaction submission
 
-Transactions submitted through this SDK go to the API server's
-`POST /tx/submit` endpoint. The server accepts the JSON-encoded
-transaction, bincode-encodes it (the chain's on-the-wire format), and
-forwards to CometBFT's `broadcast_tx_sync`. `api_url` is therefore
-**required** whenever you submit a tx; `consensus_rpc_url` is only
-used for read-only RPC queries (status, block, validators) and may be
-omitted or pointed at the same endpoint.
+Transactions submitted through this SDK are bincode-encoded by the client (the chain's on-the-wire format) and broadcast to CometBFT's `broadcast_tx_sync` at the consensus URL (`consensus_url` on the builder, or `ConsensusClient::new`). The client signs the exact transaction it encodes. The API URL serves the next nonce (`GET /account/{did}/nonce`); without one the client reads it from chain state over the CometBFT RPC. A client built without a consensus URL can read but not write: the file and key-grant operations return a configuration error naming `consensus_url`.
 
 ## Quick Start
 
@@ -364,14 +358,47 @@ let request = RegisterSubgroveRequest {
     }),
     owner_did: did_info.did.clone(),
     admins: vec![],
+    initial_funding: None,
     writers: vec![did_info.did.clone()],
     readers: vec![],
     signature: vec![],
     public_key_id: did_info.public_key_id.clone(),
-    nonce: 1,
+    nonce: 0, // ignored: the client fetches the next nonce
 };
 let tx_hash = consensus_client.register_subgrove(request, &signing_key).await?;
 ```
+
+`register_subgrove`, `register_file_subgrove`, and `register_blockchain_subgrove` (from a `SubgroveDefinition`) build the whole `RegisterSubgroveTx`, every field set explicitly, fetch the nonce, and sign five lines:
+
+```text
+RegisterSubgrove
+Subgrove: <subgrove_id>
+Owner: <owner_did>
+Config: <hex SHA-256 of the RegisterSubgroveTx's bincode with an empty signature>
+Nonce: <nonce>
+```
+
+`Config` hashes the transaction struct (not the `Transaction` enum) with bincode 1.x's default encoding, so it binds every field of every mode: name, description, schema, admins, initial funding, TEE requirement, mode settings, privacy, owner key grant, template, confirmation depth, key ID, nonce, and cryptographic completeness. The client broadcasts exactly the transaction it hashed. `signed_messages::register_subgrove` builds the message for any `RegisterSubgroveTx`, and `signed_messages::register_subgrove_config` gives the hash. A subgrove definition's `execution_mode` must be `ConsensusExecution`, `IndexerExecution`, or `TeeExecution`, and its `required_tee` `AwsNitro`, `IntelSgx`, or `AmdSev`; any other value is refused before signing.
+
+### Private subgroves: key grants
+
+`client.privacy()` grants, rotates, and revokes a private subgrove's key with the nonce you pass. A grant signs every field of the `EncryptedKeyGrant`:
+
+```text
+GrantSubgroveKey
+Subgrove: <subgrove_id>
+Sender: <sender_did>
+Grantee: <grantee_did>
+GranteeKey: <grantee_public_key_id>
+KeyEpoch: <key_epoch>
+EphemeralKey: <hex of ephemeral_public_key>
+EncryptedKey: <hex of encrypted_key>
+GrantedBy: <granted_by>
+GrantedAt: <granted_at>
+Nonce: <nonce>
+```
+
+A rotation signs `RotateSubgroveKey`, `Subgrove`, `Sender`, `NewEpoch`, `Grants` (the count), then each grant's seven lines from `Grantee` to `GrantedAt` in order, then `Nonce`. A revoke signs `RevokeSubgroveKey:{subgrove_id}:{revokee_did}:{sender_did}:{nonce}`; a subgrove ID holding `:`, or a revokee or sender that isn't a `did:willow:` DID of letters, digits, `-`, and `_`, is refused. `files().unregister_storage_node` signs `UnregisterStorageNode`, `Node`, and `Nonce`. The `signed_messages` module builds each (`grant_subgrove_key`, `rotate_subgrove_key`, `revoke_subgrove_key`, `unregister_storage_node`). A subgrove ID, owner, sender, or node DID, or a grant's grantee, key ID, or granter, holding the byte 0x0A is refused, and each of these transactions spends its nonce when the node refuses it in its block, as the data writes do.
 
 ## Root Hash Verification
 

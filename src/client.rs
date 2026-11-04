@@ -467,6 +467,16 @@ impl WillowClient {
         self.consensus_client.as_ref().map(|c| c.as_ref())
     }
 
+    /// The consensus client, or a clear error naming `operation` when no consensus URL is set:
+    /// a transaction has no server to go to without one.
+    pub(crate) fn require_consensus(&self, operation: &str) -> Result<&ConsensusClient> {
+        self.consensus_opt().ok_or_else(|| {
+            WillowError::Config(format!(
+                "{operation} submits a transaction and needs a consensus URL; set consensus_url(..) on the builder"
+            ))
+        })
+    }
+
     /// Check the health of the Willow node
     pub async fn health(&self) -> Result<HealthStatus> {
         self.request("GET", "/health", None::<&()>, false).await

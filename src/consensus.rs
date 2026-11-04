@@ -496,7 +496,16 @@ impl ConsensusClient {
         // Convert JSON-encoded tx to the bincode wire format the validator expects.
         let tx: willow_types::consensus::transactions::Transaction =
             serde_json::from_str(tx_json).map_err(WillowError::Serialization)?;
-        let tx_bytes = bincode::serialize(&tx)
+        self.broadcast(&tx).await
+    }
+
+    /// Broadcast `tx` to CometBFT as the bincode the validator decodes, so the node reads the
+    /// exact values the transaction was signed over.
+    pub(crate) async fn broadcast(
+        &self,
+        tx: &willow_types::consensus::transactions::Transaction,
+    ) -> Result<String> {
+        let tx_bytes = bincode::serialize(tx)
             .map_err(|e| WillowError::Custom(format!("bincode serialize transaction: {}", e)))?;
         let tx_base64 = base64::engine::general_purpose::STANDARD.encode(&tx_bytes);
 
@@ -664,78 +673,54 @@ impl ConsensusClient {
         Ok(false)
     }
 
-    /// Register a subgrove using SigningKey
+    /// Register a DataStorage subgrove using SigningKey.
+    ///
+    /// Fetches the nonce, then signs [`signed_messages::register_subgrove`] over the transaction
+    /// it sends (`request.nonce` and `request.signature` are ignored). Every field is sent
+    /// explicitly: no read pricing, privacy, TEE requirement, or template, a confirmation depth
+    /// of 0, and no cryptographic completeness.
     pub async fn register_subgrove(
         &self,
-        mut request: RegisterSubgroveRequest,
+        request: RegisterSubgroveRequest,
         signing_key: &SigningKey,
     ) -> Result<String> {
-        use sha3::{Digest, Keccak256};
-
-        request.nonce = self.get_next_nonce(&request.owner_did).await?;
-
-        let schema_json = request
-            .schema
-            .as_ref()
-            .map(|s| serde_json::to_string(s).unwrap())
-            .unwrap_or_else(|| "{}".to_string());
-
-        // Hash the schema for more efficient signatures
-        let mut hasher = Keccak256::new();
-        hasher.update(schema_json.as_bytes());
-        let schema_hash = hasher.finalize();
-        let schema_hash_hex = hex::encode(schema_hash);
-
-        // Build canonical sign message based on mode
-        let message = format!(
-            "RegisterSubgrove\nID: {}\nName: {}\nDescription: {}\nSchemaHash: {}\nOwner: {}\nAdmins: {}\nWriters: {}\nReaders: {}\nNonce: {}",
-            request.subgrove_id,
-            request.name,
-            request.description,
-            schema_hash_hex,
-            request.owner_did,
-            request.admins.join(","),
-            request.writers.join(","),
-            request.readers.join(","),
-            request.nonce
-        );
-
-        // Sign with Ed25519 key
-        let signature = signing_key.sign(message.as_bytes());
-        request.signature = signature.to_bytes().to_vec();
-
-        // Create transaction with DataStorage mode (SDK default)
+        let nonce = self.get_next_nonce(&request.owner_did).await?;
+        let schema = match &request.schema {
+            Some(schema) => serde_json::to_string(schema)?,
+            None => "{}".to_string(),
+        };
         let register_tx = RegisterSubgroveTx {
-            subgrove_id: request.subgrove_id.clone(),
+            subgrove_id: request.subgrove_id,
             name: request.name.clone(),
-            description: request.description.clone(),
-            schema: schema_json,
-            owner_did: request.owner_did.clone(),
-            admins: request.admins.clone(),
+            description: request.description,
+            schema,
+            owner_did: request.owner_did,
+            admins: request.admins,
             initial_funding: request.initial_funding,
+            checkpoint_verification: Default::default(),
             mode: SubgroveMode::DataStorage {
-                name: request.name.clone(),
-                writers: request.writers.clone(),
-                free_readers: request.readers.clone(),
+                name: request.name,
+                writers: request.writers,
+                free_readers: request.readers,
                 read_pricing: None,
             },
-            checkpoint_verification: Default::default(),
             privacy: None,
             initial_owner_key_grant: None,
             template_config: None,
             confirmation_depth: 0,
-            signature: request.signature.clone(),
-            public_key_id: request.public_key_id.clone(),
-            nonce: request.nonce,
+            signature: vec![],
+            public_key_id: request.public_key_id,
+            nonce,
+            cryptographic_completeness: false,
         };
-        let tx_json = Self::serialize_tx("RegisterSubgrove", &register_tx)?;
-        self.submit_transaction(&tx_json).await
+        self.sign_and_register(register_tx, signing_key).await
     }
 
     /// Register a file storage subgrove using SigningKey.
     ///
     /// File storage subgroves store files with chunk-level Merkle verification
-    /// via dedicated storage nodes.
+    /// via dedicated storage nodes. Signed like [`Self::register_subgrove`], with no admins,
+    /// description, read pricing, or retention period.
     pub async fn register_file_subgrove(
         &self,
         subgrove_id: &str,
@@ -750,29 +735,15 @@ impl ConsensusClient {
         initial_funding: Option<u128>,
     ) -> Result<String> {
         let nonce = self.get_next_nonce(owner_did).await?;
-        use sha3::{Digest, Keccak256};
-
-        let schema_json = "{}";
-        let mut hasher = Keccak256::new();
-        hasher.update(schema_json.as_bytes());
-        let schema_hash_hex = hex::encode(hasher.finalize());
-
-        let message = format!(
-            "RegisterSubgrove\nID: {}\nMode: FileStorage\nName: {}\nDescription: \nSchemaHash: {}\nOwner: {}\nAdmins: \nWriters: {}\nReaders: {}\nNonce: {}",
-            subgrove_id, name, schema_hash_hex, owner_did,
-            writers.join(","), readers.join(","), nonce
-        );
-
-        let signature = signing_key.sign(message.as_bytes());
-
         let register_tx = RegisterSubgroveTx {
             subgrove_id: subgrove_id.to_string(),
             name: name.to_string(),
             description: String::new(),
-            schema: schema_json.to_string(),
+            schema: "{}".to_string(),
             owner_did: owner_did.to_string(),
             admins: vec![],
             initial_funding,
+            checkpoint_verification: Default::default(),
             mode: SubgroveMode::FileStorage {
                 name: name.to_string(),
                 max_file_size,
@@ -782,23 +753,37 @@ impl ConsensusClient {
                 read_pricing: None,
                 retention_period: 0,
             },
-            checkpoint_verification: Default::default(),
             privacy: None,
             initial_owner_key_grant: None,
             template_config: None,
             confirmation_depth: 0,
-            signature: signature.to_bytes().to_vec(),
+            signature: vec![],
             public_key_id: public_key_id.to_string(),
             nonce,
+            cryptographic_completeness: false,
         };
-        let tx_json = Self::serialize_tx("RegisterSubgrove", &register_tx)?;
-        self.submit_transaction(&tx_json).await
+        self.sign_and_register(register_tx, signing_key).await
+    }
+
+    /// Sign `tx` (its nonce already chosen) over [`signed_messages::register_subgrove`] and
+    /// broadcast exactly the transaction whose bincode the `Config` line hashes.
+    async fn sign_and_register(
+        &self,
+        mut tx: RegisterSubgroveTx,
+        signing_key: &SigningKey,
+    ) -> Result<String> {
+        let message = signed_messages::register_subgrove(&tx)?;
+        tx.signature = signing_key.sign(message.as_bytes()).to_bytes().to_vec();
+        self.broadcast(&willow_types::consensus::transactions::Transaction::RegisterSubgrove(tx))
+            .await
     }
 
     /// Register a blockchain indexing subgrove from a definition file.
     ///
-    /// Loads the subgrove definition, signs it, and submits the transaction.
-    /// This is the simplest way to deploy a predefined subgrove.
+    /// Builds the transaction with
+    /// [`SubgroveDefinition::register_transaction`](crate::subgrove_config::SubgroveDefinition::register_transaction),
+    /// signs [`signed_messages::register_subgrove`] over it with the nonce fetched here, and
+    /// submits it. This is the simplest way to deploy a predefined subgrove.
     ///
     /// # Example
     ///
@@ -817,6 +802,7 @@ impl ConsensusClient {
     ///     "did:willow:owner",
     ///     "did:willow:owner#key-1",
     ///     &signing_key,
+    ///     None, // initial funding
     /// ).await?;
     /// # Ok(())
     /// # }
@@ -830,18 +816,9 @@ impl ConsensusClient {
         initial_funding: Option<u128>,
     ) -> Result<String> {
         let nonce = self.get_next_nonce(owner_did).await?;
-        let payload = definition.signing_payload(owner_did, nonce);
-        let signature = signing_key.sign(payload.as_bytes());
-
-        let tx_json = definition.to_register_transaction(
-            owner_did,
-            public_key_id,
-            signature.to_bytes().to_vec(),
-            nonce,
-            initial_funding,
-        );
-
-        self.submit_transaction(&tx_json).await
+        let register_tx =
+            definition.register_transaction(owner_did, public_key_id, nonce, initial_funding)?;
+        self.sign_and_register(register_tx, signing_key).await
     }
 
     /// Store data using SigningKey.
@@ -1111,6 +1088,7 @@ mod tests {
             signature: vec![7, 8, 9],
             public_key_id: "did:willow:owner#key-1".to_string(),
             nonce: 3,
+            cryptographic_completeness: true,
         };
 
         let json = serde_json::to_string(&tx).unwrap();
@@ -1118,6 +1096,7 @@ mod tests {
 
         assert_eq!(tx.subgrove_id, deserialized.subgrove_id);
         assert_eq!(tx.schema, deserialized.schema);
+        assert!(deserialized.cryptographic_completeness);
     }
 
     #[test]

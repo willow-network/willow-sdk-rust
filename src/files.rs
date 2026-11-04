@@ -87,7 +87,8 @@ impl FileOperations {
         let content_hash_hex = hex::encode(content_hash);
         let content_type = guess_content_type(filename);
 
-        let tx_nonce = self.client.consensus().get_next_nonce(&owner_did).await?;
+        let consensus = self.client.require_consensus("upload")?;
+        let tx_nonce = consensus.get_next_nonce(&owner_did).await?;
         let pub_key_id = match signing_key {
             Some(_) => public_key_id.unwrap_or("").to_string(),
             None => String::new(),
@@ -120,17 +121,10 @@ impl FileOperations {
             manifest_tx.signature = key.sign(message.as_bytes()).to_bytes().to_vec();
         }
         let tx_json = ConsensusClient::serialize_tx("StoreFileManifest", &manifest_tx)?;
-        let tx_hash = self
-            .client
-            .consensus()
-            .submit_transaction_json(&tx_json)
-            .await?;
+        let tx_hash = consensus.submit_transaction_json(&tx_json).await?;
 
         // Storage nodes verify the on-chain manifest before accepting chunks.
-        self.client
-            .consensus()
-            .wait_for_transaction(&tx_hash, 15)
-            .await?;
+        consensus.wait_for_transaction(&tx_hash, 15).await?;
 
         // Upload chunks to storage node
         let http = reqwest::Client::new();
@@ -295,7 +289,8 @@ impl FileOperations {
             WillowError::Authentication("Set identity before file operations".to_string())
         })?;
 
-        let tx_nonce = self.client.consensus().get_next_nonce(&owner_did).await?;
+        let consensus = self.client.require_consensus("delete")?;
+        let tx_nonce = consensus.get_next_nonce(&owner_did).await?;
         let pub_key_id = match signing_key {
             Some(_) => public_key_id.unwrap_or("").to_string(),
             None => String::new(),
@@ -317,47 +312,36 @@ impl FileOperations {
             delete_tx.signature = key.sign(message.as_bytes()).to_bytes().to_vec();
         }
         let tx_json = ConsensusClient::serialize_tx("DeleteFileManifest", &delete_tx)?;
-        self.client
-            .consensus()
-            .submit_transaction_json(&tx_json)
-            .await?;
+        consensus.submit_transaction_json(&tx_json).await?;
 
         Ok(())
     }
 
     /// Unregister a storage node (submits UnregisterStorageNode to consensus).
     ///
-    /// The `signing_key` signs the message `"unregister_storage_node:{node_did}"`.
+    /// The `signing_key` signs [`crate::signed_messages::unregister_storage_node`] (`Node` and
+    /// the nonce fetched here).
     pub async fn unregister_storage_node(
         &self,
         node_did: &str,
         signing_key: &SigningKey,
         public_key_id: &str,
     ) -> Result<()> {
-        use crate::consensus::ConsensusClient;
+        use crate::signed_messages::{self, UnregisterStorageNodeTx};
+        use willow_types::consensus::transactions::Transaction;
 
-        let nonce = self.client.consensus().get_next_nonce(node_did).await?;
-        let message = format!("unregister_storage_node:{}", node_did);
-        let signature = signing_key.sign(message.as_bytes());
-
-        #[derive(serde::Serialize)]
-        struct UnregisterStorageNodeTx {
-            node_did: String,
-            signature: Vec<u8>,
-            public_key_id: String,
-            nonce: u64,
-        }
-
-        let tx = UnregisterStorageNodeTx {
+        let consensus = self.client.require_consensus("unregister_storage_node")?;
+        let nonce = consensus.get_next_nonce(node_did).await?;
+        let mut tx = UnregisterStorageNodeTx {
             node_did: node_did.to_string(),
-            signature: signature.to_bytes().to_vec(),
+            signature: vec![],
             public_key_id: public_key_id.to_string(),
             nonce,
         };
-        let tx_json = ConsensusClient::serialize_tx("UnregisterStorageNode", &tx)?;
-        self.client
-            .consensus()
-            .submit_transaction_json(&tx_json)
+        let message = signed_messages::unregister_storage_node(&tx)?;
+        tx.signature = signing_key.sign(message.as_bytes()).to_bytes().to_vec();
+        consensus
+            .broadcast(&Transaction::UnregisterStorageNode(tx))
             .await?;
 
         Ok(())

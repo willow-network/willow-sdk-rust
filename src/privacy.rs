@@ -24,10 +24,12 @@
 //! ```
 
 use crate::errors::{Result, WillowError};
+use crate::signed_messages::{self, GrantSubgroveKeyTx, RevokeSubgroveKeyTx, RotateSubgroveKeyTx};
 use crate::types::ApiResponse;
 use crate::WillowClient;
 use ed25519_dalek::{Signer, SigningKey};
 use serde::{Deserialize, Serialize};
+use willow_types::consensus::transactions::Transaction;
 
 /// Privacy configuration for a private subgrove.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,17 +54,9 @@ pub enum CommitmentFrequency {
     Never,
 }
 
-/// An encrypted key grant for a subgrove.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EncryptedKeyGrant {
-    pub grantee_did: String,
-    pub key_epoch: u32,
-    pub grantee_public_key_id: String,
-    pub ephemeral_public_key: Vec<u8>,
-    pub encrypted_key: Vec<u8>,
-    pub granted_by: String,
-    pub granted_at: u64,
-}
+/// An encrypted key grant for a subgrove: the chain's own type, so a grant signs and encodes
+/// exactly as the node reads it.
+pub use willow_types::storage::EncryptedKeyGrant;
 
 /// Privacy-related operations for private subgroves.
 pub struct PrivacyOperations {
@@ -143,7 +137,8 @@ impl PrivacyOperations {
 
     /// Submit a GrantSubgroveKey transaction via consensus.
     ///
-    /// Grants the specified DID access to the subgrove's encryption key.
+    /// Grants the specified DID access to the subgrove's encryption key. Signed over
+    /// [`signed_messages::grant_subgrove_key`], which binds every field of the grant and `nonce`.
     pub async fn grant_subgrove_key(
         &self,
         subgrove_id: &str,
@@ -153,30 +148,26 @@ impl PrivacyOperations {
         public_key_id: &str,
         nonce: u64,
     ) -> Result<String> {
-        let message = format!(
-            "GrantSubgroveKey:{}:{}:{}:{}",
-            subgrove_id, grant.grantee_did, sender_did, nonce
-        );
-
-        let signature = signing_key.sign(message.as_bytes());
-
-        let tx = serde_json::json!({
-            "GrantSubgroveKey": {
-                "subgrove_id": subgrove_id,
-                "encrypted_key_grant": grant,
-                "sender_did": sender_did,
-                "signature": signature.to_bytes().to_vec(),
-                "public_key_id": public_key_id,
-                "nonce": nonce,
-            }
-        });
-
-        self.client.consensus().submit_raw_transaction(tx).await
+        let consensus = self.client.require_consensus("grant_subgrove_key")?;
+        let mut tx = GrantSubgroveKeyTx {
+            subgrove_id: subgrove_id.to_string(),
+            encrypted_key_grant: grant,
+            sender_did: sender_did.to_string(),
+            signature: vec![],
+            public_key_id: public_key_id.to_string(),
+            nonce,
+        };
+        let message = signed_messages::grant_subgrove_key(&tx)?;
+        tx.signature = signing_key.sign(message.as_bytes()).to_bytes().to_vec();
+        consensus
+            .broadcast(&Transaction::GrantSubgroveKey(tx))
+            .await
     }
 
     /// Submit a RevokeSubgroveKey transaction via consensus.
     ///
-    /// Revokes the specified DID's access to the subgrove's encryption key.
+    /// Revokes the specified DID's access to the subgrove's encryption key. Signed over
+    /// [`signed_messages::revoke_subgrove_key`].
     pub async fn revoke_subgrove_key(
         &self,
         subgrove_id: &str,
@@ -186,30 +177,27 @@ impl PrivacyOperations {
         public_key_id: &str,
         nonce: u64,
     ) -> Result<String> {
-        let message = format!(
-            "RevokeSubgroveKey:{}:{}:{}:{}",
-            subgrove_id, revokee_did, sender_did, nonce
-        );
-
-        let signature = signing_key.sign(message.as_bytes());
-
-        let tx = serde_json::json!({
-            "RevokeSubgroveKey": {
-                "subgrove_id": subgrove_id,
-                "revokee_did": revokee_did,
-                "sender_did": sender_did,
-                "signature": signature.to_bytes().to_vec(),
-                "public_key_id": public_key_id,
-                "nonce": nonce,
-            }
-        });
-
-        self.client.consensus().submit_raw_transaction(tx).await
+        let consensus = self.client.require_consensus("revoke_subgrove_key")?;
+        let mut tx = RevokeSubgroveKeyTx {
+            subgrove_id: subgrove_id.to_string(),
+            revokee_did: revokee_did.to_string(),
+            sender_did: sender_did.to_string(),
+            signature: vec![],
+            public_key_id: public_key_id.to_string(),
+            nonce,
+        };
+        let message = signed_messages::revoke_subgrove_key(&tx)?;
+        tx.signature = signing_key.sign(message.as_bytes()).to_bytes().to_vec();
+        consensus
+            .broadcast(&Transaction::RevokeSubgroveKey(tx))
+            .await
     }
 
     /// Submit a RotateSubgroveKey transaction via consensus.
     ///
-    /// Rotates the subgrove encryption key to a new epoch with new grants.
+    /// Rotates the subgrove encryption key to a new epoch with new grants. Signed over
+    /// [`signed_messages::rotate_subgrove_key`], which binds every grant, their count and order,
+    /// and `nonce`.
     pub async fn rotate_subgrove_key(
         &self,
         subgrove_id: &str,
@@ -220,25 +208,20 @@ impl PrivacyOperations {
         public_key_id: &str,
         nonce: u64,
     ) -> Result<String> {
-        let message = format!(
-            "RotateSubgroveKey:{}:{}:{}:{}",
-            subgrove_id, new_epoch, sender_did, nonce
-        );
-
-        let signature = signing_key.sign(message.as_bytes());
-
-        let tx = serde_json::json!({
-            "RotateSubgroveKey": {
-                "subgrove_id": subgrove_id,
-                "new_epoch": new_epoch,
-                "new_grants": new_grants,
-                "sender_did": sender_did,
-                "signature": signature.to_bytes().to_vec(),
-                "public_key_id": public_key_id,
-                "nonce": nonce,
-            }
-        });
-
-        self.client.consensus().submit_raw_transaction(tx).await
+        let consensus = self.client.require_consensus("rotate_subgrove_key")?;
+        let mut tx = RotateSubgroveKeyTx {
+            subgrove_id: subgrove_id.to_string(),
+            new_epoch,
+            new_grants,
+            sender_did: sender_did.to_string(),
+            signature: vec![],
+            public_key_id: public_key_id.to_string(),
+            nonce,
+        };
+        let message = signed_messages::rotate_subgrove_key(&tx)?;
+        tx.signature = signing_key.sign(message.as_bytes()).to_bytes().to_vec();
+        consensus
+            .broadcast(&Transaction::RotateSubgroveKey(tx))
+            .await
     }
 }
