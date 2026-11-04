@@ -1,11 +1,14 @@
 //! The messages data and file writes are signed over.
 //!
-//! Each is a set of lines joined by `\n` with no trailing newline: the kind, then one
-//! `Label: value` line per field the transaction writes, the nonce last. Variable-length bytes
-//! appear as the lowercase hex SHA-256 of the exact bytes the transaction carries. Each builder
-//! reads the transaction it signs, so build the message after the nonce is chosen.
+//! Each is a set of lines joined by `\n` (the byte 0x0A) with no trailing newline: the kind,
+//! then one `Label: value` line per field the transaction writes, the nonce last. Text fields go
+//! in verbatim as UTF-8. Variable-length bytes appear as the lowercase hex SHA-256 of the exact
+//! bytes the transaction carries. Each builder reads the transaction it signs, so build the
+//! message after the nonce is chosen.
 //!
-//! A text field holding a line break is refused, as the node refuses it.
+//! A text field holding the byte 0x0A is refused, as the node refuses it. A write the node
+//! refuses in its block after its signature and nonce verify still spends its nonce, so a retry
+//! signs again under the next free nonce.
 
 use crate::errors::{Result, WillowError};
 use sha2::{Digest, Sha256};
@@ -231,14 +234,14 @@ mod tests {
                 .unwrap()
         };
         let vectors = kat["vectors"].as_array().unwrap();
-        assert_eq!(vectors.len(), 6);
+        assert_eq!(vectors.len(), 7);
         for v in vectors {
             let name = v["name"].as_str().unwrap();
             let i = &v["inputs"];
             let s = |k: &str| i[k].as_str().unwrap().to_string();
             let n = |k: &str| i[k].as_u64().unwrap();
             let message = match name {
-                "StoreData" => store_data(&StoreDataTx {
+                "StoreData" | "StoreData (non-ASCII, large nonce)" => store_data(&StoreDataTx {
                     subgrove_id: s("subgrove_id"),
                     key: s("key"),
                     data: s("data_utf8").into_bytes(),
@@ -425,6 +428,16 @@ mod tests {
                 ..delete_file()
             }),
             "Key",
+        );
+
+        // Only 0x0A is refused; a carriage return goes in verbatim.
+        assert_eq!(
+            delete_data(&DeleteDataTx {
+                key: "a\rb".into(),
+                ..delete()
+            })
+            .unwrap(),
+            "DeleteData\nSubgrove: sg-1\nKey: a\rb\nOwner: did:willow:a\nNonce: 10"
         );
 
         // Data is hashed, so a line break in it is signed like any other byte.

@@ -1,5 +1,4 @@
 {
-  "from_height": 1350000,
   "private_key_seed_hex": "0303030303030303030303030303030303030303030303030303030303030303",
   "public_key_id": "did:willow:a#key-1",
   "ed25519_public_key_hex": "ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d1",
@@ -18,6 +17,20 @@
       "ed25519_signature_hex": "de9b742f3540cee197950a73aa7b8d55522edd16f8fce483f3416dff337c3f7ca7a6048e3b5094b14c6ee4bf476e857bee912bd21ad585160c111ac9fc23cb01",
       "secp256k1_keccak256_hex": "2f14c04dc6d5ba9313c123570daed7ecc05f74405c87d7465bd2272e798afee1",
       "secp256k1_compact_signature_hex": "b859def195418418c7f94a7d6375d531343730f551c9ff199f3649dfcff451ec29abef456c401eca7bb30f20dc9fb1db66d2e10c9101c0f6c7e1646175316f81"
+    },
+    {
+      "name": "StoreData (non-ASCII, large nonce)",
+      "inputs": {
+        "subgrove_id": "sg-1",
+        "key": "na\u00efve-\u043a\u043b\u044e\u0447",
+        "owner_did": "did:willow:a",
+        "data_utf8": "{\"msg\":\"h\u00e9llo \u4e16\u754c\"}",
+        "nonce": 4294967297
+      },
+      "message": "StoreData\nSubgrove: sg-1\nKey: na\u00efve-\u043a\u043b\u044e\u0447\nOwner: did:willow:a\nDataHash: 095785a44b468473879c88052d54258b0f4e4865730c60990bb230e971104b70\nNonce: 4294967297",
+      "ed25519_signature_hex": "b028df8a5551ea75bc8fb760e3a96355dd8ff02075f58d1a240987897983c57820c65f3ac64790ad04e0c8741730b7fef1bd8f17fcd04e38b2d555555d21c103",
+      "secp256k1_keccak256_hex": "1bf6638c45638b00093f49a3c5caf81a737c79383bbf20307e618c64ce7464d0",
+      "secp256k1_compact_signature_hex": "17ccbfd5b0d5b66507e956e1ff22ccf4e9a10ec15140c223160ae4fee2f6159b6501adf760c50ded405a14499d1857cc9af9219c6115aea9583a7a46fae318a6"
     },
     {
       "name": "UpdateData",
