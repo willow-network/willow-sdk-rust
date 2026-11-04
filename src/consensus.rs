@@ -2,6 +2,7 @@
 
 use crate::auth::sign_challenge;
 use crate::errors::{Result, WillowError};
+use crate::nonces::{refusal_outcome, AccountNonceState, NonceOutcome, NonceTracker};
 use crate::signed_messages::{self, StoreDataTx};
 use crate::types::{DidDocument, RegisterSubgroveRequest, SignatureAlgorithm, StoreDataRequest};
 use base64::Engine;
@@ -9,9 +10,14 @@ use ed25519_dalek::{Signer, SigningKey};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sha2::{Digest, Sha256};
+use std::sync::Arc;
 
 /// Transaction types for consensus - match the working format exactly
 pub type Transaction = serde_json::Value;
+
+/// The chain's transaction enum, as the node decodes it.
+type ChainTransaction = willow_types::consensus::transactions::Transaction;
 
 /// Register DID transaction
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,11 +88,26 @@ pub struct CometBftError {
     pub data: Option<String>,
 }
 
-/// Consensus client for submitting transactions
+/// What CometBFT answered a `broadcast_tx_sync`.
+enum Submission {
+    /// CheckTx accepted it, or the mempool already holds these exact bytes; the hash.
+    Accepted(String),
+    /// CheckTx refused it.
+    Refused { code: u32, log: String },
+    /// It may or may not have reached the node.
+    Unknown(WillowError),
+}
+
+/// Consensus client for submitting transactions.
+///
+/// Every write it signs takes its nonce from a [`NonceTracker`] (one per client, shared by every
+/// clone of the [`crate::WillowClient`] that holds it): the lowest nonce in the node's window
+/// that the chain doesn't show used and no write in flight from this client holds.
 pub struct ConsensusClient {
     http_client: Client,
     consensus_rpc_url: String,
     api_url: Option<String>,
+    nonces: Arc<NonceTracker>,
 }
 
 impl ConsensusClient {
@@ -96,26 +117,70 @@ impl ConsensusClient {
             http_client: Client::new(),
             consensus_rpc_url: consensus_rpc_url.to_string(),
             api_url: None,
+            nonces: Arc::new(NonceTracker::new()),
         }
     }
 
-    /// Create a new consensus client with API URL for nonce auto-management
+    /// Create a new consensus client with an API URL, which serves an account's base nonce
+    /// when the CometBFT RPC doesn't answer its nonce state.
     pub fn new_with_api(consensus_rpc_url: &str, api_url: &str) -> Self {
         Self {
-            http_client: Client::new(),
-            consensus_rpc_url: consensus_rpc_url.to_string(),
             api_url: Some(api_url.to_string()),
+            ..Self::new(consensus_rpc_url)
         }
     }
 
-    /// Fetch the next valid nonce for a DID, returning `base + 1`.
+    /// Hand out nonces from `nonces` instead of this client's own tracker, so clients that sign
+    /// for the same identity don't take the same nonce.
+    pub fn with_nonce_tracker(mut self, nonces: Arc<NonceTracker>) -> Self {
+        self.nonces = nonces;
+        self
+    }
+
+    /// The CometBFT RPC URL transactions and chain-state queries go to.
+    pub fn rpc_url(&self) -> &str {
+        &self.consensus_rpc_url
+    }
+
+    /// The tracker this client hands out nonces from.
+    pub fn nonce_tracker(&self) -> &Arc<NonceTracker> {
+        &self.nonces
+    }
+
+    /// Hand out the next nonce for a write signed by `did`: the lowest in `base + 1 ..= base +
+    /// 24` that the chain doesn't show used ([`Self::account_nonce_state`]) and that no write
+    /// from this client has taken within the last 120 s.
     ///
-    /// When an API URL is configured (the gateway path) it uses the
-    /// `/account/{did}/nonce` endpoint; otherwise it reads the base nonce
-    /// straight from chain state via the CometBFT RPC
-    /// (`abci_query /store/account_nonce/{did}`), so the client also works
-    /// against a raw validator (e.g. a local devnet) with no API server.
+    /// The nonce is held for this caller: a write submitted through this client under it settles
+    /// it (a CheckTx refusal that doesn't say the nonce is held, used, or spent gives it back),
+    /// and an unused one is free again after 120 s. [`WillowError::NonceWindowFull`] when all 24
+    /// are taken.
     pub async fn get_next_nonce(&self, did: &str) -> Result<u64> {
+        let state = self.account_nonce_state(did).await?;
+        self.nonces.take(did, state)
+    }
+
+    /// `did`'s nonce state: the ABCI query `/store/account_nonce_state/{did}` over the CometBFT
+    /// RPC, the base and which of the 24 nonces above it are used. When the RPC doesn't answer
+    /// it, the base alone: from the API's `/account/{did}/nonce` when an API URL is set, else
+    /// from `/store/account_nonce/{did}`.
+    pub async fn account_nonce_state(&self, did: &str) -> Result<AccountNonceState> {
+        if let Ok(Some(value)) = self
+            .abci_query_value(&format!("/store/account_nonce_state/{did}"))
+            .await
+        {
+            if let Ok(state) = AccountNonceState::from_bytes(&value) {
+                return Ok(state);
+            }
+        }
+        Ok(AccountNonceState {
+            base: self.base_nonce(did).await?,
+            used: 0,
+        })
+    }
+
+    /// The account's base nonce alone.
+    async fn base_nonce(&self, did: &str) -> Result<u64> {
         if let Some(api_url) = self.api_url.as_ref() {
             let url = format!("{}/account/{}/nonce", api_url.trim_end_matches('/'), did);
             let resp = self
@@ -128,30 +193,27 @@ impl ConsensusClient {
                 WillowError::Network(format!("Failed to parse nonce response: {}", e))
             })?;
             // Response format: {"success": true, "data": {"did": "...", "nonce": N}}
-            let base_nonce = body
+            return Ok(body
                 .get("data")
                 .and_then(|d| d.get("nonce"))
                 .and_then(|n| n.as_u64())
-                .unwrap_or(0);
-            return Ok(base_nonce + 1);
+                .unwrap_or(0));
         }
-        self.next_nonce_via_rpc(did).await
+        let value = self
+            .abci_query_value(&format!("/store/account_nonce/{did}"))
+            .await?
+            .unwrap_or_default();
+        Ok(AccountNonceState::from_bytes(&value[..value.len().min(8)])?.base)
     }
 
-    /// Read the base nonce from chain state via the CometBFT RPC and return
-    /// `base + 1`. `abci_query` returns the base as an 8-byte big-endian u64 in
-    /// `result.response.value` (base64); empty = fresh account (base 0).
-    async fn next_nonce_via_rpc(&self, did: &str) -> Result<u64> {
-        let body = serde_json::json!({
+    /// An ABCI store query over the CometBFT RPC: the value bytes when the node answers code 0
+    /// (empty when it has none), `None` for another code.
+    async fn abci_query_value(&self, path: &str) -> Result<Option<Vec<u8>>> {
+        let body = json!({
             "jsonrpc": "2.0",
             "id": 1,
             "method": "abci_query",
-            "params": {
-                "path": format!("/store/account_nonce/{}", did),
-                "data": "",
-                "height": "0",
-                "prove": false,
-            }
+            "params": { "path": path, "data": "", "height": "0", "prove": false }
         });
         let resp: serde_json::Value = self
             .http_client
@@ -159,23 +221,22 @@ impl ConsensusClient {
             .json(&body)
             .send()
             .await
-            .map_err(|e| WillowError::Network(format!("Failed to fetch nonce: {}", e)))?
+            .map_err(|e| WillowError::Network(format!("abci_query {path}: {e}")))?
             .json()
             .await
-            .map_err(|e| WillowError::Network(format!("Failed to parse nonce response: {}", e)))?;
-        let value_b64 = resp["result"]["response"]["value"].as_str().unwrap_or("");
-        if value_b64.is_empty() {
-            return Ok(1);
+            .map_err(|e| WillowError::Network(format!("abci_query {path}: {e}")))?;
+        let response = resp
+            .get("result")
+            .and_then(|r| r.get("response"))
+            .ok_or_else(|| WillowError::Network(format!("abci_query {path}: no response")))?;
+        if response["code"].as_u64().unwrap_or(0) != 0 {
+            return Ok(None);
         }
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(value_b64)
-            .map_err(|e| WillowError::Network(format!("nonce base64 decode: {}", e)))?;
-        if bytes.len() < 8 {
-            return Ok(1);
-        }
-        let mut buf = [0u8; 8];
-        buf.copy_from_slice(&bytes[..8]);
-        Ok(u64::from_be_bytes(buf) + 1)
+        let value = response["value"].as_str().unwrap_or("");
+        base64::engine::general_purpose::STANDARD
+            .decode(value)
+            .map(Some)
+            .map_err(|e| WillowError::Network(format!("abci_query {path}: value: {e}")))
     }
 
     /// Read a block's on-chain completeness anchor — the 32-byte
@@ -185,7 +246,10 @@ impl ConsensusClient {
     /// `/store/events_commitment/{subgrove_id}/{block_number}`. On a hit
     /// (`response.code == 0`) the value bytes are JSON
     /// `{ "subgrove_id", "block_number", "events_commitment": "<64-hex>" }`;
-    /// the 32-byte commitment is the hex-decoded `events_commitment`.
+    /// the 32-byte commitment is the hex-decoded `events_commitment`. An anchor that names another
+    /// subgrove or block is refused.
+    ///
+    /// The node answers this query without a proof, so the commitment is the RPC node's word.
     ///
     /// Returns `Ok(None)` when the chain has no commitment for the block
     /// (a non-zero ABCI code, e.g. "No events commitment for block N", or an
@@ -195,43 +259,24 @@ impl ConsensusClient {
         subgrove_id: &str,
         block_number: u64,
     ) -> Result<Option<[u8; 32]>> {
-        let body = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "abci_query",
-            "params": {
-                "path": format!("/store/events_commitment/{}/{}", subgrove_id, block_number),
-                "data": "",
-                "height": "0",
-                "prove": false,
+        let path = format!("/store/events_commitment/{}/{}", subgrove_id, block_number);
+        let bytes = match self.abci_query_value(&path).await {
+            Ok(Some(bytes)) if !bytes.is_empty() => bytes,
+            Ok(_) => return Ok(None),
+            Err(e) => {
+                return Err(WillowError::Network(format!(
+                    "Failed to fetch events_commitment: {e}"
+                )))
             }
-        });
-        let resp: serde_json::Value = self
-            .http_client
-            .post(&self.consensus_rpc_url)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| WillowError::Network(format!("Failed to fetch events_commitment: {}", e)))?
-            .json()
-            .await
-            .map_err(|e| {
-                WillowError::Network(format!("Failed to parse events_commitment response: {}", e))
-            })?;
-
-        let response = &resp["result"]["response"];
-        let code = response["code"].as_u64().unwrap_or(0);
-        if code != 0 {
-            return Ok(None);
-        }
-        let value_b64 = response["value"].as_str().unwrap_or("");
-        if value_b64.is_empty() {
-            return Ok(None);
-        }
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(value_b64)
-            .map_err(|e| WillowError::Network(format!("events_commitment base64 decode: {}", e)))?;
+        };
         let anchor: EventsCommitmentAnchor = serde_json::from_slice(&bytes)?;
+        if anchor.subgrove_id != subgrove_id || anchor.block_number != block_number {
+            return Err(WillowError::Validation(format!(
+                "the events_commitment anchor answered for {subgrove_id} block {block_number} \
+                 names {} block {}",
+                anchor.subgrove_id, anchor.block_number
+            )));
+        }
         let commitment_bytes = hex::decode(&anchor.events_commitment)?;
         if commitment_bytes.len() != 32 {
             return Err(WillowError::Validation(format!(
@@ -244,6 +289,12 @@ impl ConsensusClient {
         Ok(Some(out))
     }
 
+    /// The chain's form of a transaction built as JSON by [`Self::serialize_tx`].
+    fn to_chain_transaction<T: Serialize>(variant_name: &str, tx: &T) -> Result<ChainTransaction> {
+        serde_json::from_str(&Self::serialize_tx(variant_name, tx)?)
+            .map_err(WillowError::Serialization)
+    }
+
     /// Register a DID through consensus
     pub async fn register_did(
         &self,
@@ -252,21 +303,21 @@ impl ConsensusClient {
         public_key_id: &str,
         algorithm: SignatureAlgorithm,
     ) -> Result<String> {
-        let nonce = self.get_next_nonce(&did_document.id).await?;
         let did_doc_json = serde_json::to_string(did_document)?;
         let signature_hex = sign_challenge(&did_doc_json, private_key_hex, algorithm)?;
         let signature_bytes = hex::decode(signature_hex)?;
-
-        // Create transaction
-        let register_tx = RegisterDidTx {
-            did_document: did_document.clone(),
-            signature: signature_bytes,
-            public_key_id: public_key_id.to_string(),
-            nonce,
-        };
-
-        let tx_json = Self::serialize_tx("RegisterDid", &register_tx)?;
-        self.submit_transaction(&tx_json).await
+        self.submit_with_nonce(&did_document.id, |nonce| {
+            Self::to_chain_transaction(
+                "RegisterDid",
+                &RegisterDidTx {
+                    did_document: did_document.clone(),
+                    signature: signature_bytes,
+                    public_key_id: public_key_id.to_string(),
+                    nonce,
+                },
+            )
+        })
+        .await
     }
 
     /// Update (rotate) an existing DID document.
@@ -284,20 +335,22 @@ impl ConsensusClient {
         current_public_key_id: &str,
         algorithm: SignatureAlgorithm,
     ) -> Result<String> {
-        let nonce = self.get_next_nonce(&new_did_document.id).await?;
-        self.update_did_with_nonce(
-            new_did_document,
-            current_private_key_hex,
-            current_public_key_id,
-            algorithm,
-            nonce,
-        )
+        self.submit_with_nonce(&new_did_document.id, |nonce| {
+            Self::update_did_transaction(
+                new_did_document,
+                current_private_key_hex,
+                current_public_key_id,
+                algorithm,
+                nonce,
+            )
+        })
         .await
     }
 
     /// Same as [`ConsensusClient::update_did`] with the nonce supplied instead
     /// of fetched. Lets a caller resolve the nonce, show the operator the exact
-    /// message that will be signed, and then submit that same message.
+    /// message that will be signed, and then submit that same message. The nonce is held for
+    /// this write in the client's tracker and settled by its outcome.
     pub async fn update_did_with_nonce(
         &self,
         new_did_document: &DidDocument,
@@ -306,26 +359,41 @@ impl ConsensusClient {
         algorithm: SignatureAlgorithm,
         nonce: u64,
     ) -> Result<String> {
+        let tx = Self::update_did_transaction(
+            new_did_document,
+            current_private_key_hex,
+            current_public_key_id,
+            algorithm,
+            nonce,
+        )?;
+        self.submit_with_given_nonce(&new_did_document.id, nonce, &tx)
+            .await
+    }
+
+    fn update_did_transaction(
+        new_did_document: &DidDocument,
+        current_private_key_hex: &str,
+        current_public_key_id: &str,
+        algorithm: SignatureAlgorithm,
+        nonce: u64,
+    ) -> Result<ChainTransaction> {
         let message = crate::did_rotation::update_did_signing_message(new_did_document, nonce)?;
         let signature_hex = sign_challenge(&message, current_private_key_hex, algorithm)?;
-        let signature_bytes = hex::decode(signature_hex)?;
-
-        let update_tx = UpdateDidTx {
-            did_document: new_did_document.clone(),
-            signature: signature_bytes,
-            public_key_id: current_public_key_id.to_string(),
-            nonce,
-        };
-
-        let tx_json = Self::serialize_tx("UpdateDid", &update_tx)?;
-        self.submit_transaction(&tx_json).await
+        Self::to_chain_transaction(
+            "UpdateDid",
+            &UpdateDidTx {
+                did_document: new_did_document.clone(),
+                signature: hex::decode(signature_hex)?,
+                public_key_id: current_public_key_id.to_string(),
+                nonce,
+            },
+        )
     }
 
     /// Read a DID document from chain state.
     ///
     /// Uses the REST API when one is configured and falls back to the CometBFT
-    /// RPC's ABCI store query, mirroring [`ConsensusClient::get_next_nonce`].
-    /// Both read the same GroveDB slot.
+    /// RPC's ABCI store query. Both read the same GroveDB slot, unproven.
     pub async fn get_did_document(&self, did: &str) -> Result<DidDocument> {
         if let Some(api_url) = self.api_url.as_ref() {
             let url = format!("{}/did/{}", api_url.trim_end_matches('/'), did);
@@ -408,25 +476,24 @@ impl ConsensusClient {
         public_key_id: &str,
         algorithm: SignatureAlgorithm,
     ) -> Result<String> {
-        let nonce = self.get_next_nonce(indexer_did).await?;
-        // Must match the canonical message format the chain handler verifies.
-        let message = format!(
-            "ClaimSubgroveIndexing\n{}\n{}\n{}",
-            subgrove_id, indexer_did, nonce,
-        );
-        let signature_hex = sign_challenge(&message, indexer_private_key_hex, algorithm)?;
-        let signature_bytes = hex::decode(signature_hex)?;
-
-        let claim_tx = ClaimSubgroveIndexingTx {
-            subgrove_id: subgrove_id.to_string(),
-            indexer_did: indexer_did.to_string(),
-            signature: signature_bytes,
-            public_key_id: public_key_id.to_string(),
-            nonce,
-        };
-
-        let tx_json = Self::serialize_tx("ClaimSubgroveIndexing", &claim_tx)?;
-        self.submit_transaction(&tx_json).await
+        self.submit_with_nonce(indexer_did, |nonce| {
+            // Must match the canonical message format the chain handler verifies.
+            let message = format!(
+                "ClaimSubgroveIndexing\n{}\n{}\n{}",
+                subgrove_id, indexer_did, nonce,
+            );
+            let signature_hex = sign_challenge(&message, indexer_private_key_hex, algorithm)?;
+            Ok(ChainTransaction::ClaimSubgroveIndexing(
+                ClaimSubgroveIndexingTx {
+                    subgrove_id: subgrove_id.to_string(),
+                    indexer_did: indexer_did.to_string(),
+                    signature: hex::decode(signature_hex)?,
+                    public_key_id: public_key_id.to_string(),
+                    nonce,
+                },
+            ))
+        })
+        .await
     }
 
     /// Transfer tokens through consensus
@@ -440,38 +507,33 @@ impl ConsensusClient {
         public_key_id: &str,
         algorithm: SignatureAlgorithm,
     ) -> Result<String> {
-        let nonce = self.get_next_nonce(from_did).await?;
-        let transfer_message = format!(
-            "Transfer\nFrom: {}\nTo: {}\nAmount: {}\nMemo: {}\nNonce: {}",
-            from_did,
-            to_did,
-            amount,
-            memo.as_ref().unwrap_or(&"".to_string()),
-            nonce
-        );
-
-        // Sign the message
-        let signature_hex = sign_challenge(&transfer_message, private_key_hex, algorithm)?;
-        let signature_bytes = hex::decode(signature_hex)?;
-
-        // Create transaction
-        let transfer_tx = TransferTx {
-            from_did: from_did.to_string(),
-            to_did: to_did.to_string(),
-            amount,
-            memo,
-            signature: signature_bytes,
-            public_key_id: public_key_id.to_string(),
-            nonce,
-        };
-
-        let tx_json = Self::serialize_tx("Transfer", &transfer_tx)?;
-        self.submit_transaction(&tx_json).await
+        self.submit_with_nonce(from_did, |nonce| {
+            let transfer_message = format!(
+                "Transfer\nFrom: {}\nTo: {}\nAmount: {}\nMemo: {}\nNonce: {}",
+                from_did,
+                to_did,
+                amount,
+                memo.as_deref().unwrap_or(""),
+                nonce
+            );
+            let signature_hex = sign_challenge(&transfer_message, private_key_hex, algorithm)?;
+            Ok(ChainTransaction::Transfer(TransferTx {
+                from_did: from_did.to_string(),
+                to_did: to_did.to_string(),
+                amount,
+                memo,
+                signature: hex::decode(signature_hex)?,
+                public_key_id: public_key_id.to_string(),
+                nonce,
+            }))
+        })
+        .await
     }
 
     /// Submit a raw JSON transaction to CometBFT.
     ///
-    /// This is a public wrapper around submit_transaction for CLI/external use.
+    /// This is a public wrapper around submit_transaction for CLI/external use. Its nonce is the
+    /// caller's: it neither takes one nor settles one in the client's tracker.
     pub async fn submit_raw_transaction(&self, transaction: serde_json::Value) -> Result<String> {
         let tx_json = serde_json::to_string(&transaction)?;
         self.submit_transaction(&tx_json).await
@@ -486,30 +548,108 @@ impl ConsensusClient {
         Ok(format!(r#"{{"{}":{}}}"#, variant_name, inner))
     }
 
-    /// Submit a transaction to CometBFT
-    /// Submit a pre-serialized transaction JSON string to CometBFT.
+    /// Submit a pre-serialized transaction JSON string to CometBFT. Its nonce is the caller's:
+    /// it neither takes one nor settles one in the client's tracker.
     pub async fn submit_transaction_json(&self, tx_json: &str) -> Result<String> {
         self.submit_transaction(tx_json).await
     }
 
     async fn submit_transaction(&self, tx_json: &str) -> Result<String> {
         // Convert JSON-encoded tx to the bincode wire format the validator expects.
-        let tx: willow_types::consensus::transactions::Transaction =
+        let tx: ChainTransaction =
             serde_json::from_str(tx_json).map_err(WillowError::Serialization)?;
         self.broadcast(&tx).await
     }
 
     /// Broadcast `tx` to CometBFT as the bincode the validator decodes, so the node reads the
     /// exact values the transaction was signed over.
-    pub(crate) async fn broadcast(
+    pub(crate) async fn broadcast(&self, tx: &ChainTransaction) -> Result<String> {
+        match self.submit_bytes(tx).await? {
+            Submission::Accepted(hash) => Ok(hash),
+            Submission::Refused { code, log } => Err(Self::refused(code, &log, None)),
+            Submission::Unknown(e) => Err(e),
+        }
+    }
+
+    /// Take a nonce for `did`, build the signed transaction under it with `build`, and submit
+    /// it, settling the nonce by the outcome. A build that fails gives the nonce back.
+    pub(crate) async fn submit_with_nonce<F>(&self, did: &str, build: F) -> Result<String>
+    where
+        F: FnOnce(u64) -> Result<ChainTransaction>,
+    {
+        let nonce = self.get_next_nonce(did).await?;
+        let tx = match build(nonce) {
+            Ok(tx) => tx,
+            Err(e) => {
+                self.nonces.release(did, nonce);
+                return Err(e);
+            }
+        };
+        self.submit_under(did, nonce, &tx).await
+    }
+
+    /// Submit `tx`, signed by `did` under a nonce the caller chose, holding the nonce in the
+    /// tracker and settling it by the outcome.
+    pub(crate) async fn submit_with_given_nonce(
         &self,
-        tx: &willow_types::consensus::transactions::Transaction,
+        did: &str,
+        nonce: u64,
+        tx: &ChainTransaction,
     ) -> Result<String> {
+        self.nonces.hold(did, nonce);
+        self.submit_under(did, nonce, tx).await
+    }
+
+    async fn submit_under(&self, did: &str, nonce: u64, tx: &ChainTransaction) -> Result<String> {
+        let submission = match self.submit_bytes(tx).await {
+            Ok(submission) => submission,
+            Err(e) => {
+                // Nothing was sent.
+                self.nonces.release(did, nonce);
+                return Err(e);
+            }
+        };
+        match submission {
+            Submission::Accepted(hash) => {
+                self.nonces.settle(did, nonce, NonceOutcome::Accepted);
+                Ok(hash)
+            }
+            Submission::Refused { code, log } => {
+                let outcome = refusal_outcome(&log, nonce);
+                self.nonces.settle(did, nonce, outcome);
+                Err(Self::refused(code, &log, Some(outcome)))
+            }
+            Submission::Unknown(e) => {
+                self.nonces.settle(did, nonce, NonceOutcome::Unknown);
+                Err(e)
+            }
+        }
+    }
+
+    fn refused(code: u32, log: &str, outcome: Option<NonceOutcome>) -> WillowError {
+        let note = match outcome {
+            Some(NonceOutcome::Used) => {
+                "; its nonce is used: a write refused this way may be one whose earlier attempt \
+                 landed, so read what it wrote before signing it again under a fresh nonce"
+            }
+            Some(NonceOutcome::Held) => {
+                "; a pending transaction holds its nonce: it is not given back until that one \
+                 lands or its hold lapses"
+            }
+            _ => "",
+        };
+        WillowError::Custom(format!(
+            "Transaction failed: {} (code: {}){}",
+            log, code, note
+        ))
+    }
+
+    /// Send `tx` to CometBFT's `broadcast_tx_sync`. `Err` only when nothing was sent.
+    async fn submit_bytes(&self, tx: &ChainTransaction) -> Result<Submission> {
         let tx_bytes = bincode::serialize(tx)
             .map_err(|e| WillowError::Custom(format!("bincode serialize transaction: {}", e)))?;
         let tx_base64 = base64::engine::general_purpose::STANDARD.encode(&tx_bytes);
 
-        // Create JSON-RPC request
         let rpc_request = json!({
             "jsonrpc": "2.0",
             "id": 1,
@@ -519,21 +659,41 @@ impl ConsensusClient {
             }
         });
 
-        // Submit to CometBFT
-        let response = self
+        let response = match self
             .http_client
             .post(&self.consensus_rpc_url)
             .json(&rpc_request)
             .send()
-            .await?;
+            .await
+        {
+            Ok(response) => response,
+            Err(e) if e.is_connect() || e.is_builder() => return Err(e.into()),
+            Err(e) => return Ok(Submission::Unknown(e.into())),
+        };
+        let response_text = match response.text().await {
+            Ok(text) => text,
+            Err(e) => return Ok(Submission::Unknown(e.into())),
+        };
+        let rpc_response: CometBftResponse = match serde_json::from_str(&response_text) {
+            Ok(r) => r,
+            Err(e) => return Ok(Submission::Unknown(WillowError::Serialization(e))),
+        };
 
-        let response_text = response.text().await?;
-        let rpc_response: CometBftResponse =
-            serde_json::from_str(&response_text).map_err(|e| WillowError::Serialization(e))?;
-
-        // Check for errors
         if let Some(error) = rpc_response.error {
-            return Err(WillowError::Custom(format!(
+            let detail = error.data.clone().unwrap_or_default();
+            // CometBFT already holds these exact bytes (pending, or committed recently): the
+            // copy CheckTx admitted is this transaction.
+            if detail.trim_end().ends_with("tx already exists in cache")
+                || error
+                    .message
+                    .trim_end()
+                    .ends_with("tx already exists in cache")
+            {
+                return Ok(Submission::Accepted(hex::encode_upper(Sha256::digest(
+                    &tx_bytes,
+                ))));
+            }
+            return Ok(Submission::Unknown(WillowError::Custom(format!(
                 "CometBFT error: {} ({}){}",
                 error.message,
                 error.code,
@@ -542,20 +702,18 @@ impl ConsensusClient {
                     .as_ref()
                     .map(|d| format!(": {}", d))
                     .unwrap_or_default()
-            )));
+            ))));
         }
 
-        // Check result
-        if let Some(result) = rpc_response.result {
-            if result.code != 0 {
-                return Err(WillowError::Custom(format!(
-                    "Transaction failed: {} (code: {})",
-                    result.log, result.code
-                )));
-            }
-            Ok(result.hash)
-        } else {
-            Err(WillowError::Custom("No result in response".to_string()))
+        match rpc_response.result {
+            Some(result) if result.code != 0 => Ok(Submission::Refused {
+                code: result.code,
+                log: result.log,
+            }),
+            Some(result) => Ok(Submission::Accepted(result.hash)),
+            None => Ok(Submission::Unknown(WillowError::Custom(
+                "No result in response".to_string(),
+            ))),
         }
     }
 
@@ -675,16 +833,16 @@ impl ConsensusClient {
 
     /// Register a DataStorage subgrove using SigningKey.
     ///
-    /// Fetches the nonce, then signs [`signed_messages::register_subgrove`] over the transaction
+    /// Takes the nonce, then signs [`signed_messages::register_subgrove`] over the transaction
     /// it sends (`request.nonce` and `request.signature` are ignored). Every field is sent
     /// explicitly: no read pricing, privacy, TEE requirement, or template, a confirmation depth
-    /// of 0, and no cryptographic completeness.
+    /// of 0, and no cryptographic completeness. A registration the node's registration rules
+    /// refuse ([`signed_messages::check_register_subgrove`]) is refused before signing.
     pub async fn register_subgrove(
         &self,
         request: RegisterSubgroveRequest,
         signing_key: &SigningKey,
     ) -> Result<String> {
-        let nonce = self.get_next_nonce(&request.owner_did).await?;
         let schema = match &request.schema {
             Some(schema) => serde_json::to_string(schema)?,
             None => "{}".to_string(),
@@ -710,7 +868,7 @@ impl ConsensusClient {
             confirmation_depth: 0,
             signature: vec![],
             public_key_id: request.public_key_id,
-            nonce,
+            nonce: 0,
             cryptographic_completeness: false,
         };
         self.sign_and_register(register_tx, signing_key).await
@@ -734,7 +892,6 @@ impl ConsensusClient {
         signing_key: &SigningKey,
         initial_funding: Option<u128>,
     ) -> Result<String> {
-        let nonce = self.get_next_nonce(owner_did).await?;
         let register_tx = RegisterSubgroveTx {
             subgrove_id: subgrove_id.to_string(),
             name: name.to_string(),
@@ -759,30 +916,36 @@ impl ConsensusClient {
             confirmation_depth: 0,
             signature: vec![],
             public_key_id: public_key_id.to_string(),
-            nonce,
+            nonce: 0,
             cryptographic_completeness: false,
         };
         self.sign_and_register(register_tx, signing_key).await
     }
 
-    /// Sign `tx` (its nonce already chosen) over [`signed_messages::register_subgrove`] and
-    /// broadcast exactly the transaction whose bincode the `Config` line hashes.
+    /// Check `tx` against the registration rules, take its owner's nonce, sign
+    /// [`signed_messages::register_subgrove`] over it, and broadcast exactly the transaction whose
+    /// bincode the `Config` line hashes.
     async fn sign_and_register(
         &self,
-        mut tx: RegisterSubgroveTx,
+        tx: RegisterSubgroveTx,
         signing_key: &SigningKey,
     ) -> Result<String> {
-        let message = signed_messages::register_subgrove(&tx)?;
-        tx.signature = signing_key.sign(message.as_bytes()).to_bytes().to_vec();
-        self.broadcast(&willow_types::consensus::transactions::Transaction::RegisterSubgrove(tx))
-            .await
+        signed_messages::check_register_subgrove(&tx)?;
+        let owner = tx.owner_did.clone();
+        self.submit_with_nonce(&owner, |nonce| {
+            let mut tx = RegisterSubgroveTx { nonce, ..tx };
+            let message = signed_messages::register_subgrove(&tx)?;
+            tx.signature = signing_key.sign(message.as_bytes()).to_bytes().to_vec();
+            Ok(ChainTransaction::RegisterSubgrove(tx))
+        })
+        .await
     }
 
     /// Register a blockchain indexing subgrove from a definition file.
     ///
     /// Builds the transaction with
     /// [`SubgroveDefinition::register_transaction`](crate::subgrove_config::SubgroveDefinition::register_transaction),
-    /// signs [`signed_messages::register_subgrove`] over it with the nonce fetched here, and
+    /// signs [`signed_messages::register_subgrove`] over it with the nonce taken here, and
     /// submits it. This is the simplest way to deploy a predefined subgrove.
     ///
     /// # Example
@@ -815,41 +978,42 @@ impl ConsensusClient {
         signing_key: &SigningKey,
         initial_funding: Option<u128>,
     ) -> Result<String> {
-        let nonce = self.get_next_nonce(owner_did).await?;
         let register_tx =
-            definition.register_transaction(owner_did, public_key_id, nonce, initial_funding)?;
+            definition.register_transaction(owner_did, public_key_id, 0, initial_funding)?;
         self.sign_and_register(register_tx, signing_key).await
     }
 
     /// Store data using SigningKey.
     ///
     /// `request.data` is sent as its JSON text, and the transaction is signed over
-    /// [`signed_messages::store_data`] with the nonce fetched here (`request.nonce` and
+    /// [`signed_messages::store_data`] with the nonce taken here (`request.nonce` and
     /// `request.signature` are ignored).
     pub async fn store_data(
         &self,
         request: StoreDataRequest,
         signing_key: &SigningKey,
     ) -> Result<String> {
-        let nonce = self.get_next_nonce(&request.owner_did).await?;
-        let mut tx = StoreDataTx {
-            subgrove_id: request.subgrove_id,
-            key: request.key,
-            data: serde_json::to_vec(&request.data)?,
-            owner_did: request.owner_did,
-            signature: vec![],
-            public_key_id: request.public_key_id,
-            nonce,
-        };
-        let message = signed_messages::store_data(&tx)?;
-        tx.signature = signing_key.sign(message.as_bytes()).to_bytes().to_vec();
-
-        let tx_json = Self::serialize_tx("StoreData", &tx)?;
-        self.submit_transaction(&tx_json).await
+        let data = serde_json::to_vec(&request.data)?;
+        let owner = request.owner_did.clone();
+        self.submit_with_nonce(&owner, |nonce| {
+            let mut tx = StoreDataTx {
+                subgrove_id: request.subgrove_id,
+                key: request.key,
+                data,
+                owner_did: request.owner_did,
+                signature: vec![],
+                public_key_id: request.public_key_id,
+                nonce,
+            };
+            let message = signed_messages::store_data(&tx)?;
+            tx.signature = signing_key.sign(message.as_bytes()).to_bytes().to_vec();
+            Ok(ChainTransaction::StoreData(tx))
+        })
+        .await
     }
 
     /// Delete data using SigningKey, signed over [`signed_messages::delete_data`] with the
-    /// nonce fetched here.
+    /// nonce taken here.
     pub async fn delete_data(
         &self,
         subgrove_id: &str,
@@ -858,74 +1022,72 @@ impl ConsensusClient {
         public_key_id: &str,
         signing_key: &SigningKey,
     ) -> Result<String> {
-        let nonce = self.get_next_nonce(owner_did).await?;
-        let mut delete_tx = DeleteDataTx {
-            subgrove_id: subgrove_id.to_string(),
-            key: key.to_string(),
-            owner_did: owner_did.to_string(),
-            signature: vec![],
-            public_key_id: public_key_id.to_string(),
-            nonce,
-        };
-        let message = signed_messages::delete_data(&delete_tx)?;
-        delete_tx.signature = signing_key.sign(message.as_bytes()).to_bytes().to_vec();
-
-        let tx_json = Self::serialize_tx("DeleteData", &delete_tx)?;
-        self.submit_transaction(&tx_json).await
+        self.submit_with_nonce(owner_did, |nonce| {
+            let mut tx = DeleteDataTx {
+                subgrove_id: subgrove_id.to_string(),
+                key: key.to_string(),
+                owner_did: owner_did.to_string(),
+                signature: vec![],
+                public_key_id: public_key_id.to_string(),
+                nonce,
+            };
+            let message = signed_messages::delete_data(&tx)?;
+            tx.signature = signing_key.sign(message.as_bytes()).to_bytes().to_vec();
+            Ok(ChainTransaction::DeleteData(tx))
+        })
+        .await
     }
 
-    /// Fund a subgrove using SigningKey
+    /// Fund a subgrove using SigningKey, with the nonce taken here (`request.nonce` and
+    /// `request.signature` are ignored).
     pub async fn fund_subgrove(
         &self,
-        mut request: crate::types::FundSubgroveRequest,
+        request: crate::types::FundSubgroveRequest,
         signing_key: &SigningKey,
     ) -> Result<String> {
-        request.nonce = self.get_next_nonce(&request.from_did).await?;
-        let signing_payload = format!(
-            "FundSubgrove\nSubgrove: {}\nAmount: {}\nFrom: {}\nNonce: {}",
-            request.subgrove_id, request.amount, request.from_did, request.nonce
-        );
-
-        // Sign with Ed25519 key
-        let signature = signing_key.sign(signing_payload.as_bytes());
-
-        let fund_tx = FundSubgroveTx {
-            subgrove_id: request.subgrove_id,
-            amount: request.amount,
-            from_did: request.from_did,
-            signature: signature.to_bytes().to_vec(),
-            public_key_id: request.public_key_id,
-            nonce: request.nonce,
-        };
-        let tx_json = Self::serialize_tx("FundSubgrove", &fund_tx)?;
-        self.submit_transaction(&tx_json).await
+        let from = request.from_did.clone();
+        self.submit_with_nonce(&from, |nonce| {
+            let signing_payload = format!(
+                "FundSubgrove\nSubgrove: {}\nAmount: {}\nFrom: {}\nNonce: {}",
+                request.subgrove_id, request.amount, request.from_did, nonce
+            );
+            let signature = signing_key.sign(signing_payload.as_bytes());
+            Ok(ChainTransaction::FundSubgrove(FundSubgroveTx {
+                subgrove_id: request.subgrove_id,
+                amount: request.amount,
+                from_did: request.from_did,
+                signature: signature.to_bytes().to_vec(),
+                public_key_id: request.public_key_id,
+                nonce,
+            }))
+        })
+        .await
     }
 
-    /// Deregister (delete) a subgrove using SigningKey.
+    /// Deregister (delete) a subgrove using SigningKey, with the nonce taken here.
     ///
     /// Remaining subgrove funding balance is refunded to the owner.
     pub async fn deregister_subgrove(
         &self,
-        mut request: crate::types::DeregisterSubgroveRequest,
+        request: crate::types::DeregisterSubgroveRequest,
         signing_key: &SigningKey,
     ) -> Result<String> {
-        request.nonce = self.get_next_nonce(&request.owner_did).await?;
-        let signing_payload = format!(
-            "DeregisterSubgrove:{}:{}:{}",
-            request.subgrove_id, request.owner_did, request.nonce
-        );
-
-        let signature = signing_key.sign(signing_payload.as_bytes());
-
-        let deregister_tx = DeregisterSubgroveTx {
-            subgrove_id: request.subgrove_id,
-            owner_did: request.owner_did,
-            signature: signature.to_bytes().to_vec(),
-            public_key_id: request.public_key_id,
-            nonce: request.nonce,
-        };
-        let tx_json = Self::serialize_tx("DeregisterSubgrove", &deregister_tx)?;
-        self.submit_transaction(&tx_json).await
+        let owner = request.owner_did.clone();
+        self.submit_with_nonce(&owner, |nonce| {
+            let signing_payload = format!(
+                "DeregisterSubgrove:{}:{}:{}",
+                request.subgrove_id, request.owner_did, nonce
+            );
+            let signature = signing_key.sign(signing_payload.as_bytes());
+            Ok(ChainTransaction::DeregisterSubgrove(DeregisterSubgroveTx {
+                subgrove_id: request.subgrove_id,
+                owner_did: request.owner_did,
+                signature: signature.to_bytes().to_vec(),
+                public_key_id: request.public_key_id,
+                nonce,
+            }))
+        })
+        .await
     }
 
     /// Get transaction result

@@ -138,7 +138,10 @@ impl PrivacyOperations {
     /// Submit a GrantSubgroveKey transaction via consensus.
     ///
     /// Grants the specified DID access to the subgrove's encryption key. Signed over
-    /// [`signed_messages::grant_subgrove_key`], which binds every field of the grant and `nonce`.
+    /// [`signed_messages::grant_subgrove_key`], which binds every field of the grant and `nonce`;
+    /// a grantee that isn't a DID is refused before signing. `nonce` is held for this write in the
+    /// client's nonce tracker and settled by its outcome; take one with
+    /// [`crate::consensus::ConsensusClient::get_next_nonce`].
     pub async fn grant_subgrove_key(
         &self,
         subgrove_id: &str,
@@ -160,14 +163,15 @@ impl PrivacyOperations {
         let message = signed_messages::grant_subgrove_key(&tx)?;
         tx.signature = signing_key.sign(message.as_bytes()).to_bytes().to_vec();
         consensus
-            .broadcast(&Transaction::GrantSubgroveKey(tx))
+            .submit_with_given_nonce(sender_did, nonce, &Transaction::GrantSubgroveKey(tx))
             .await
     }
 
     /// Submit a RevokeSubgroveKey transaction via consensus.
     ///
     /// Revokes the specified DID's access to the subgrove's encryption key. Signed over
-    /// [`signed_messages::revoke_subgrove_key`].
+    /// [`signed_messages::revoke_subgrove_key`]; a subgrove ID holding `:`, or a revokee or sender
+    /// that isn't a DID, is refused before signing. `nonce` is held and settled as for a grant.
     pub async fn revoke_subgrove_key(
         &self,
         subgrove_id: &str,
@@ -189,7 +193,7 @@ impl PrivacyOperations {
         let message = signed_messages::revoke_subgrove_key(&tx)?;
         tx.signature = signing_key.sign(message.as_bytes()).to_bytes().to_vec();
         consensus
-            .broadcast(&Transaction::RevokeSubgroveKey(tx))
+            .submit_with_given_nonce(sender_did, nonce, &Transaction::RevokeSubgroveKey(tx))
             .await
     }
 
@@ -197,7 +201,8 @@ impl PrivacyOperations {
     ///
     /// Rotates the subgrove encryption key to a new epoch with new grants. Signed over
     /// [`signed_messages::rotate_subgrove_key`], which binds every grant, their count and order,
-    /// and `nonce`.
+    /// and `nonce`. No grants, a grant at another key epoch than `new_epoch`, or a grantee that
+    /// isn't a DID is refused before signing. `nonce` is held and settled as for a grant.
     pub async fn rotate_subgrove_key(
         &self,
         subgrove_id: &str,
@@ -221,7 +226,7 @@ impl PrivacyOperations {
         let message = signed_messages::rotate_subgrove_key(&tx)?;
         tx.signature = signing_key.sign(message.as_bytes()).to_bytes().to_vec();
         consensus
-            .broadcast(&Transaction::RotateSubgroveKey(tx))
+            .submit_with_given_nonce(sender_did, nonce, &Transaction::RotateSubgroveKey(tx))
             .await
     }
 }

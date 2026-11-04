@@ -3,14 +3,15 @@
 //! The SDK's `graphql_query` / `sql_query` methods take a [`QuerySource`]
 //! telling the routing layer where the caller wants data served from:
 //!
-//! - [`QuerySource::Validator`]: consensus-verified chain-tip. Every row is
-//!   Merkle-provable. Fails fast for `VerifyOnly` subgroves (validator never
-//!   stored the data).
-//! - [`QuerySource::Indexer`]: full history + analytics. Trust is
-//!   sampling/dispute based.
+//! - [`QuerySource::Validator`]: the chain-tip data the validator stores. Fails
+//!   fast for `VerifyOnly` subgroves (validator never stored the data).
+//! - [`QuerySource::Indexer`]: full history + analytics.
 //! - [`QuerySource::Auto`] (default): indexer when one serves this subgrove,
 //!   otherwise validator. On indexer failure, falls back to validator and
 //!   sets `fallback: true` in the result.
+//!
+//! Whichever answers, the routed GraphQL and SQL answers are returned
+//! unverified: they ask for no proof, and none is checked.
 //!
 //! The [`WillowIndexers`] client wraps the validator's `GET /indexers`
 //! endpoint with a 30s in-memory cache. When the client is constructed with
@@ -52,7 +53,7 @@ use url::Url;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum QuerySource {
-    /// Consensus-verified chain-tip. Fails fast for `VerifyOnly` subgroves.
+    /// The validator's chain-tip data. Fails fast for `VerifyOnly` subgroves.
     Validator,
     /// Full history + analytics via an indexer. Fails if none registered.
     Indexer,

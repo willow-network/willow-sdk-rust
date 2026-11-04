@@ -10,15 +10,19 @@
 //! A subgrove registration signs `Subgrove`, `Owner`, `Config`, and `Nonce`, where `Config` is
 //! the SHA-256 of the whole [`RegisterSubgroveTx`]'s bincode (bincode 1.x default) with an empty
 //! signature ([`register_subgrove_config`]), so every field and mode setting is bound. The
-//! builders for key grants, key rotations, and storage-node removals are the node's own, from
-//! `willow_types::consensus::signed_messages`.
+//! builders for registrations, key grants, key rotations, and storage-node removals are the
+//! node's own, from `willow_types::consensus::signed_messages`.
 //!
-//! A text field holding the byte 0x0A is refused, as the node refuses it. A write the node
-//! refuses in its block after its signature and nonce verify still spends its nonce, so a retry
-//! signs again under the next free nonce.
+//! A text field holding the byte 0x0A is refused, as the node refuses it, and so is a
+//! transaction the node would refuse for its fields whatever its signature: a registration the
+//! registration rules refuse ([`check_register_subgrove`]), a grant or rotation whose grantee
+//! isn't a DID, a rotation with no grants or a grant at another key epoch, and a revoke that
+//! could split another way. A write the node refuses in its block after its signature and nonce
+//! verify still spends its nonce, so a retry signs again under the next free nonce.
 
 use crate::errors::{Result, WillowError};
 use sha2::{Digest, Sha256};
+use willow_types::consensus::indexing_transactions::SubgroveMode;
 use willow_types::consensus::signed_messages as forms;
 
 pub use willow_types::consensus::transactions::{
@@ -140,35 +144,127 @@ pub fn register_subgrove_unsigned_bincode(tx: &RegisterSubgroveTx) -> Result<Vec
         .map_err(|e| WillowError::Custom(format!("Failed to encode the registration: {e}")))
 }
 
-/// The SHA-256 of [`register_subgrove_unsigned_bincode`].
+/// The SHA-256 of [`register_subgrove_unsigned_bincode`]
+/// (`willow_types::consensus::signed_messages::subgrove_config`).
 pub fn register_subgrove_config(tx: &RegisterSubgroveTx) -> Result<[u8; 32]> {
-    Ok(Sha256::digest(register_subgrove_unsigned_bincode(tx)?).into())
+    forms::subgrove_config(tx).map_err(WillowError::Validation)
 }
 
 /// `RegisterSubgrove`, `Subgrove`, `Owner`, `Config` ([`register_subgrove_config`], lowercase
-/// hex), `Nonce`. Every mode is signed this way.
+/// hex), `Nonce` (`willow_types::consensus::signed_messages::register_subgrove`). Every mode is
+/// signed this way.
 pub fn register_subgrove(tx: &RegisterSubgroveTx) -> Result<String> {
-    Ok([
-        "RegisterSubgrove".to_string(),
-        field("Subgrove", &tx.subgrove_id)?,
-        field("Owner", &tx.owner_did)?,
-        format!("Config: {}", hex::encode(register_subgrove_config(tx)?)),
-        format!("Nonce: {}", tx.nonce),
-    ]
-    .join("\n"))
+    forms::register_subgrove(tx).map_err(WillowError::Validation)
+}
+
+/// The longest subgrove ID the node accepts for a data or file subgrove.
+pub const MAX_SUBGROVE_ID_LEN: usize = 64;
+
+/// The registration rules the node applies whatever the signature, so a registration they refuse
+/// is refused before it is signed:
+///
+/// - a DataStorage or FileStorage registration needs a subgrove ID of 1 to 64 ASCII letters,
+///   digits, `-`, or `_`, starting with a letter or digit; admins, writers, and free readers that
+///   are DIDs (`did:willow:` then letters, digits, `-`, or `_`, at most 128 bytes); and a `schema`
+///   that parses as the node's `SchemaDefinition` and declares no indexes;
+/// - a private DataStorage registration's `initial_owner_key_grant` must be key epoch 0, granted
+///   to the owner, a DID.
+pub fn check_register_subgrove(tx: &RegisterSubgroveTx) -> Result<()> {
+    let refuse = |m: String| Err(WillowError::Validation(m));
+    let (writers, free_readers) = match &tx.mode {
+        SubgroveMode::DataStorage {
+            writers,
+            free_readers,
+            ..
+        }
+        | SubgroveMode::FileStorage {
+            writers,
+            free_readers,
+            ..
+        } => (writers, free_readers),
+        SubgroveMode::BlockchainIndexing { .. } => return Ok(()),
+    };
+    let id = &tx.subgrove_id;
+    let id_ok = !id.is_empty()
+        && id.len() <= MAX_SUBGROVE_ID_LEN
+        && id.bytes().next().is_some_and(|b| b.is_ascii_alphanumeric())
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    if !id_ok {
+        return refuse(format!(
+            "Invalid subgrove_id {id:?}: 1 to {MAX_SUBGROVE_ID_LEN} ASCII letters, digits, '-', or \
+             '_', starting with a letter or digit"
+        ));
+    }
+    for admin in &tx.admins {
+        validate_did(admin, "admin")?;
+    }
+    for writer in writers {
+        validate_did(writer, "writer")?;
+    }
+    for reader in free_readers {
+        validate_did(reader, "free reader")?;
+    }
+    match serde_json::from_str::<willow_types::storage::types::SchemaDefinition>(&tx.schema) {
+        Err(e) => {
+            return refuse(format!(
+                "schema doesn't parse as the node's SchemaDefinition: {e}"
+            ))
+        }
+        Ok(schema) if !schema.indexes.is_empty() => {
+            return refuse("Schema indexes are not supported".to_string())
+        }
+        Ok(_) => {}
+    }
+    if let (SubgroveMode::DataStorage { .. }, Some(_), Some(grant)) =
+        (&tx.mode, &tx.privacy, &tx.initial_owner_key_grant)
+    {
+        if grant.key_epoch != 0 {
+            return refuse(format!(
+                "initial_owner_key_grant key_epoch must be 0, got {}",
+                grant.key_epoch
+            ));
+        }
+        if grant.grantee_did != tx.owner_did {
+            return refuse("initial_owner_key_grant must grant the owner".to_string());
+        }
+        validate_did(&grant.grantee_did, "grantee_did")?;
+    }
+    Ok(())
 }
 
 /// `GrantSubgroveKey`, `Subgrove`, `Sender`, then every field of the grant (`Grantee`,
 /// `GranteeKey`, `KeyEpoch`, `EphemeralKey` and `EncryptedKey` as lowercase hex, `GrantedBy`,
-/// `GrantedAt`), `Nonce`.
+/// `GrantedAt`), `Nonce`. A grantee that isn't a `did:willow:` DID of letters, digits, `-`, and
+/// `_` is refused, as the node refuses it (so a revoke can remove it).
 pub fn grant_subgrove_key(tx: &GrantSubgroveKeyTx) -> Result<String> {
-    forms::grant_subgrove_key(tx).map_err(WillowError::Validation)
+    let message = forms::grant_subgrove_key(tx).map_err(WillowError::Validation)?;
+    validate_did(&tx.encrypted_key_grant.grantee_did, "grantee_did")?;
+    Ok(message)
 }
 
 /// `RotateSubgroveKey`, `Subgrove`, `Sender`, `NewEpoch`, `Grants` (the count), each grant's
-/// seven lines in order (as in [`grant_subgrove_key`]), `Nonce`.
+/// seven lines in order (as in [`grant_subgrove_key`]), `Nonce`. A rotation with no grants, a
+/// grant at another key epoch than `new_epoch`, or a grantee that isn't a DID is refused, as the
+/// node refuses it.
 pub fn rotate_subgrove_key(tx: &RotateSubgroveKeyTx) -> Result<String> {
-    forms::rotate_subgrove_key(tx).map_err(WillowError::Validation)
+    let message = forms::rotate_subgrove_key(tx).map_err(WillowError::Validation)?;
+    if tx.new_grants.is_empty() {
+        return Err(WillowError::Validation(
+            "a key rotation needs at least one grant".to_string(),
+        ));
+    }
+    for grant in &tx.new_grants {
+        if grant.key_epoch != tx.new_epoch {
+            return Err(WillowError::Validation(format!(
+                "Grant for {} has key_epoch {}, expected {}",
+                grant.grantee_did, grant.key_epoch, tx.new_epoch
+            )));
+        }
+        validate_did(&grant.grantee_did, "grantee_did")?;
+    }
+    Ok(message)
 }
 
 /// `RevokeSubgroveKey:{subgrove_id}:{revokee_did}:{sender_did}:{nonce}`. It binds every field;
@@ -529,10 +625,26 @@ mod tests {
         .is_ok());
     }
 
-    /// An API and CometBFT RPC that hand out `base + 1` as the next nonce, accept every tx,
-    /// report it in a block, and take every chunk.
+    /// The ABCI answer to `/store/account_nonce_state/{did}`: `base`, and `used` above it.
+    fn nonce_state(base: u64, used: &[u64]) -> serde_json::Value {
+        let bits: u32 = used.iter().fold(0, |b, n| b | 1 << (n - base - 1));
+        let mut value = base.to_be_bytes().to_vec();
+        value.extend_from_slice(&bits.to_le_bytes()[..3]);
+        json!({"jsonrpc": "2.0", "id": 1, "result": {"response": {
+            "code": 0,
+            "value": base64::engine::general_purpose::STANDARD.encode(value)
+        }}})
+    }
+
+    /// An API and CometBFT RPC whose nonce state for every account is `base` with nothing used
+    /// above it, that accept every tx, report it in a block, and take every chunk.
     async fn mock_chain(base: u64) -> MockServer {
         let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(body_partial_json(json!({"method": "abci_query"})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(nonce_state(base, &[])))
+            .mount(&server)
+            .await;
         Mock::given(method("GET"))
             .and(path_regex(r"^/account/[^/]+/nonce$"))
             .respond_with(
@@ -1247,11 +1359,15 @@ events = ["Swap(address,address,int256)"]
             )
             .await
             .unwrap();
+        let at_epoch_2 = |grantee: &str| EncryptedKeyGrant {
+            key_epoch: 2,
+            ..key_grant(grantee)
+        };
         privacy
             .rotate_subgrove_key(
                 "private-1",
                 2,
-                vec![key_grant("did:willow:a"), key_grant("did:willow:b")],
+                vec![at_epoch_2("did:willow:a"), at_epoch_2("did:willow:b")],
                 OWNER,
                 &seed_key(),
                 KEY_ID,
@@ -1411,5 +1527,398 @@ events = ["Swap(address,address,int256)"]
             .await
             .unwrap_err();
         assert!(matches!(err, WillowError::Config(_)), "{err}");
+    }
+
+    /// A key grant or rotation to a grantee that isn't a DID, a rotation with no grants or a
+    /// grant at another epoch, are refused before signing.
+    #[test]
+    fn grants_and_rotations_the_node_refuses_are_refused() {
+        let grant = |grantee: &str| GrantSubgroveKeyTx {
+            subgrove_id: "private-1".into(),
+            encrypted_key_grant: key_grant(grantee),
+            sender_did: OWNER.into(),
+            signature: vec![],
+            public_key_id: KEY_ID.into(),
+            nonce: 5,
+        };
+        assert!(grant_subgrove_key(&grant("did:willow:b")).is_ok());
+        for grantee in [
+            "did:other:b",
+            "did:willow:",
+            "did:willow:b:c",
+            "did:willow:b c",
+        ] {
+            assert!(
+                matches!(
+                    grant_subgrove_key(&grant(grantee)),
+                    Err(WillowError::Validation(_))
+                ),
+                "{grantee}"
+            );
+        }
+        let rotation = |grants: Vec<EncryptedKeyGrant>| RotateSubgroveKeyTx {
+            subgrove_id: "private-1".into(),
+            new_epoch: 1,
+            new_grants: grants,
+            sender_did: OWNER.into(),
+            signature: vec![],
+            public_key_id: KEY_ID.into(),
+            nonce: 6,
+        };
+        assert!(rotate_subgrove_key(&rotation(vec![key_grant("did:willow:b")])).is_ok());
+        for grants in [
+            vec![],
+            vec![EncryptedKeyGrant {
+                key_epoch: 2,
+                ..key_grant("did:willow:b")
+            }],
+            vec![key_grant("did:willow:b"), key_grant("did:x:c")],
+        ] {
+            assert!(
+                matches!(
+                    rotate_subgrove_key(&rotation(grants.clone())),
+                    Err(WillowError::Validation(_))
+                ),
+                "{grants:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn registrations_the_node_refuses_are_refused() {
+        assert!(check_register_subgrove(&registration()).is_ok());
+        let schema = |s: &str| RegisterSubgroveTx {
+            schema: s.into(),
+            ..registration()
+        };
+        assert!(check_register_subgrove(&schema(
+            r#"{"version": 1, "fields": {"title": "string", "n": "number"}, "indexes": [], "required_fields": ["title"], "extra": 1}"#
+        ))
+        .is_ok());
+        let with_mode = |writers: Vec<String>, free_readers: Vec<String>| RegisterSubgroveTx {
+            mode: SubgroveMode::DataStorage {
+                name: "Notes".into(),
+                writers,
+                free_readers,
+                read_pricing: None,
+            },
+            ..registration()
+        };
+        let private_grant = |grant: EncryptedKeyGrant| RegisterSubgroveTx {
+            privacy: Some(willow_types::storage::PrivacyConfig {
+                allowed_indexers: None,
+                commitment_frequency: willow_types::storage::CommitmentFrequency::Never,
+            }),
+            initial_owner_key_grant: Some(grant),
+            ..registration()
+        };
+        let owner_grant = EncryptedKeyGrant {
+            key_epoch: 0,
+            ..key_grant(OWNER)
+        };
+        assert!(check_register_subgrove(&private_grant(owner_grant.clone())).is_ok());
+        for (tx, what) in [
+            (
+                RegisterSubgroveTx {
+                    subgrove_id: "-notes".into(),
+                    ..registration()
+                },
+                "an id starting with '-'",
+            ),
+            (
+                RegisterSubgroveTx {
+                    subgrove_id: "notes.1".into(),
+                    ..registration()
+                },
+                "an id holding '.'",
+            ),
+            (
+                RegisterSubgroveTx {
+                    subgrove_id: "n".repeat(65),
+                    ..registration()
+                },
+                "a 65-byte id",
+            ),
+            (
+                RegisterSubgroveTx {
+                    subgrove_id: String::new(),
+                    ..registration()
+                },
+                "an empty id",
+            ),
+            (
+                schema(
+                    r#"{"indexes": [{"name": "by_title", "fields": ["title"], "unique": false}]}"#,
+                ),
+                "schema indexes",
+            ),
+            (schema("type Note { id: ID! }"), "a schema that isn't JSON"),
+            (
+                schema(r#"{"fields": {"title": "text"}}"#),
+                "an unknown field type",
+            ),
+            (
+                RegisterSubgroveTx {
+                    admins: vec!["did:other:b".into()],
+                    ..registration()
+                },
+                "a non-DID admin",
+            ),
+            (
+                with_mode(vec!["did:willow:b:c".into()], vec![]),
+                "a non-DID writer",
+            ),
+            (
+                with_mode(vec![], vec!["did:willow:".into()]),
+                "a non-DID free reader",
+            ),
+            (
+                private_grant(EncryptedKeyGrant {
+                    key_epoch: 1,
+                    ..owner_grant.clone()
+                }),
+                "an initial grant at epoch 1",
+            ),
+            (
+                private_grant(EncryptedKeyGrant {
+                    key_epoch: 0,
+                    ..key_grant("did:willow:b")
+                }),
+                "an initial grant to someone else",
+            ),
+        ] {
+            assert!(
+                matches!(
+                    check_register_subgrove(&tx),
+                    Err(WillowError::Validation(_))
+                ),
+                "{what}"
+            );
+        }
+        // A blockchain-indexing registration's id and schema follow other rules.
+        let indexing = SubgroveDefinition::from_toml(
+            r#"
+subgrove_id = "idx-1"
+description = "Swaps"
+execution_mode = "IndexerExecution"
+sampling_rate_percent = 10
+schema = "type Swap @entity { id: ID! }"
+
+[manifest]
+spec_version = "1.0.0"
+description = "Swaps"
+
+[[manifest.data_sources]]
+name = "Pool"
+network = "mainnet"
+address = "0x1234567890abcdef1234567890abcdef12345678"
+abi = "Pool"
+start_block = 1
+events = ["Swap(address,address,int256)"]
+"#,
+        )
+        .unwrap()
+        .register_transaction(OWNER, KEY_ID, 1, None)
+        .unwrap();
+        assert!(check_register_subgrove(&indexing).is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_refused_registration_takes_no_nonce_and_sends_nothing() {
+        let server = mock_chain(3).await;
+        let consensus = ConsensusClient::new_with_api(&server.uri(), &server.uri());
+        let request = RegisterSubgroveRequest {
+            subgrove_id: "notes-1".into(),
+            name: "Notes".into(),
+            description: String::new(),
+            schema: None,
+            owner_did: OWNER.into(),
+            admins: vec!["not-a-did".into()],
+            initial_funding: None,
+            writers: vec![],
+            readers: vec![],
+            signature: vec![],
+            public_key_id: KEY_ID.into(),
+            nonce: 0,
+        };
+        let err = consensus
+            .register_subgrove(request, &seed_key())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, WillowError::Validation(_)), "{err}");
+        assert!(server.received_requests().await.unwrap().is_empty());
+        assert!(!consensus.nonce_tracker().is_held(OWNER, 4));
+    }
+
+    /// A chain whose nonce state is `state`, and whose CheckTx answers each submission in turn
+    /// with `answers` (a `(code, log)`), then accepts.
+    async fn refusing_chain(state: serde_json::Value, answers: Vec<(u32, String)>) -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(body_partial_json(json!({"method": "abci_query"})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(state))
+            .mount(&server)
+            .await;
+        for (code, log) in answers {
+            Mock::given(method("POST"))
+                .and(body_partial_json(json!({"method": "broadcast_tx_sync"})))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "jsonrpc": "2.0", "id": 1,
+                    "result": {"code": code, "data": "", "log": log, "hash": "ABCD"}
+                })))
+                .up_to_n_times(1)
+                .mount(&server)
+                .await;
+        }
+        Mock::given(method("POST"))
+            .and(body_partial_json(json!({"method": "broadcast_tx_sync"})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "jsonrpc": "2.0", "id": 1,
+                "result": {"code": 0, "data": "", "log": "", "hash": "ABCD"}
+            })))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    fn store_request(key: &str) -> StoreDataRequest {
+        StoreDataRequest {
+            subgrove_id: "sg-1".into(),
+            key: key.into(),
+            data: json!({"k": key}),
+            owner_did: OWNER.into(),
+            signature: vec![],
+            public_key_id: KEY_ID.into(),
+            nonce: 0,
+        }
+    }
+
+    fn nonces_sent(sent: &[Transaction]) -> Vec<u64> {
+        sent.iter()
+            .map(|tx| match tx {
+                Transaction::StoreData(t) => t.nonce,
+                other => panic!("unexpected {other:?}"),
+            })
+            .collect()
+    }
+
+    /// Writes in flight together take distinct nonces: the lowest the chain's bitmap shows free
+    /// and no other write holds. Each is signed over its own nonce.
+    #[tokio::test]
+    async fn concurrent_writes_take_distinct_free_nonces() {
+        let server = refusing_chain(nonce_state(6, &[7, 9]), vec![]).await;
+        let consensus = ConsensusClient::new(&server.uri());
+        let key = seed_key();
+        let (a, b, c) = tokio::join!(
+            consensus.store_data(store_request("a"), &key),
+            consensus.store_data(store_request("b"), &key),
+            consensus.store_data(store_request("c"), &key),
+        );
+        a.unwrap();
+        b.unwrap();
+        c.unwrap();
+        let sent = broadcast(&server).await;
+        let mut nonces = nonces_sent(&sent);
+        nonces.sort();
+        assert_eq!(nonces, vec![8, 10, 11]);
+        for tx in &sent {
+            let Transaction::StoreData(t) = tx else {
+                unreachable!()
+            };
+            assert_signed(&store_data(t).unwrap(), &t.signature);
+        }
+    }
+
+    /// A CheckTx refusal gives its nonce back, unless the node's refusal of that nonce says it
+    /// is held, used, or spent.
+    #[tokio::test]
+    async fn a_refusal_gives_the_nonce_back_only_when_it_isnt_taken() {
+        let server = refusing_chain(
+            nonce_state(6, &[]),
+            vec![
+                (1, "Insufficient balance for fee".into()),
+                (1, "Invalid nonce: 7 already used (replay)".into()),
+                (
+                    1,
+                    "Nonce 8 of did:willow:a is held by a pending transaction; sign this one with \
+                     another nonce"
+                        .into(),
+                ),
+            ],
+        )
+        .await;
+        let consensus = ConsensusClient::new(&server.uri());
+        let refused = consensus
+            .store_data(store_request("a"), &seed_key())
+            .await
+            .unwrap_err();
+        assert!(
+            refused.to_string().contains("Insufficient balance"),
+            "{refused}"
+        );
+        let used = consensus
+            .store_data(store_request("b"), &seed_key())
+            .await
+            .unwrap_err();
+        assert!(used.to_string().contains("read what it wrote"), "{used}");
+        consensus
+            .store_data(store_request("c"), &seed_key())
+            .await
+            .unwrap_err();
+        consensus
+            .store_data(store_request("d"), &seed_key())
+            .await
+            .unwrap();
+        // 7 was given back after the plain refusal and taken again; then 7 was used, 8 held.
+        assert_eq!(nonces_sent(&broadcast(&server).await), vec![7, 7, 8, 9]);
+    }
+
+    /// CometBFT already holding these exact bytes is the transaction admitted: its hash, and
+    /// its nonce stays taken.
+    #[tokio::test]
+    async fn a_transaction_already_in_the_mempool_is_accepted() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(body_partial_json(json!({"method": "abci_query"})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(nonce_state(0, &[])))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(body_partial_json(json!({"method": "broadcast_tx_sync"})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "jsonrpc": "2.0", "id": 1,
+                "error": {"code": -32603, "message": "Internal error", "data": "tx already exists in cache"}
+            })))
+            .mount(&server)
+            .await;
+        let consensus = ConsensusClient::new(&server.uri());
+        let hash = consensus
+            .store_data(store_request("a"), &seed_key())
+            .await
+            .unwrap();
+        let sent = server.received_requests().await.unwrap();
+        let body: serde_json::Value = sent.last().unwrap().body_json().unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(body["params"]["tx"].as_str().unwrap())
+            .unwrap();
+        assert_eq!(hash, hex::encode_upper(Sha256::digest(bytes)));
+        assert!(consensus.nonce_tracker().is_held(OWNER, 1));
+    }
+
+    /// Without an `account_nonce_state` answer, the base comes from the API.
+    #[tokio::test]
+    async fn the_base_alone_comes_from_the_api_when_the_rpc_has_no_nonce_state() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path_regex(r"^/account/[^/]+/nonce$"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({"success": true, "data": {"nonce": 41}})),
+            )
+            .mount(&server)
+            .await;
+        let consensus = ConsensusClient::new_with_api(&server.uri(), &server.uri());
+        assert_eq!(consensus.get_next_nonce(OWNER).await.unwrap(), 42);
+        assert_eq!(consensus.get_next_nonce(OWNER).await.unwrap(), 43);
     }
 }

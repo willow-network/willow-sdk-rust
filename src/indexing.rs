@@ -65,7 +65,8 @@ impl IndexingOperations {
     /// [`WillowClient::indexer_base_url`] — the explicit `indexer_url`
     /// override if set, else the validator. For source-routed queries
     /// (auto-discovery, explicit validator fallback, etc.) use
-    /// [`Self::graphql_query_with_source`].
+    /// [`Self::graphql_query_with_source`]. The answer is returned unverified:
+    /// no proof is requested or checked.
     pub async fn graphql_query(
         &self,
         subgrove_id: &str,
@@ -126,11 +127,11 @@ impl IndexingOperations {
 
     /// Executes a GraphQL query with explicit source selection.
     ///
-    /// The `source` argument makes the trust model part of the API: callers
-    /// declare whether they want consensus-verified chain-tip data
-    /// ([`QuerySource::Validator`]), historical/analytics data
+    /// The `source` argument picks who answers: the validator's chain-tip data
+    /// ([`QuerySource::Validator`]), an indexer's historical/analytics data
     /// ([`QuerySource::Indexer`]), or "best effort with fallback"
-    /// ([`QuerySource::Auto`], usually what you want).
+    /// ([`QuerySource::Auto`], usually what you want). Either way the answer is
+    /// returned unverified: no proof is requested or checked.
     ///
     /// The returned [`RoutedQueryResult`] tells the caller which backend
     /// actually served the query so UIs can surface it to users.

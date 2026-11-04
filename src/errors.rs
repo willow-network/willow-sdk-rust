@@ -68,6 +68,16 @@ pub enum WillowError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
+    /// The SDK can't do what was asked as asked: for a read, it can't verify the answer, and
+    /// returns nothing rather than return it unverified.
+    #[error("Unsupported: {0}")]
+    Unsupported(String),
+
+    /// Every nonce the node accepts for this identity (the 24 above its base) is used or held by
+    /// a write in flight; send more once earlier writes land.
+    #[error("Nonce window full: {0}")]
+    NonceWindowFull(String),
+
     /// Generic error with custom message
     #[error("{0}")]
     Custom(String),

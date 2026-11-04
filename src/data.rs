@@ -2,8 +2,6 @@
 
 use crate::client::WillowClient;
 use crate::errors::{Result, WillowError};
-#[cfg(not(feature = "no-light-client"))]
-use crate::proof::{ProofVerifier, QueryResponseExt};
 use crate::types::ApiResponse;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -16,6 +14,7 @@ pub struct QueryResponse {
     pub limit: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub proof: Option<String>,
+    /// Never set by this SDK: a query's documents are returned unverified.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verified_root_hash: Option<String>,
 }
@@ -93,11 +92,27 @@ impl DataOperations {
         Self { client }
     }
 
-    /// Get a single item from a subgrove with automatic proof verification
+    /// Get a single item from a subgrove, verified.
+    ///
+    /// Reads the value (`GET /data/{subgrove}/{key}`) and its proof (`GET /proof/{subgrove}/{key}`),
+    /// and returns the value only when:
+    ///
+    /// - the proof proves an Item at `key` in the subgrove's data tree
+    ///   (`[subgroves, subgrove_id, data]`), in a form its root binds
+    ///   ([`crate::grovedb_envelope::verify_item_at_path`]), and that item is the value served;
+    /// - the root the proof computes is the app hash of the CometBFT header at the proof's
+    ///   height plus one (the state after block `height` is committed in the next block's
+    ///   header), as the light client gives it from the consensus RPC, not from the API that
+    ///   served the proof.
+    ///
+    /// A missing proof or height, another value, another root, or a header the light client can't
+    /// get is a [`WillowError::ProofVerificationFailed`] (or a light-client error): nothing is
+    /// returned unverified. A key the API reports missing is [`WillowError::NotFound`], unproven.
+    /// Built with `no-light-client`, this returns [`WillowError::Unsupported`]; use
+    /// [`Self::get_unverified`].
     pub async fn get(&self, subgrove_id: &str, key: &str) -> Result<Value> {
         self.ensure_authenticated()?;
 
-        // First get the data
         let data_response: ApiResponse<Value> = self
             .client
             .request(
@@ -112,11 +127,8 @@ impl DataOperations {
             .data
             .ok_or_else(|| WillowError::NotFound(format!("Key not found: {}", key)))?;
 
-        // Verify proof against the light client. Auto-initializes with
-        // trust-on-first-use if no light client is configured.
         #[cfg(not(feature = "no-light-client"))]
         {
-            // Get proof for this specific item
             let proof_response: ApiResponse<Value> = self
                 .client
                 .request(
@@ -126,32 +138,65 @@ impl DataOperations {
                     true,
                 )
                 .await?;
+            let fail = |m: String| WillowError::ProofVerificationFailed(m);
+            let proof_data = proof_response.data.ok_or_else(|| {
+                fail(format!(
+                    "no proof served for key {key:?}, so the value can't be verified (use \
+                     get_unverified to read it unverified)"
+                ))
+            })?;
+            let proof_hex = proof_data
+                .get("proof")
+                .and_then(|p| p.as_str())
+                .ok_or_else(|| {
+                    fail(format!(
+                        "the proof served for key {key:?} has no proof bytes"
+                    ))
+                })?;
+            let height = proof_data
+                .get("height")
+                .and_then(|h| h.as_u64())
+                .filter(|h| *h > 0)
+                .ok_or_else(|| {
+                    fail(format!(
+                        "the proof served for key {key:?} names no block height, so its root \
+                         can't be checked against the chain's"
+                    ))
+                })?;
+            let proof =
+                hex::decode(proof_hex).map_err(|e| fail(format!("Invalid proof hex: {e}")))?;
 
-            if let Some(proof_data) = proof_response.data {
-                if let Some(proof_hex) = proof_data.get("proof").and_then(|p| p.as_str()) {
-                    // Get or create light client (auto-initializes with trust-on-first-use)
-                    let light_client = self.client.get_or_create_light_client().await?;
-
-                    // Build the GroveDB path matching the server's proof generation
-                    let path: Vec<Vec<u8>> = vec![
-                        b"subgroves".to_vec(),
-                        subgrove_id.as_bytes().to_vec(),
-                        b"data".to_vec(),
-                    ];
-
-                    light_client
-                        .verify_proof_hex(proof_hex, &path, key.as_bytes(), None)
-                        .await?;
-                }
-            } else {
-                log::warn!("No proof available for key: {}", key);
+            let path = crate::proof::subgrove_data_path(subgrove_id);
+            let (root, item) =
+                crate::grovedb_envelope::verify_item_at_path(&proof, &path, key.as_bytes())?;
+            let proven = served_value(&item);
+            if proven != data {
+                return Err(fail(format!(
+                    "the value served for key {key:?} is not the value its proof proves"
+                )));
             }
+
+            let light_client = self.client.get_or_create_light_client().await?;
+            let trusted = light_client.app_hash_after(height).await?;
+            if root.as_slice() != trusted.as_slice() {
+                return Err(fail(format!(
+                    "Root hash mismatch: the proof computes {} but the header after block {height} \
+                     has app hash {}",
+                    hex::encode(root),
+                    hex::encode(&trusted)
+                )));
+            }
+            Ok(proven)
         }
 
-        // When no-light-client feature is enabled, skip proof verification entirely
-        // (user has explicitly opted out of trustless verification)
-
-        Ok(data)
+        #[cfg(feature = "no-light-client")]
+        {
+            let _ = data;
+            Err(WillowError::Unsupported(
+                "built with no-light-client, the SDK can't verify a read; use get_unverified"
+                    .to_string(),
+            ))
+        }
     }
 
     /// Get a single item without proof verification
@@ -173,55 +218,21 @@ impl DataOperations {
             .ok_or_else(|| WillowError::NotFound(format!("Key not found: {}", key)))
     }
 
-    /// Query items using the indexing query API with automatic proof verification
+    /// Not supported: always [`WillowError::Unsupported`], with nothing sent.
     ///
-    /// This method automatically requests proof and verifies it against the consensus root hash.
-    /// If verification fails, the query will return an error.
-    ///
-    /// When `no-light-client` feature is enabled, this behaves the same as `query_unverified`.
-    pub async fn query(&self, subgrove_id: &str, mut query: Value) -> Result<QueryResponse> {
+    /// The API returns a query's documents without their keys, with a proof of the subgrove's
+    /// whole data tree, so nothing binds the documents to the proof, nor to the query's filter,
+    /// order, offset, and limit. Use [`Self::query_unverified`] for the documents unverified, or
+    /// [`Self::get`] for a verified value by key.
+    pub async fn query(&self, subgrove_id: &str, query: Value) -> Result<QueryResponse> {
+        let _ = (subgrove_id, query);
         self.ensure_authenticated()?;
-
-        // Only request proof if verification is enabled
-        #[cfg(not(feature = "no-light-client"))]
-        if let Some(obj) = query.as_object_mut() {
-            obj.insert("include_proof".to_string(), Value::Bool(true));
-        }
-
-        let response: ApiResponse<QueryResponse> = self
-            .client
-            .request(
-                "POST",
-                &format!("/query/{}", subgrove_id),
-                Some(&query),
-                true,
-            )
-            .await?;
-
-        let mut query_response = response
-            .data
-            .ok_or_else(|| WillowError::Custom("No data in query response".to_string()))?;
-
-        // Verify proof if present and light client is available
-        #[cfg(not(feature = "no-light-client"))]
-        if query_response.proof.is_some() {
-            match self
-                .verify_and_compare_root(subgrove_id, &query_response)
-                .await
-            {
-                Ok(verified_root) => {
-                    query_response.verified_root_hash = Some(verified_root);
-                }
-                Err(e) => {
-                    return Err(WillowError::ProofVerificationFailed(format!(
-                        "Query proof verification failed: {}",
-                        e
-                    )));
-                }
-            }
-        }
-
-        Ok(query_response)
+        Err(WillowError::Unsupported(
+            "a query's documents can't be verified: the API serves them without their keys, \
+             and nothing binds them to the proof or to the query's selection; use \
+             query_unverified, or get for a verified value by key"
+                .to_string(),
+        ))
     }
 
     /// Execute a SQL query against a subgrove. Sends to
@@ -342,7 +353,7 @@ impl DataOperations {
     // Historical Query Methods
     // ============================================================================
 
-    /// Get checkpoint state root for proof verification.
+    /// Get a checkpoint's state root, as the API reports it (unproven).
     ///
     /// # Arguments
     ///
@@ -372,11 +383,13 @@ impl DataOperations {
             .ok_or_else(|| WillowError::NotFound("Checkpoint not found".to_string()))
     }
 
-    /// Query historical indexed data from a verified checkpoint.
+    /// Query historical indexed data from a checkpoint, unverified.
     ///
     /// This method queries historical data from indexer nodes that have preserved
-    /// checkpoint data. The response includes proof information that can be
-    /// verified against the checkpoint's state root.
+    /// checkpoint data, through the API. The answer is not verified: the API's historical query
+    /// passes on no proof of the indexer's answer, and the checkpoint state root it is compared
+    /// with comes from the same API ([`Self::get_checkpoint_state_root`]). A response whose state
+    /// root differs from that checkpoint's is refused as inconsistent.
     ///
     /// # Arguments
     ///
@@ -457,170 +470,239 @@ impl DataOperations {
         Ok(response)
     }
 
-    /// Query historical data and verify the proof against checkpoint state root.
+    /// Not supported: always [`WillowError::Unsupported`], with nothing sent.
     ///
-    /// This is the fully secure method for historical queries. It:
-    /// 1. Gets the checkpoint state root from consensus
-    /// 2. Executes the query through an indexer
-    /// 3. Verifies the returned proof against the checkpoint state root
-    ///
-    /// # Arguments
-    ///
-    /// * `subgrove_id` - The subgrove ID
-    /// * `checkpoint_id` - The checkpoint ID (hex string)
-    /// * `query` - The query parameters (include_proof is forced to true)
-    ///
-    /// # Returns
-    ///
-    /// Verified historical data
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if proof verification fails
+    /// The node's historical query passes on no proof of the indexer's answer, and the
+    /// checkpoint state root it would be checked against comes from the same API, not from a
+    /// root the SDK trusts. Use [`Self::query_historical`] for the answer unverified.
+    #[deprecated(
+        note = "a historical answer can't be verified: no proof binds it, and the checkpoint root \
+                comes from the same API; use query_historical for it unverified"
+    )]
     pub async fn query_historical_verified(
         &self,
         subgrove_id: &str,
         checkpoint_id: &str,
-        mut query: HistoricalQueryRequest,
+        query: HistoricalQueryRequest,
     ) -> Result<HistoricalQueryResponse> {
-        // Force proof inclusion for verification
-        query.include_proof = Some(true);
-
-        let result = self
-            .query_historical(subgrove_id, checkpoint_id, query)
-            .await?;
-
-        // Verify the proof against the checkpoint state root
-        #[cfg(not(feature = "no-light-client"))]
-        {
-            if let Some(ref proof) = result.proof {
-                // Convert data to array format for verification
-                let documents = if result.data.is_array() {
-                    result.data.as_array().unwrap().clone()
-                } else {
-                    vec![result.data.clone()]
-                };
-
-                // Verify proof and get computed root hash
-                let computed_root = ProofVerifier::verify_query_proof(proof, &documents)?;
-
-                // Compare with the checkpoint's state root (normalize hex strings)
-                let normalized_computed = computed_root
-                    .to_lowercase()
-                    .trim_start_matches("0x")
-                    .to_string();
-                let normalized_expected = result
-                    .state_root
-                    .to_lowercase()
-                    .trim_start_matches("0x")
-                    .to_string();
-
-                if normalized_computed != normalized_expected {
-                    return Err(WillowError::ProofVerificationFailed(format!(
-                        "Historical proof verification failed: computed root {} does not match checkpoint state root {}",
-                        computed_root, result.state_root
-                    )));
-                }
-            } else {
-                // Proof was requested but not returned
-                return Err(WillowError::ProofVerificationFailed(
-                    "Historical query did not return proof data despite include_proof=true"
-                        .to_string(),
-                ));
-            }
-        }
-
-        #[cfg(feature = "no-light-client")]
-        {
-            // Without light client, we can't verify proofs
-            // Just warn and return the result
-            eprintln!("Warning: proof verification disabled with 'no-light-client' feature");
-        }
-
-        Ok(result)
+        let _ = (subgrove_id, checkpoint_id, query);
+        Err(WillowError::Unsupported(
+            "a historical answer can't be verified: the node passes on no proof of it, and the \
+             checkpoint state root comes from the same API; use query_historical for it \
+             unverified"
+                .to_string(),
+        ))
     }
 
     fn ensure_authenticated(&self) -> Result<()> {
         self.client.require_auth()
     }
+}
 
-    /// Verify proof and compare with consensus root hash.
-    ///
-    /// Uses the light client for trustless verification. Auto-initializes
-    /// with trust-on-first-use if no light client is configured.
-    ///
-    /// Only available when light client verification is enabled.
-    #[cfg(not(feature = "no-light-client"))]
-    async fn verify_and_compare_root(
-        &self,
-        subgrove_id: &str,
-        query_response: &QueryResponse,
-    ) -> Result<String> {
-        use grovedb::{GroveDb, PathQuery, Query};
-
-        let light_client = self.client.get_or_create_light_client().await?;
-
-        let proof_hex = query_response.proof.as_ref().ok_or_else(|| {
-            WillowError::ProofVerificationFailed("No proof in query response".to_string())
-        })?;
-
-        let proof_bytes = hex::decode(proof_hex).map_err(|e| {
-            WillowError::ProofVerificationFailed(format!("Invalid proof hex: {}", e))
-        })?;
-        if proof_bytes.is_empty() {
-            return Err(WillowError::ProofVerificationFailed(
-                "Empty proof".to_string(),
-            ));
-        }
-
-        // Build the same PathQuery the server used to generate the proof:
-        // path: [subgroves, subgrove_id, data], query: range_full
-        // The server always generates proofs with range_full (matching full_scan),
-        // so the SDK reconstructs the identical PathQuery for strict verification.
-        let path: Vec<Vec<u8>> = vec![
-            b"subgroves".to_vec(),
-            subgrove_id.as_bytes().to_vec(),
-            b"data".to_vec(),
-        ];
-
-        let query = Query::new_range_full();
-        let path_query = PathQuery::new_unsized(path, query);
-        let grove_version = grovedb_version::version::GroveVersion::default();
-
-        // The envelope must descend the whole path first (a dropped subtree
-        // layer otherwise verifies as "no data" under the same root).
-        crate::grovedb_envelope::check_envelope(&proof_bytes, &path_query.path)?;
-
-        // Strict verify_query — proves completeness: the server returned ALL
-        // data in the subgrove. If any item was omitted or fabricated, this fails.
-        let (computed_root_bytes, _verified_items) =
-            GroveDb::verify_query(&proof_bytes, &path_query, &grove_version).map_err(|e| {
-                WillowError::ProofVerificationFailed(format!(
-                    "GroveDB proof verification failed: {}",
-                    e
-                ))
-            })?;
-
-        let computed_root = hex::encode(&computed_root_bytes);
-
-        // Compare against current consensus app_hash from /block_results
-        let consensus_root = hex::encode(light_client.fetch_current_app_hash().await?);
-
-        // Compare roots
-        if computed_root != consensus_root {
-            return Err(WillowError::ProofVerificationFailed(format!(
-                "Root hash mismatch: computed {} vs consensus {}",
-                computed_root, consensus_root
-            )));
-        }
-
-        Ok(computed_root)
-    }
+/// The value `GET /data` serves for an item's bytes: their JSON, or `{"hex": <hex>}` when
+/// they aren't JSON.
+#[cfg(not(feature = "no-light-client"))]
+fn served_value(bytes: &[u8]) -> Value {
+    serde_json::from_slice(bytes)
+        .unwrap_or_else(|_| serde_json::json!({ "hex": hex::encode(bytes) }))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(feature = "no-light-client"))]
+    mod verified_get {
+        use super::*;
+        use crate::grovedb_envelope::test_proofs::item_proof;
+        use crate::light_client::LightClientConfig;
+        use crate::types::SignatureAlgorithm;
+        use serde_json::json;
+        use std::time::Duration;
+        use wiremock::matchers::{method, path, query_param};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        const SG: &str = "sg-1";
+        const KEY: &str = "doc1";
+        const HEIGHT: u64 = 41;
+
+        fn value() -> Value {
+            json!({"title": "Hello", "n": 42})
+        }
+
+        /// The CometBFT `/commit` answer for a header at `height` with `app_hash`.
+        fn commit(height: u64, app_hash: &[u8]) -> Value {
+            json!({"jsonrpc": "2.0", "id": -1, "result": {"signed_header": {"header": {
+                "chain_id": "willow", "height": height.to_string(),
+                "app_hash": hex::encode_upper(app_hash)
+            }}}})
+        }
+
+        /// An API serving `served` at the key with `proof`, and a CometBFT RPC whose header at
+        /// HEIGHT + 1 has `app_hash` (and at HEIGHT, another).
+        async fn chain(served: Value, proof: Value, app_hash: &[u8]) -> (MockServer, WillowClient) {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path(format!("/data/{SG}/{KEY}")))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_json(json!({"success": true, "data": served})),
+                )
+                .mount(&server)
+                .await;
+            Mock::given(method("GET"))
+                .and(path(format!("/proof/{SG}/{KEY}")))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_json(json!({"success": true, "data": proof})),
+                )
+                .mount(&server)
+                .await;
+            Mock::given(method("GET"))
+                .and(path("/commit"))
+                .and(query_param("height", (HEIGHT + 1).to_string()))
+                .respond_with(
+                    ResponseTemplate::new(200).set_body_json(commit(HEIGHT + 1, app_hash)),
+                )
+                .mount(&server)
+                .await;
+            Mock::given(method("GET"))
+                .and(path("/commit"))
+                .and(query_param("height", HEIGHT.to_string()))
+                .respond_with(ResponseTemplate::new(200).set_body_json(commit(HEIGHT, &[0xee; 32])))
+                .mount(&server)
+                .await;
+            let client = WillowClient::builder()
+                .api_url(&server.uri())
+                .light_client_config(
+                    LightClientConfig::builder("willow")
+                        .validator_endpoints(vec![server.uri()])
+                        .rpc_timeout(Duration::from_millis(600))
+                        .build(),
+                )
+                .build()
+                .await
+                .unwrap();
+            client.set_identity_with_algorithm(
+                "did:willow:a",
+                &"03".repeat(32),
+                "did:willow:a#key-1",
+                SignatureAlgorithm::Ed25519,
+            );
+            (server, client)
+        }
+
+        fn honest() -> (Vec<u8>, [u8; 32]) {
+            item_proof(
+                &crate::proof::subgrove_data_path(SG),
+                KEY.as_bytes(),
+                &serde_json::to_vec(&value()).unwrap(),
+            )
+        }
+
+        fn proof_body(proof: &[u8], height: Value) -> Value {
+            json!({"proof": hex::encode(proof), "height": height, "path": [], "key": ""})
+        }
+
+        #[tokio::test]
+        async fn get_returns_the_value_its_proof_binds_under_the_next_headers_app_hash() {
+            let (proof, root) = honest();
+            let (_server, client) = chain(value(), proof_body(&proof, json!(HEIGHT)), &root).await;
+            assert_eq!(client.data().get(SG, KEY).await.unwrap(), value());
+        }
+
+        #[tokio::test]
+        async fn get_refuses_what_it_cannot_verify() {
+            let (proof, root) = honest();
+            let refused = |result: Result<Value>| match result {
+                Err(WillowError::ProofVerificationFailed(_)) | Err(WillowError::LightClient(_)) => {
+                }
+                other => panic!("expected a refusal, got {other:?}"),
+            };
+
+            // Another value served beside the honest proof.
+            let (_s, client) = chain(
+                json!({"title": "forged"}),
+                proof_body(&proof, json!(HEIGHT)),
+                &root,
+            )
+            .await;
+            refused(client.data().get(SG, KEY).await);
+
+            // Another root in the header after the proof's block (the header at the proof's own
+            // height doesn't count).
+            let (_s, client) = chain(value(), proof_body(&proof, json!(HEIGHT)), &[0x11; 32]).await;
+            refused(client.data().get(SG, KEY).await);
+
+            // No height, or no proof.
+            let (_s, client) = chain(value(), proof_body(&proof, Value::Null), &root).await;
+            refused(client.data().get(SG, KEY).await);
+            let (_s, client) = chain(value(), json!({"height": HEIGHT}), &root).await;
+            refused(client.data().get(SG, KEY).await);
+
+            // A lone Push(Hash(root)), which names the trusted root itself.
+            let lone = [&[0x00, 0x21, 0x01][..], &root, &[0x00, 0x01]].concat();
+            let (_s, client) = chain(value(), proof_body(&lone, json!(HEIGHT)), &root).await;
+            refused(client.data().get(SG, KEY).await);
+
+            // A proof of the same value at another key or in another subgrove.
+            let bytes = serde_json::to_vec(&value()).unwrap();
+            for (path, key) in [
+                (crate::proof::subgrove_data_path(SG), b"doc2".to_vec()),
+                (
+                    crate::proof::subgrove_data_path("sg-2"),
+                    KEY.as_bytes().to_vec(),
+                ),
+            ] {
+                let (other, other_root) = item_proof(&path, &key, &bytes);
+                let (_s, client) =
+                    chain(value(), proof_body(&other, json!(HEIGHT)), &other_root).await;
+                refused(client.data().get(SG, KEY).await);
+            }
+
+            // No header after the proof's block.
+            let (_s, client) = chain(value(), proof_body(&proof, json!(HEIGHT + 5)), &root).await;
+            refused(client.data().get(SG, KEY).await);
+        }
+
+        #[tokio::test]
+        async fn query_and_historical_verification_refuse_without_a_request() {
+            let (proof, root) = honest();
+            let (server, client) = chain(value(), proof_body(&proof, json!(HEIGHT)), &root).await;
+            let before = server.received_requests().await.unwrap().len();
+            assert!(matches!(
+                client.data().query(SG, json!({})).await,
+                Err(WillowError::Unsupported(_))
+            ));
+            #[allow(deprecated)]
+            let historical = client
+                .data()
+                .query_historical_verified(
+                    SG,
+                    "00",
+                    HistoricalQueryRequest {
+                        path: vec![],
+                        key: None,
+                        query_type: None,
+                        include_proof: None,
+                    },
+                )
+                .await;
+            assert!(matches!(historical, Err(WillowError::Unsupported(_))));
+            assert_eq!(server.received_requests().await.unwrap().len(), before);
+        }
+
+        /// Without a consensus URL or light-client config, an API URL that doesn't name port
+        /// 3031 leaves no CometBFT RPC to read headers from: the API's own answer is no root.
+        #[tokio::test]
+        async fn no_header_source_but_the_api_is_a_configuration_error() {
+            let client = WillowClient::new("https://api.example.invalid")
+                .await
+                .unwrap();
+            let err = client.get_or_create_light_client().await.err().unwrap();
+            assert!(matches!(err, WillowError::Config(_)), "{err}");
+        }
+    }
 
     #[tokio::test]
     async fn test_ensure_authenticated() {

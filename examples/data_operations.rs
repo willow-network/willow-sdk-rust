@@ -50,8 +50,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => println!("   Note: {}", e),
     }
 
-    // 3. Query with filters (verified)
-    println!("\n3. Query with filters (verified)...");
+    // 3. Query with filters (a query's documents are returned unverified)
+    println!("\n3. Query with filters (unverified)...");
     let query = json!({
         "filters": {
             "category": "electronics",
@@ -60,15 +60,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "limit": 10
     });
 
-    match client.data().query(dataset_id, query).await {
+    match client.data().query_unverified(dataset_id, query).await {
         Ok(response) => {
-            println!("   Found {} documents", response.documents.len());
-            if let Some(root_hash) = response.verified_root_hash {
-                println!(
-                    "   Verified against root: {}...",
-                    &root_hash[..16.min(root_hash.len())]
-                );
-            }
+            println!(
+                "   Found {} documents (unverified)",
+                response.documents.len()
+            );
             for doc in &response.documents {
                 println!("   - {}", serde_json::to_string(doc)?);
             }

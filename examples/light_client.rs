@@ -1,8 +1,8 @@
 //! Light client example for the Willow Rust SDK
 //!
 //! This example demonstrates:
-//! - Configuring a light client for trustless verification
-//! - Verifying data against multiple validators
+//! - Configuring the light client's validator endpoints
+//! - Verifying a value against a header from those endpoints
 //! - Exporting and importing trusted state
 //!
 //! Run with: cargo run --example light_client
@@ -61,35 +61,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     println!("   Authenticated as: {}", DEVNET_VALIDATOR_1.did);
 
-    // 4. Retrieve with full trustless verification
+    // 4. Retrieve a verified value by key
     // Note: Data must first be stored via consensus transactions
-    println!("\n4. Retrieving data with trustless verification...");
-    println!("   This verifies:");
-    println!("   - 2/3+ validator signatures on block headers");
-    println!("   - GroveDB Merkle proof against consensus app_hash");
-    println!("   - Data integrity without trusting any single node\n");
+    println!("\n4. Retrieving a verified value...");
+    println!("   This checks:");
+    println!("   - the GroveDB proof proves this value at its key in the subgrove's data");
+    println!("   - its root is the app_hash of the header after the proof's block,");
+    println!("     read from the validator endpoints (not from the API)\n");
 
     match client.data().get("secure-data", "entry-1").await {
         Ok(data) => {
-            println!("   Data retrieved and CRYPTOGRAPHICALLY VERIFIED:");
+            println!("   Data retrieved and verified:");
             println!("   {}", serde_json::to_string_pretty(&data)?);
         }
         Err(e) => println!("   Note: {}", e),
     }
 
-    // 5. Query with verification
-    println!("\n5. Querying with trustless verification...");
+    // 5. Query (a query's documents are returned unverified)
+    println!("\n5. Querying (unverified)...");
     let query = json!({ "limit": 10 });
 
-    match client.data().query("secure-data", query).await {
+    match client.data().query_unverified("secure-data", query).await {
         Ok(response) => {
-            println!("   Query returned {} documents", response.documents.len());
-            if let Some(root_hash) = &response.verified_root_hash {
-                println!(
-                    "   Verified against root: {}...",
-                    &root_hash[..16.min(root_hash.len())]
-                );
-            }
+            println!(
+                "   Query returned {} documents (unverified)",
+                response.documents.len()
+            );
         }
         Err(e) => println!("   Note: {}", e),
     }
@@ -109,17 +106,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 7. Show verification comparison
     println!("\n7. Verification comparison...");
-    println!("\n   LIGHT CLIENT (trustless):");
-    println!("   + Verifies validator signatures (2/3+ threshold)");
-    println!("   + Validates block header chain");
-    println!("   + Verifies proofs against consensus app_hash");
-    println!("   + No trust in any single node required");
-    println!("   - Slightly higher latency\n");
-
-    println!("   STANDARD VERIFICATION (root hash):");
-    println!("   + Fast verification");
-    println!("   + Verifies GroveDB proofs locally");
-    println!("   - Trusts that API returns correct root hash\n");
+    println!("\n   VERIFIED READS (data().get):");
+    println!("   + The proof binds the value at its key in the subgrove's data");
+    println!("   + Its root is checked against a header from the validator endpoints");
+    println!("   - Headers are trusted as those endpoints serve them; commit");
+    println!("     signatures are not checked\n");
 
     println!("   UNVERIFIED (performance mode):");
     println!("   + Fastest response times");

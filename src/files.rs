@@ -6,10 +6,8 @@
 
 use crate::client::WillowClient;
 use crate::errors::{Result, WillowError};
-use crate::types::ApiResponse;
 use ed25519_dalek::{Signer, SigningKey};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 /// Default chunk size for file splitting (256 KB).
@@ -58,8 +56,13 @@ impl FileOperations {
     ///
     /// When `signing_key` is provided, the manifest transaction is signed with
     /// the given Ed25519 key over [`crate::signed_messages::store_file_manifest`],
-    /// which binds every manifest field and the nonce fetched here. The
+    /// which binds every manifest field and the nonce taken here. The
     /// `public_key_id` is required for signed transactions.
+    ///
+    /// Chunks go to the storage node only once the manifest has landed in a block and executed:
+    /// storage nodes check the on-chain manifest before they accept chunks. A manifest not in a
+    /// block within about 30 s, or refused in its block (which spends its nonce), is an error and
+    /// no chunk is sent.
     pub async fn upload(
         &self,
         subgrove_id: &str,
@@ -88,43 +91,58 @@ impl FileOperations {
         let content_type = guess_content_type(filename);
 
         let consensus = self.client.require_consensus("upload")?;
-        let tx_nonce = consensus.get_next_nonce(&owner_did).await?;
         let pub_key_id = match signing_key {
             Some(_) => public_key_id.unwrap_or("").to_string(),
             None => String::new(),
         };
 
-        // Submit manifest to consensus via CometBFT RPC.
-        // Use the server's StoreFileManifestTx struct directly for correct
-        // serialization of [u8; 32] fields (content_hash, chunk_merkle_root).
-        use crate::consensus::ConsensusClient;
+        // Submit the manifest to consensus via the CometBFT RPC, as the chain's own
+        // StoreFileManifestTx.
         use crate::signed_messages::{self, StoreFileManifestTx};
+        use willow_types::consensus::transactions::Transaction;
 
-        let mut manifest_tx = StoreFileManifestTx {
-            subgrove_id: subgrove_id.to_string(),
-            file_key: file_key.to_string(),
-            filename: filename.to_string(),
-            content_type: content_type.clone(),
-            total_size: data.len() as u64,
-            content_hash,
-            chunk_count,
-            chunk_size: chunk_size as u32,
-            chunk_merkle_root,
-            owner_did: owner_did.clone(),
-            encryption: None,
-            signature: vec![],
-            public_key_id: pub_key_id,
-            nonce: tx_nonce,
-        };
-        if let Some(key) = signing_key {
-            let message = signed_messages::store_file_manifest(&manifest_tx)?;
-            manifest_tx.signature = key.sign(message.as_bytes()).to_bytes().to_vec();
-        }
-        let tx_json = ConsensusClient::serialize_tx("StoreFileManifest", &manifest_tx)?;
-        let tx_hash = consensus.submit_transaction_json(&tx_json).await?;
+        let tx_hash = consensus
+            .submit_with_nonce(&owner_did, |nonce| {
+                let mut manifest_tx = StoreFileManifestTx {
+                    subgrove_id: subgrove_id.to_string(),
+                    file_key: file_key.to_string(),
+                    filename: filename.to_string(),
+                    content_type: content_type.clone(),
+                    total_size: data.len() as u64,
+                    content_hash,
+                    chunk_count,
+                    chunk_size,
+                    chunk_merkle_root,
+                    owner_did: owner_did.clone(),
+                    encryption: None,
+                    signature: vec![],
+                    public_key_id: pub_key_id,
+                    nonce,
+                };
+                if let Some(key) = signing_key {
+                    let message = signed_messages::store_file_manifest(&manifest_tx)?;
+                    manifest_tx.signature = key.sign(message.as_bytes()).to_bytes().to_vec();
+                }
+                Ok(Transaction::StoreFileManifest(manifest_tx))
+            })
+            .await?;
 
         // Storage nodes verify the on-chain manifest before accepting chunks.
-        consensus.wait_for_transaction(&tx_hash, 15).await?;
+        match consensus.wait_for_tx_outcome(&tx_hash, 15).await? {
+            None => {
+                return Err(WillowError::Custom(format!(
+                    "the manifest transaction {tx_hash} is not in a block yet; no chunk was \
+                     uploaded (wait for it to land, then upload the chunks)"
+                )))
+            }
+            Some(outcome) if outcome.code != 0 => {
+                return Err(WillowError::Custom(format!(
+                    "the manifest transaction {tx_hash} was refused in block {}: {} (code: {})",
+                    outcome.height, outcome.log, outcome.code
+                )))
+            }
+            Some(_) => {}
+        }
 
         // Upload chunks to storage node
         let http = reqwest::Client::new();
@@ -275,7 +293,7 @@ impl FileOperations {
     /// Delete a file (submits DeleteFileManifestTx to consensus).
     ///
     /// When `signing_key` is provided, the delete transaction is signed over
-    /// [`crate::signed_messages::delete_file_manifest`] with the nonce fetched here.
+    /// [`crate::signed_messages::delete_file_manifest`] with the nonce taken here.
     pub async fn delete(
         &self,
         subgrove_id: &str,
@@ -290,29 +308,31 @@ impl FileOperations {
         })?;
 
         let consensus = self.client.require_consensus("delete")?;
-        let tx_nonce = consensus.get_next_nonce(&owner_did).await?;
         let pub_key_id = match signing_key {
             Some(_) => public_key_id.unwrap_or("").to_string(),
             None => String::new(),
         };
 
-        use crate::consensus::ConsensusClient;
         use crate::signed_messages::{self, DeleteFileManifestTx};
+        use willow_types::consensus::transactions::Transaction;
 
-        let mut delete_tx = DeleteFileManifestTx {
-            subgrove_id: subgrove_id.to_string(),
-            file_key: file_key.to_string(),
-            owner_did: owner_did.clone(),
-            signature: vec![],
-            public_key_id: pub_key_id,
-            nonce: tx_nonce,
-        };
-        if let Some(key) = signing_key {
-            let message = signed_messages::delete_file_manifest(&delete_tx)?;
-            delete_tx.signature = key.sign(message.as_bytes()).to_bytes().to_vec();
-        }
-        let tx_json = ConsensusClient::serialize_tx("DeleteFileManifest", &delete_tx)?;
-        consensus.submit_transaction_json(&tx_json).await?;
+        consensus
+            .submit_with_nonce(&owner_did, |nonce| {
+                let mut delete_tx = DeleteFileManifestTx {
+                    subgrove_id: subgrove_id.to_string(),
+                    file_key: file_key.to_string(),
+                    owner_did: owner_did.clone(),
+                    signature: vec![],
+                    public_key_id: pub_key_id,
+                    nonce,
+                };
+                if let Some(key) = signing_key {
+                    let message = signed_messages::delete_file_manifest(&delete_tx)?;
+                    delete_tx.signature = key.sign(message.as_bytes()).to_bytes().to_vec();
+                }
+                Ok(Transaction::DeleteFileManifest(delete_tx))
+            })
+            .await?;
 
         Ok(())
     }
@@ -320,7 +340,7 @@ impl FileOperations {
     /// Unregister a storage node (submits UnregisterStorageNode to consensus).
     ///
     /// The `signing_key` signs [`crate::signed_messages::unregister_storage_node`] (`Node` and
-    /// the nonce fetched here).
+    /// the nonce taken here).
     pub async fn unregister_storage_node(
         &self,
         node_did: &str,
@@ -331,17 +351,18 @@ impl FileOperations {
         use willow_types::consensus::transactions::Transaction;
 
         let consensus = self.client.require_consensus("unregister_storage_node")?;
-        let nonce = consensus.get_next_nonce(node_did).await?;
-        let mut tx = UnregisterStorageNodeTx {
-            node_did: node_did.to_string(),
-            signature: vec![],
-            public_key_id: public_key_id.to_string(),
-            nonce,
-        };
-        let message = signed_messages::unregister_storage_node(&tx)?;
-        tx.signature = signing_key.sign(message.as_bytes()).to_bytes().to_vec();
         consensus
-            .broadcast(&Transaction::UnregisterStorageNode(tx))
+            .submit_with_nonce(node_did, |nonce| {
+                let mut tx = UnregisterStorageNodeTx {
+                    node_did: node_did.to_string(),
+                    signature: vec![],
+                    public_key_id: public_key_id.to_string(),
+                    nonce,
+                };
+                let message = signed_messages::unregister_storage_node(&tx)?;
+                tx.signature = signing_key.sign(message.as_bytes()).to_bytes().to_vec();
+                Ok(Transaction::UnregisterStorageNode(tx))
+            })
             .await?;
 
         Ok(())

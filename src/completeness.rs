@@ -8,8 +8,9 @@
 //! An indexer can serve the matched-log preimage for a `(subgrove, block)`.
 //! A client re-hashes that preimage with [`canonical_event_set_hash`] and
 //! compares it to the on-chain commitment via [`verify_served_events`]. If they
-//! match, the served set is provably the complete, untampered filter-matched
-//! set the chain attests to — without trusting the indexer.
+//! match, the served set is the complete, untampered filter-matched set the
+//! commitment attests to — without trusting the indexer. The commitment is read
+//! from the consensus RPC without a proof, so it is that RPC node's word.
 //!
 //! This mirrors willow's on-chain `canonical_event_set_hash`
 //! (`willow-network::data_sources::types`, consensus
@@ -175,8 +176,10 @@ impl WillowClient {
     ///
     /// Returns [`verify_served_events`] of the served set against the anchor.
     ///
-    /// A `true` result proves the indexer served the complete, untampered
-    /// filter-matched set the chain attests to. Uses the client's existing
+    /// A `true` result means the indexer served the complete, untampered
+    /// filter-matched set whose commitment the consensus RPC node answers. The node
+    /// answers the anchor query without a proof, so this trusts that RPC node (not
+    /// the indexer); an anchor naming another subgrove or block is refused. Uses the client's existing
     /// consensus RPC client and HTTP client; the GET targets the indexer set via
     /// `indexer_url(..)` on the builder (only indexers serve matched logs).
     ///

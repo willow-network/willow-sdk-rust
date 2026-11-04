@@ -308,9 +308,12 @@ impl WillowClient {
     /// creates and initializes one using trust-on-first-use. The initialization
     /// is thread-safe and happens only once.
     ///
-    /// Trust-on-first-use bootstrap: the first verified header is trusted,
-    /// and every subsequent header chains from it cryptographically. Pin a
-    /// known-good checkpoint header in production deployments.
+    /// The light client created here reads headers from the consensus URL when one is set,
+    /// else from the API URL with port 3031 replaced by 26657. An API URL without that port and
+    /// no consensus URL is a configuration error: the roots reads are checked against must come
+    /// from the chain's CometBFT RPC, not from the API that serves the data. Headers are taken as
+    /// the endpoint serves them, trusting the first (see [`crate::light_client`]); configure
+    /// `light_client_config` with the endpoints you trust.
     ///
     /// Returns `None` if `no-light-client` feature is enabled.
     #[cfg(not(feature = "no-light-client"))]
@@ -324,8 +327,23 @@ impl WillowClient {
         let lc = self
             .light_client_once
             .get_or_try_init(|| async {
-                // Derive CometBFT RPC endpoint from API URL (typically :3031 -> :26657)
-                let rpc_endpoint = self.base_url.to_string().replace(":3031", ":26657");
+                let rpc_endpoint = match self.consensus_opt() {
+                    Some(consensus) => consensus.rpc_url().trim_end_matches('/').to_string(),
+                    None => {
+                        let api = self.base_url.as_str().trim_end_matches('/').to_string();
+                        // Typically :3031 -> :26657.
+                        let derived = api.replace(":3031", ":26657");
+                        if derived == api {
+                            return Err(WillowError::Config(
+                                "a verified read checks its proof against a CometBFT header, which \
+                                 must come from the chain's RPC rather than the API: set \
+                                 consensus_url or light_client_config on the builder"
+                                    .to_string(),
+                            ));
+                        }
+                        derived
+                    }
+                };
 
                 let config = LightClientConfig::builder("willow-chain")
                     .validator_endpoints(vec![rpc_endpoint])
@@ -482,11 +500,11 @@ impl WillowClient {
         self.request("GET", "/health", None::<&()>, false).await
     }
 
-    /// Get the verified root hash from the blockchain consensus.
+    /// Get the root hash the API reports as committed (`GET /state/root-hash/verified`).
     ///
-    /// This method returns the root hash that has been verified through blockchain consensus,
-    /// providing stronger security guarantees than the local root hash. This is the recommended
-    /// method for applications that need cryptographic proof of the current state.
+    /// The API's word, unverified: this SDK checks no signature or proof of it. To check a proof
+    /// against the chain, use the light client's [`LightClient::app_hash_after`], which reads the
+    /// header from the CometBFT RPC.
     ///
     /// # Returns
     /// The current verified root hash as a hex string
@@ -510,11 +528,8 @@ impl WillowClient {
 
     /// Get the local root hash from the node's current state.
     ///
-    /// This method returns the root hash from the node's local state, which may not yet be
-    /// verified through consensus. This is useful for debugging or when you need the absolute
-    /// latest state, but it provides weaker security guarantees than `get_root_hash()`.
-    ///
-    /// For most applications, use `get_root_hash()` instead for verified blockchain state.
+    /// This method returns the root hash from the node's local state, as the API reports it
+    /// (unverified, like [`Self::get_root_hash`]). Useful for debugging.
     ///
     /// # Returns
     /// The current local root hash as a hex string
