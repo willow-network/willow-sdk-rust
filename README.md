@@ -178,6 +178,19 @@ let request = StoreDataRequest {
 let tx_hash = consensus_client.store_data(request, &signing_key).await?;
 ```
 
+`data` is sent as its JSON text. The client fetches the nonce, then signs labelled lines that bind it and every field the transaction writes, joined by `\n` with no trailing newline:
+
+```text
+StoreData
+Subgrove: <subgrove_id>
+Key: <key>
+Owner: <owner_did>
+DataHash: <lowercase hex SHA-256 of the data bytes the transaction carries>
+Nonce: <nonce>
+```
+
+`UpdateData` signs the same lines under its own name. `DeleteData` and a file delete's `DeleteFileManifest` sign `Subgrove`, `Key`, `Owner`, and `Nonce`. A file upload's `StoreFileManifest` signs every manifest field: `Subgrove`, `Key`, `Owner`, `Filename`, `ContentType`, `TotalSize`, `ContentHash`, `ChunkCount`, `ChunkSize`, `ChunkMerkleRoot`, `Encryption` (`none`, or `<key epoch>:<hex nonce>`), and `Nonce`. A subgrove ID, key, owner DID, filename, or content type holding a line break is refused. The `signed_messages` module builds each message from the transaction it signs (`store_data`, `update_data`, `delete_data`, `store_file_manifest`, `delete_file_manifest`).
+
 ## DID Operations
 
 ### Generate DIDs

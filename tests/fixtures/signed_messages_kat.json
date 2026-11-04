@@ -1,0 +1,108 @@
+{
+  "from_height": 1350000,
+  "private_key_seed_hex": "0303030303030303030303030303030303030303030303030303030303030303",
+  "public_key_id": "did:willow:a#key-1",
+  "ed25519_public_key_hex": "ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d1",
+  "secp256k1_public_key_compressed_hex": "02531fe6068134503d2723133227c867ac8fa6c83c537e9a44c3c5bdbdcb1fe337",
+  "vectors": [
+    {
+      "name": "StoreData",
+      "inputs": {
+        "subgrove_id": "sg-1",
+        "key": "doc1",
+        "owner_did": "did:willow:a",
+        "data_utf8": "{\"title\":\"Hello\",\"value\":42}",
+        "nonce": 7
+      },
+      "message": "StoreData\nSubgrove: sg-1\nKey: doc1\nOwner: did:willow:a\nDataHash: 121f48fb1c55f98e25ce615dd67aaf29d5b64da09103b70e4ccd7caf1be839d9\nNonce: 7",
+      "ed25519_signature_hex": "de9b742f3540cee197950a73aa7b8d55522edd16f8fce483f3416dff337c3f7ca7a6048e3b5094b14c6ee4bf476e857bee912bd21ad585160c111ac9fc23cb01",
+      "secp256k1_keccak256_hex": "2f14c04dc6d5ba9313c123570daed7ecc05f74405c87d7465bd2272e798afee1",
+      "secp256k1_compact_signature_hex": "b859def195418418c7f94a7d6375d531343730f551c9ff199f3649dfcff451ec29abef456c401eca7bb30f20dc9fb1db66d2e10c9101c0f6c7e1646175316f81"
+    },
+    {
+      "name": "UpdateData",
+      "inputs": {
+        "subgrove_id": "sg-1",
+        "key": "doc1",
+        "owner_did": "did:willow:a",
+        "data_utf8": "{}",
+        "nonce": 8
+      },
+      "message": "UpdateData\nSubgrove: sg-1\nKey: doc1\nOwner: did:willow:a\nDataHash: 44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\nNonce: 8",
+      "ed25519_signature_hex": "785db0aab830f079051dc3969b7e0ac42e332676511918879815a8fd77a6a315343a47ed38229447736d1e6901d1893a6211705e1e1e846b5858f0c46dc11202",
+      "secp256k1_keccak256_hex": "062bb37be0aa0023f397f9d7b86d35439fe6856cca9a75316d2ab7a651fee5c6",
+      "secp256k1_compact_signature_hex": "c32eb310906d3940b19e15ed36d17d722674c6ee31c4aa4b6bde0d5e5870ac0a68a6e5ad7019a7f72a1813cd17c0825d29d10bf147d333229110c61816d53d37"
+    },
+    {
+      "name": "DeleteData",
+      "inputs": {
+        "subgrove_id": "sg-1",
+        "key": "doc1",
+        "owner_did": "did:willow:a",
+        "nonce": 10
+      },
+      "message": "DeleteData\nSubgrove: sg-1\nKey: doc1\nOwner: did:willow:a\nNonce: 10",
+      "ed25519_signature_hex": "cb71bda21958bc7fbdc439933ec1db2d30ec6c2fc8690742d60c5d4981147ced1afd8539ce5828f58146da4bd8800849f79bbe81b2fe06ae651be5e515122c0c",
+      "secp256k1_keccak256_hex": "d13ac5fbb00f9be2f381a06506137ba9e894d1e8288880202c73f139539e1997",
+      "secp256k1_compact_signature_hex": "a92d8872a7b8f3d7874ba03a7d00a8dee0500a82d70011d6b47e0693408bec0855653d17f6e5a734595425d3819af7fc5117661cd74cc799aa0ee22577d9483e"
+    },
+    {
+      "name": "StoreFileManifest",
+      "inputs": {
+        "subgrove_id": "files-1",
+        "file_key": "photo.png",
+        "owner_did": "did:willow:a",
+        "filename": "photo.png",
+        "content_type": "image/png",
+        "total_size": 1048577,
+        "content_hash_hex": "1111111111111111111111111111111111111111111111111111111111111111",
+        "chunk_count": 2,
+        "chunk_size": 1048576,
+        "chunk_merkle_root_hex": "2222222222222222222222222222222222222222222222222222222222222222",
+        "encryption": null,
+        "nonce": 9
+      },
+      "message": "StoreFileManifest\nSubgrove: files-1\nKey: photo.png\nOwner: did:willow:a\nFilename: photo.png\nContentType: image/png\nTotalSize: 1048577\nContentHash: 1111111111111111111111111111111111111111111111111111111111111111\nChunkCount: 2\nChunkSize: 1048576\nChunkMerkleRoot: 2222222222222222222222222222222222222222222222222222222222222222\nEncryption: none\nNonce: 9",
+      "ed25519_signature_hex": "49d3a88692df5436585a30077cc71303f0459a7479a4d1d9b531ea5df655715ec93b4837a694cb2640e908532293f28633a02b0e725c14e01805336c22a87205",
+      "secp256k1_keccak256_hex": "b666e01faf742fe92666428f7e5366f136ab4803cbb4876707e5518f8a5a730f",
+      "secp256k1_compact_signature_hex": "a77698a4b453f7668eebf721c07dea0c044d0fc1c4466555865726c7363b662e006afa66ba80d2dbb3f286986b6d2d3ddebad910102ceeb2e31a1460da044c4c"
+    },
+    {
+      "name": "StoreFileManifest (encrypted)",
+      "inputs": {
+        "subgrove_id": "files-1",
+        "file_key": "photo.png",
+        "owner_did": "did:willow:a",
+        "filename": "photo.png",
+        "content_type": "image/png",
+        "total_size": 1048577,
+        "content_hash_hex": "1111111111111111111111111111111111111111111111111111111111111111",
+        "chunk_count": 2,
+        "chunk_size": 1048576,
+        "chunk_merkle_root_hex": "2222222222222222222222222222222222222222222222222222222222222222",
+        "encryption": {
+          "key_epoch": 3,
+          "nonce_hex": "abababababababababababababababababababababababab"
+        },
+        "nonce": 9
+      },
+      "message": "StoreFileManifest\nSubgrove: files-1\nKey: photo.png\nOwner: did:willow:a\nFilename: photo.png\nContentType: image/png\nTotalSize: 1048577\nContentHash: 1111111111111111111111111111111111111111111111111111111111111111\nChunkCount: 2\nChunkSize: 1048576\nChunkMerkleRoot: 2222222222222222222222222222222222222222222222222222222222222222\nEncryption: 3:abababababababababababababababababababababababab\nNonce: 9",
+      "ed25519_signature_hex": "f963d00b3ca568cccd11108cb6337ca5e55e00f7bf9d3a63e16ace78d0659420b0c22345d90752bbfe474b1df0064ebd8a5ffd9129150290c431241da8614105",
+      "secp256k1_keccak256_hex": "d855d5a1bb4f1e0e93a2ce8cb764aa6e1805ed8cc82df1673f7470d13b4628a9",
+      "secp256k1_compact_signature_hex": "99071dd5c15e601093a6441de6045c8243e97b8d92e788b286fb47c572c915d62ef77fea6a5bfffea817aafd1e45059dbdeca10914aad9a9347c6e449d59bafa"
+    },
+    {
+      "name": "DeleteFileManifest",
+      "inputs": {
+        "subgrove_id": "files-1",
+        "file_key": "photo.png",
+        "owner_did": "did:willow:a",
+        "nonce": 11
+      },
+      "message": "DeleteFileManifest\nSubgrove: files-1\nKey: photo.png\nOwner: did:willow:a\nNonce: 11",
+      "ed25519_signature_hex": "084b551d5982d0d626320efaef0bf3f01967a1a4a80cfcdc69e18b9e535be564745cdf112827847fc90307258d939b2fd76b43874d793c007e67a2725d3d2307",
+      "secp256k1_keccak256_hex": "45e3258e3c93223e93d4745e92d922b48785816ab50d40e401fc91cdb725c2b2",
+      "secp256k1_compact_signature_hex": "80dfb0839e7a0c39b242a339dc1b196069c5bc4bfb18aaeb357b11f8f5b14ac17e0d0d7513c001110385869a35830f4f02cbe56b991e93af22b487ac35b7ea35"
+    }
+  ]
+}

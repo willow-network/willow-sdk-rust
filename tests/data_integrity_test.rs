@@ -4,7 +4,7 @@ use ed25519_dalek::{Signer, SigningKey};
 use serde_json::json;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::time::sleep;
-use willow_sdk::{ConsensusClient, WillowClient};
+use willow_sdk::{signed_messages, ConsensusClient, WillowClient};
 
 // RFC 8032 §7.1 Test 2 Ed25519 vector.
 const PRIVATE_KEY_HEX: &str = "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb";
@@ -241,34 +241,20 @@ async fn data_integrity_test() {
     });
 
     // Use UpdateData transaction
-    use sha3::{Digest, Keccak256};
+    let mut update_tx = signed_messages::UpdateDataTx {
+        subgrove_id: subgrove_name.clone(),
+        key: test_key.to_string(),
+        data: serde_json::to_vec(&updated_data).unwrap(),
+        owner_did: funded_did.clone(),
+        signature: vec![],
+        public_key_id: format!("{}#key-1", funded_did),
+        nonce,
+    };
+    let message = signed_messages::update_data(&update_tx).unwrap();
+    update_tx.signature = signing_key.sign(message.as_bytes()).to_bytes().to_vec();
+    let update_json = ConsensusClient::serialize_tx("UpdateData", &update_tx).unwrap();
 
-    let message = format!(
-        "UpdateData:{}:{}:{}",
-        subgrove_name,
-        test_key,
-        serde_json::to_string(&updated_data).unwrap()
-    );
-
-    let mut hasher = Keccak256::new();
-    hasher.update(message.as_bytes());
-    let hash = hasher.finalize();
-    let signature = signing_key.sign(&hash);
-
-    let update_tx = json!({
-        "UpdateData": {
-
-            "subgrove_id": subgrove_name,
-            "key": test_key,
-            "data": updated_data,
-            "owner_did": funded_did,
-            "signature": hex::encode(signature.to_bytes()),
-            "public_key_id": format!("{}#key-1", funded_did),
-            "nonce": nonce
-        }
-    });
-
-    match submit_transaction(&consensus, &update_tx).await {
+    match consensus.submit_transaction_json(&update_json).await {
         Ok(tx) => println!("  ✅ Updated item: {}", tx),
         Err(e) => println!("  ❌ Failed to update item: {}", e),
     }
@@ -376,26 +362,19 @@ async fn data_integrity_test() {
     println!("\n🧪 Test 5: DELETE - Testing deletion...");
 
     // Delete item_003 using consensus transaction
-    let message = format!("DeleteData:{}:{}", subgrove_name, "item_003");
+    let mut delete_tx = signed_messages::DeleteDataTx {
+        subgrove_id: subgrove_name.clone(),
+        key: "item_003".to_string(),
+        owner_did: funded_did.clone(),
+        signature: vec![],
+        public_key_id: format!("{}#key-1", funded_did),
+        nonce,
+    };
+    let message = signed_messages::delete_data(&delete_tx).unwrap();
+    delete_tx.signature = signing_key.sign(message.as_bytes()).to_bytes().to_vec();
+    let delete_json = ConsensusClient::serialize_tx("DeleteData", &delete_tx).unwrap();
 
-    let mut hasher = Keccak256::new();
-    hasher.update(message.as_bytes());
-    let hash = hasher.finalize();
-    let signature = signing_key.sign(&hash);
-
-    let delete_tx = json!({
-        "DeleteData": {
-
-            "subgrove_id": subgrove_name,
-            "key": "item_003",
-            "owner_did": funded_did,
-            "signature": hex::encode(signature.to_bytes()),
-            "public_key_id": format!("{}#key-1", funded_did),
-            "nonce": nonce
-        }
-    });
-
-    match submit_transaction(&consensus, &delete_tx).await {
+    match consensus.submit_transaction_json(&delete_json).await {
         Ok(tx_hash) => {
             println!("  ✅ Deleted item_003: {}", tx_hash);
             sleep(Duration::from_secs(5)).await;
@@ -559,24 +538,20 @@ async fn store_data(
     signing_key: &SigningKey,
     nonce: u64,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let data_json = serde_json::to_string(&data)?;
-    let message = format!("{}:{}:{}", subgrove_id, key, data_json);
-    let signature = signing_key.sign(message.as_bytes());
+    let mut tx = signed_messages::StoreDataTx {
+        subgrove_id: subgrove_id.to_string(),
+        key: key.to_string(),
+        data: serde_json::to_vec(&data)?,
+        owner_did: owner_did.to_string(),
+        signature: vec![],
+        public_key_id: format!("{}#key-1", owner_did),
+        nonce,
+    };
+    let message = signed_messages::store_data(&tx)?;
+    tx.signature = signing_key.sign(message.as_bytes()).to_bytes().to_vec();
 
-    let transaction = json!({
-        "StoreData": {
-
-            "subgrove_id": subgrove_id,
-            "key": key,
-            "data": data,
-            "owner_did": owner_did,
-            "signature": signature.to_bytes().to_vec(),
-            "public_key_id": format!("{}#key-1", owner_did),
-            "nonce": nonce
-        }
-    });
-
-    submit_transaction(consensus, &transaction).await
+    let tx_json = ConsensusClient::serialize_tx("StoreData", &tx)?;
+    Ok(consensus.submit_transaction_json(&tx_json).await?)
 }
 
 async fn submit_transaction(

@@ -2,6 +2,7 @@
 
 use crate::auth::sign_challenge;
 use crate::errors::{Result, WillowError};
+use crate::signed_messages::{self, StoreDataTx};
 use crate::types::{DidDocument, RegisterSubgroveRequest, SignatureAlgorithm, StoreDataRequest};
 use base64::Engine;
 use ed25519_dalek::{Signer, SigningKey};
@@ -843,26 +844,35 @@ impl ConsensusClient {
         self.submit_transaction(&tx_json).await
     }
 
-    /// Store data using SigningKey
+    /// Store data using SigningKey.
+    ///
+    /// `request.data` is sent as its JSON text, and the transaction is signed over
+    /// [`signed_messages::store_data`] with the nonce fetched here (`request.nonce` and
+    /// `request.signature` are ignored).
     pub async fn store_data(
         &self,
-        mut request: StoreDataRequest,
+        request: StoreDataRequest,
         signing_key: &SigningKey,
     ) -> Result<String> {
-        request.nonce = self.get_next_nonce(&request.owner_did).await?;
-        let data_json =
-            serde_json::to_string(&request.data).map_err(|e| WillowError::Serialization(e))?;
-        let message = format!("{}:{}:{}", request.subgrove_id, request.key, data_json);
+        let nonce = self.get_next_nonce(&request.owner_did).await?;
+        let mut tx = StoreDataTx {
+            subgrove_id: request.subgrove_id,
+            key: request.key,
+            data: serde_json::to_vec(&request.data)?,
+            owner_did: request.owner_did,
+            signature: vec![],
+            public_key_id: request.public_key_id,
+            nonce,
+        };
+        let message = signed_messages::store_data(&tx)?;
+        tx.signature = signing_key.sign(message.as_bytes()).to_bytes().to_vec();
 
-        // Sign the message
-        let signature = signing_key.sign(message.as_bytes());
-        request.signature = signature.to_bytes().to_vec();
-
-        let tx_json = Self::serialize_tx("StoreData", &request)?;
+        let tx_json = Self::serialize_tx("StoreData", &tx)?;
         self.submit_transaction(&tx_json).await
     }
 
-    /// Delete data using SigningKey
+    /// Delete data using SigningKey, signed over [`signed_messages::delete_data`] with the
+    /// nonce fetched here.
     pub async fn delete_data(
         &self,
         subgrove_id: &str,
@@ -872,17 +882,17 @@ impl ConsensusClient {
         signing_key: &SigningKey,
     ) -> Result<String> {
         let nonce = self.get_next_nonce(owner_did).await?;
-        let message = format!("DeleteData:{}:{}", subgrove_id, key);
-        let signature = signing_key.sign(message.as_bytes());
-
-        let delete_tx = DeleteDataTx {
+        let mut delete_tx = DeleteDataTx {
             subgrove_id: subgrove_id.to_string(),
             key: key.to_string(),
             owner_did: owner_did.to_string(),
-            signature: signature.to_bytes().to_vec(),
+            signature: vec![],
             public_key_id: public_key_id.to_string(),
             nonce,
         };
+        let message = signed_messages::delete_data(&delete_tx)?;
+        delete_tx.signature = signing_key.sign(message.as_bytes()).to_bytes().to_vec();
+
         let tx_json = Self::serialize_tx("DeleteData", &delete_tx)?;
         self.submit_transaction(&tx_json).await
     }
