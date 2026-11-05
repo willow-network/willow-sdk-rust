@@ -58,6 +58,13 @@ const ENVELOPE_DECODE_LIMIT: usize =
 /// The largest merk node value: its length is a u16.
 const MAX_ELEMENT_BYTES: usize = u16::MAX as usize;
 
+/// The length of an element a proof can't tell from a subtree or a reference. A node's value
+/// hash is blake3 over the value's length (a varint) and the value; a subtree's or a
+/// reference's is `combine_hash`, blake3 over two 32-byte hashes. For a 63-byte value the two
+/// inputs are both 64 bytes, so a `KV` node of 63 bytes can stand for a subtree or reference
+/// whose hashes are ground to match.
+const AMBIGUOUS_ELEMENT_LEN: usize = 63;
+
 fn envelope_error(m: impl std::fmt::Display) -> WillowError {
     WillowError::ProofVerificationFailed(format!("GroveDB envelope: {m}"))
 }
@@ -343,6 +350,12 @@ fn check_all_layers(v0: &GroveDBProofV0) -> Result<()> {
     Ok(())
 }
 
+/// Whether the subtree at `path` holds only Items: a subgrove's data tree
+/// (`[subgroves, <subgrove id>, data]`), where the chain stores each key's value as an Item.
+fn holds_only_items(path: &[Vec<u8>]) -> bool {
+    matches!(path, [subgroves, _, data] if subgroves == b"subgroves" && data == b"data")
+}
+
 /// Verify that `proof` proves an Item at `key` in the subtree at `path`, and return the root it
 /// computes and the item's bytes. Nothing else passes: the proof must descend exactly `path`
 /// ([`check_envelope`]), keep its opaque nodes childless and its values elements within their
@@ -398,6 +411,12 @@ pub fn verify_item_at_path(
             )),
             None => return Err(fail("the proof doesn't carry the key's element".into())),
         };
+    if value.len() == AMBIGUOUS_ELEMENT_LEN && !holds_only_items(path) {
+        return Err(fail(format!(
+            "the key's element is {AMBIGUOUS_ELEMENT_LEN} bytes, which a proof can't tell from a \
+             subtree or a reference outside a subgrove's data tree"
+        )));
+    }
 
     let version = grovedb_version::version::GroveVersion::latest();
     let path_query = PathQuery::new_unsized(path.to_vec(), Query::new_single_key(key.to_vec()));
@@ -748,6 +767,47 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("doesn't bind its value"), "{err}");
+    }
+
+    /// An Item with a 60-byte value and no flags is 63 bytes, the length whose `KV` node a proof
+    /// can't tell from a subtree's or a reference's: refused outside a subgrove's data tree,
+    /// accepted in it, where the chain stores only Items.
+    #[test]
+    fn a_63_byte_element_is_refused_outside_a_subgroves_data_tree() {
+        use super::test_proofs::item_proof;
+        let value = [b'v'; 60];
+        let entity_tree = vec![
+            b"subgroves".to_vec(),
+            b"sg-1".to_vec(),
+            b"indexed".to_vec(),
+            b"Supply".to_vec(),
+        ];
+        let (proof, _) = item_proof(&entity_tree, b"k", &value);
+        let err = verify_item_at_path(&proof, &entity_tree, b"k")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("63 bytes"), "{err}");
+        assert!(ProofVerifier::verify_item_at_path(
+            &hex::encode(&proof),
+            &entity_tree,
+            b"k",
+            &value
+        )
+        .is_err());
+        for n in [59, 61] {
+            let other = vec![b'v'; n];
+            let (proof, root) = item_proof(&entity_tree, b"k", &other);
+            assert_eq!(
+                verify_item_at_path(&proof, &entity_tree, b"k").unwrap(),
+                (root, other)
+            );
+        }
+        let data = crate::proof::subgrove_data_path("sg-1");
+        let (proof, root) = item_proof(&data, b"k", &value);
+        assert_eq!(
+            verify_item_at_path(&proof, &data, b"k").unwrap(),
+            (root, value.to_vec())
+        );
     }
 
     #[test]
