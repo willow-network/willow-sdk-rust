@@ -2294,7 +2294,7 @@ dependencies = [
 [[package]]
 name = "grovedb"
 version = "3.1.0"
-source = "git+https://github.com/willow-network/grovedb?rev=ad96737272685258f51b1172b458af42dd49497c#ad96737272685258f51b1172b458af42dd49497c"
+source = "git+https://github.com/willow-network/grovedb?rev=447327f403ac3dba1b889714e3fbad6eef318b86#447327f403ac3dba1b889714e3fbad6eef318b86"
 dependencies = [
  "bincode 2.0.0-rc.3",
  "bincode_derive",
@@ -2315,7 +2315,7 @@ dependencies = [
 [[package]]
 name = "grovedb-costs"
 version = "3.1.0"
-source = "git+https://github.com/willow-network/grovedb?rev=ad96737272685258f51b1172b458af42dd49497c#ad96737272685258f51b1172b458af42dd49497c"
+source = "git+https://github.com/willow-network/grovedb?rev=447327f403ac3dba1b889714e3fbad6eef318b86#447327f403ac3dba1b889714e3fbad6eef318b86"
 dependencies = [
  "integer-encoding",
  "intmap",
@@ -2325,7 +2325,7 @@ dependencies = [
 [[package]]
 name = "grovedb-merk"
 version = "3.1.0"
-source = "git+https://github.com/willow-network/grovedb?rev=ad96737272685258f51b1172b458af42dd49497c#ad96737272685258f51b1172b458af42dd49497c"
+source = "git+https://github.com/willow-network/grovedb?rev=447327f403ac3dba1b889714e3fbad6eef318b86#447327f403ac3dba1b889714e3fbad6eef318b86"
 dependencies = [
  "bincode 2.0.0-rc.3",
  "bincode_derive",
@@ -2345,7 +2345,7 @@ dependencies = [
 [[package]]
 name = "grovedb-path"
 version = "3.1.0"
-source = "git+https://github.com/willow-network/grovedb?rev=ad96737272685258f51b1172b458af42dd49497c#ad96737272685258f51b1172b458af42dd49497c"
+source = "git+https://github.com/willow-network/grovedb?rev=447327f403ac3dba1b889714e3fbad6eef318b86#447327f403ac3dba1b889714e3fbad6eef318b86"
 dependencies = [
  "hex",
 ]
@@ -2353,7 +2353,7 @@ dependencies = [
 [[package]]
 name = "grovedb-version"
 version = "3.1.0"
-source = "git+https://github.com/willow-network/grovedb?rev=ad96737272685258f51b1172b458af42dd49497c#ad96737272685258f51b1172b458af42dd49497c"
+source = "git+https://github.com/willow-network/grovedb?rev=447327f403ac3dba1b889714e3fbad6eef318b86#447327f403ac3dba1b889714e3fbad6eef318b86"
 dependencies = [
  "thiserror 2.0.17",
  "versioned-feature-core",
@@ -2362,7 +2362,7 @@ dependencies = [
 [[package]]
 name = "grovedb-visualize"
 version = "3.1.0"
-source = "git+https://github.com/willow-network/grovedb?rev=ad96737272685258f51b1172b458af42dd49497c#ad96737272685258f51b1172b458af42dd49497c"
+source = "git+https://github.com/willow-network/grovedb?rev=447327f403ac3dba1b889714e3fbad6eef318b86#447327f403ac3dba1b889714e3fbad6eef318b86"
 dependencies = [
  "hex",
  "itertools 0.14.0",

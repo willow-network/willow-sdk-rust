@@ -271,9 +271,12 @@ fn decode_envelope(proof: &[u8]) -> Result<GroveDBProofV0> {
     Ok(v0)
 }
 
-/// A merk node's value as the GroveDB element it encodes, decoded within the value's own size
-/// bound. grovedb decodes the values it reads with no limit, so a value that claims more than
-/// it holds is refused here before grovedb sees it.
+/// A merk node's value as the GroveDB element it encodes, decoded within a bound proportional
+/// to the value's own size. bincode resizes (zeroes) a byte string to its claimed length before
+/// reading it, so a fixed bound would let every few bytes of a hostile value force a large
+/// allocation. The claim limit is the smallest power of two at least 32 times the value's
+/// length (at least 1 KiB): bincode claims `len * size_of::<T>()` for a container, 24 bytes for
+/// each reference path segment, which takes as little as 1 serialized byte.
 fn decode_element(value: &[u8]) -> Result<Element> {
     if value.len() > MAX_ELEMENT_BYTES {
         return Err(WillowError::ProofVerificationFailed(format!(
@@ -281,10 +284,23 @@ fn decode_element(value: &[u8]) -> Result<Element> {
             value.len()
         )));
     }
-    let config = bincode2::config::standard()
-        .with_big_endian()
-        .with_limit::<MAX_ELEMENT_BYTES>();
-    bincode2::decode_from_slice::<Element, _>(value, config)
+    macro_rules! decode_in_class {
+        ($class:expr, $($bits:literal)*) => {
+            match $class {
+                $(
+                    c if c == 1usize << $bits => bincode2::decode_from_slice::<Element, _>(
+                        value,
+                        bincode2::config::standard()
+                            .with_big_endian()
+                            .with_limit::<{ 1usize << $bits }>(),
+                    ),
+                )*
+                _ => Err(bincode2::error::DecodeError::LimitExceeded),
+            }
+        };
+    }
+    let class = (value.len() * 32).max(1 << 10).next_power_of_two();
+    decode_in_class!(class, 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25)
         .map(|(element, _)| element)
         .map_err(|e| {
             WillowError::ProofVerificationFailed(format!(
@@ -1244,6 +1260,35 @@ mod hostile_proofs {
             "{held} bytes held for {} bytes of ops",
             pushes.len()
         );
+    }
+
+    /// A value of six bytes claiming a 67,108,863-byte item: decoded under a limit proportional
+    /// to its length, it is refused without the allocation, however many nodes carry it.
+    #[test]
+    fn lying_element_lengths_cost_no_large_allocations() {
+        let bomb = vec![0x00u8, 0xFC, 0x03, 0xF0, 0x00, 0x00];
+        let ops: Vec<Op> = (0..50u32)
+            .map(|i| {
+                Op::Push(Node::KVValueHash(
+                    i.to_be_bytes().to_vec(),
+                    bomb.clone(),
+                    [0; 32],
+                ))
+            })
+            .collect();
+        let v0 = GroveDBProofV0 {
+            root_layer: LayerProof {
+                merk_proof: encode_ops(&ops),
+                lower_layers: Default::default(),
+            },
+            prove_options: ProveOptions::default(),
+        };
+        let config = bincode2::config::standard().with_big_endian();
+        let proof = bincode2::encode_to_vec(GroveDBProof::V0(v0), config).unwrap();
+        let started = std::time::Instant::now();
+        let err = check_layers(&proof).unwrap_err().to_string();
+        assert!(err.contains("not an element"), "{err}");
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 
     /// Real proofs from the Willow GroveDB fork's prover: a 70,000-byte item, whose merk op is a
