@@ -54,10 +54,11 @@ impl FileOperations {
 
     /// Upload a file to a FileStorage subgrove.
     ///
-    /// When `signing_key` is provided, the manifest transaction is signed with
-    /// the given Ed25519 key over [`crate::signed_messages::store_file_manifest`],
-    /// which binds every manifest field and the nonce taken here. The
-    /// `public_key_id` is required for signed transactions.
+    /// The manifest transaction is signed with `signing_key` over
+    /// [`crate::signed_messages::store_file_manifest`], which binds every manifest field and the
+    /// nonce taken here, under `public_key_id`. The node refuses an unsigned manifest, so without
+    /// both this is refused ([`WillowError::Validation`]) before anything is sent; they are
+    /// `Option`s only for compatibility.
     ///
     /// Chunks go to the storage node only once the manifest has landed in a block and executed:
     /// storage nodes check the on-chain manifest before they accept chunks. A manifest not in a
@@ -74,6 +75,7 @@ impl FileOperations {
         public_key_id: Option<&str>,
     ) -> Result<FileManifest> {
         self.ensure_authenticated()?;
+        let (signing_key, pub_key_id) = require_signing("upload", signing_key, public_key_id)?;
 
         let chunk_size = DEFAULT_CHUNK_SIZE;
         let chunks = chunk_data(data, chunk_size);
@@ -91,10 +93,6 @@ impl FileOperations {
         let content_type = guess_content_type(filename);
 
         let consensus = self.client.require_consensus("upload")?;
-        let pub_key_id = match signing_key {
-            Some(_) => public_key_id.unwrap_or("").to_string(),
-            None => String::new(),
-        };
 
         // Submit the manifest to consensus via the CometBFT RPC, as the chain's own
         // StoreFileManifestTx.
@@ -119,10 +117,8 @@ impl FileOperations {
                     public_key_id: pub_key_id,
                     nonce,
                 };
-                if let Some(key) = signing_key {
-                    let message = signed_messages::store_file_manifest(&manifest_tx)?;
-                    manifest_tx.signature = key.sign(message.as_bytes()).to_bytes().to_vec();
-                }
+                let message = signed_messages::store_file_manifest(&manifest_tx)?;
+                manifest_tx.signature = signing_key.sign(message.as_bytes()).to_bytes().to_vec();
                 Ok(Transaction::StoreFileManifest(manifest_tx))
             })
             .await?;
@@ -292,8 +288,10 @@ impl FileOperations {
 
     /// Delete a file (submits DeleteFileManifestTx to consensus).
     ///
-    /// When `signing_key` is provided, the delete transaction is signed over
-    /// [`crate::signed_messages::delete_file_manifest`] with the nonce taken here.
+    /// The delete transaction is signed with `signing_key` over
+    /// [`crate::signed_messages::delete_file_manifest`] with the nonce taken here, under
+    /// `public_key_id`. Without both it is refused ([`WillowError::Validation`]) before anything
+    /// is sent, as the node refuses an unsigned delete.
     pub async fn delete(
         &self,
         subgrove_id: &str,
@@ -302,16 +300,13 @@ impl FileOperations {
         public_key_id: Option<&str>,
     ) -> Result<()> {
         self.ensure_authenticated()?;
+        let (signing_key, pub_key_id) = require_signing("delete", signing_key, public_key_id)?;
 
         let owner_did = self.client.get_did().ok_or_else(|| {
             WillowError::Authentication("Set identity before file operations".to_string())
         })?;
 
         let consensus = self.client.require_consensus("delete")?;
-        let pub_key_id = match signing_key {
-            Some(_) => public_key_id.unwrap_or("").to_string(),
-            None => String::new(),
-        };
 
         use crate::signed_messages::{self, DeleteFileManifestTx};
         use willow_types::consensus::transactions::Transaction;
@@ -326,10 +321,8 @@ impl FileOperations {
                     public_key_id: pub_key_id,
                     nonce,
                 };
-                if let Some(key) = signing_key {
-                    let message = signed_messages::delete_file_manifest(&delete_tx)?;
-                    delete_tx.signature = key.sign(message.as_bytes()).to_bytes().to_vec();
-                }
+                let message = signed_messages::delete_file_manifest(&delete_tx)?;
+                delete_tx.signature = signing_key.sign(message.as_bytes()).to_bytes().to_vec();
                 Ok(Transaction::DeleteFileManifest(delete_tx))
             })
             .await?;
@@ -375,6 +368,21 @@ impl FileOperations {
             ));
         }
         Ok(())
+    }
+}
+
+/// The key and key ID a file transaction is signed with: the node refuses one unsigned.
+fn require_signing<'a>(
+    operation: &str,
+    signing_key: Option<&'a SigningKey>,
+    public_key_id: Option<&str>,
+) -> Result<(&'a SigningKey, String)> {
+    match (signing_key, public_key_id) {
+        (Some(key), Some(id)) if !id.is_empty() => Ok((key, id.to_string())),
+        _ => Err(WillowError::Validation(format!(
+            "{operation} needs a signing key and its public key ID: the node refuses an unsigned \
+             file transaction"
+        ))),
     }
 }
 
@@ -479,4 +487,37 @@ fn guess_content_type(filename: &str) -> String {
         _ => "application/octet-stream",
     }
     .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::SignatureAlgorithm;
+    use wiremock::MockServer;
+
+    #[tokio::test]
+    async fn unsigned_uploads_and_deletes_are_refused_before_anything_is_sent() {
+        let server = MockServer::start().await;
+        let client = WillowClient::builder()
+            .api_url(&server.uri())
+            .consensus_url(&server.uri())
+            .build()
+            .await
+            .unwrap();
+        client.set_identity_with_algorithm(
+            "did:willow:a",
+            &"03".repeat(32),
+            "did:willow:a#key-1",
+            SignatureAlgorithm::Ed25519,
+        );
+        let files = client.files();
+        let err = files
+            .upload("sg", "k", "a.txt", b"hello", &server.uri(), None, None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, WillowError::Validation(_)), "{err}");
+        let err = files.delete("sg", "k", None, None).await.unwrap_err();
+        assert!(matches!(err, WillowError::Validation(_)), "{err}");
+        assert!(server.received_requests().await.unwrap().is_empty());
+    }
 }

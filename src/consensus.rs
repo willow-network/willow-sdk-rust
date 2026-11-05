@@ -1041,12 +1041,18 @@ impl ConsensusClient {
     ///
     /// `request.data` is sent as its JSON text, and the transaction is signed over
     /// [`signed_messages::store_data`] with the nonce taken here (`request.nonce` and
-    /// `request.signature` are ignored).
+    /// `request.signature` are ignored). The node stores only a JSON object: other data is
+    /// refused ([`WillowError::Validation`]) before a nonce is taken.
     pub async fn store_data(
         &self,
         request: StoreDataRequest,
         signing_key: &SigningKey,
     ) -> Result<String> {
+        if !request.data.is_object() {
+            return Err(WillowError::Validation(
+                "StoreData's data must be a JSON object; the node refuses any other".to_string(),
+            ));
+        }
         let data = serde_json::to_vec(&request.data)?;
         let owner = request.owner_did.clone();
         self.submit_with_nonce(&owner, |nonce| {
@@ -1425,6 +1431,33 @@ mod tests {
 
         assert_eq!(result.code, 1);
         assert!(result.log.contains("Insufficient"));
+    }
+
+    #[tokio::test]
+    async fn store_data_refuses_data_that_is_not_a_json_object_before_taking_a_nonce() {
+        let server = wiremock::MockServer::start().await;
+        let client = ConsensusClient::new(&server.uri());
+        let key = SigningKey::from_bytes(&[7; 32]);
+        for data in [
+            json!([1, 2]),
+            json!("text"),
+            json!(3),
+            json!(null),
+            json!(true),
+        ] {
+            let request = StoreDataRequest {
+                subgrove_id: "sg".into(),
+                key: "k".into(),
+                data: data.clone(),
+                owner_did: "did:willow:a".into(),
+                signature: vec![],
+                public_key_id: "did:willow:a#key-1".into(),
+                nonce: 0,
+            };
+            let err = client.store_data(request, &key).await.unwrap_err();
+            assert!(matches!(err, WillowError::Validation(_)), "{data}: {err}");
+        }
+        assert!(server.received_requests().await.unwrap().is_empty());
     }
 
     /// A write whose outcome is unknown carries its DID, nonce, and the exact bytes it sent;
