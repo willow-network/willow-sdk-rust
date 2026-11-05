@@ -69,7 +69,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("   {}", serde_json::to_string_pretty(&data)?);
             }
             if response.proof.is_some() {
-                println!("   Proof included in response");
+                println!("   Proof included in response (the SDK doesn't check it)");
             }
             if let Some(errors) = response.errors {
                 for err in errors {
@@ -171,14 +171,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => println!("   Note: {}", e),
     }
 
-    // 7. Comparison with The Graph
-    println!("\n7. Willow vs The Graph...");
-    println!("   Willow advantages:");
-    println!("   + Cryptographic proofs for every query");
-    println!("   + Trustless verification of indexed data");
-    println!("   + No fisherman disputes needed");
-    println!("   + Instant finality on results");
-    println!("   + Native proof verification in SDK");
+    // 7. What the SDK verifies
+    println!("\n7. What is verified...");
+    println!("   - GraphQL and SQL answers are returned unverified: the server's word");
+    println!("   - data().get checks a value's proof against a CometBFT header's app hash");
+    println!("   - verifiable_rpc().query checks an indexer's proofs against the state root");
+    println!("     it names in the same answer, not against the chain");
 
     println!("\nGraphQL indexing example complete!");
     Ok(())

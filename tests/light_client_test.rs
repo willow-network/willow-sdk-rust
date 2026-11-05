@@ -229,10 +229,10 @@ async fn light_client_verification_test() {
 
     match client.data().query_unverified(&subgrove_name, query).await {
         Ok(response) => {
-            println!("  ✅ Query executed and verified!");
+            println!("  ✅ Query executed (unverified)");
             println!("  📊 Found {} documents", response.documents.len());
             if let Some(verified_root) = response.verified_root_hash {
-                println!("  🔐 Verified against root hash: {}", &verified_root[..16]);
+                println!("  📝 Root hash the API reports: {}", &verified_root[..16]);
             }
         }
         Err(e) => {

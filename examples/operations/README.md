@@ -35,15 +35,9 @@ Each example has a `CONFIGURATION` section at the top. Modify these values for y
 // CONFIGURATION - Modify these values for your testing
 // =========================================================================
 let subgrove_id = "users";
-let nonce: u64 = 0;
 // =========================================================================
 ```
 
-## Nonce Management
+## Nonces
 
-Each DID has a nonce that must increment with each transaction:
-- First transaction: `nonce = 0`
-- Second transaction: `nonce = 1`
-- etc.
-
-Track your nonces when running multiple examples with the same DID.
+The client takes each write's nonce itself: the lowest one the node accepts that the chain doesn't show used and no write from this client holds (see [Nonces](../../README.md#nonces)). A request's `nonce` field is ignored, so there is nothing to track between runs.

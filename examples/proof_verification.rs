@@ -58,17 +58,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => println!("   Note: {}\n", e),
     }
 
-    // 3. Query: refused, since nothing binds a query's documents to a proof
-    println!("3. Query with verification (refused)...");
+    // 3. Query: nothing binds a query's documents to a proof, so `data().query` always refuses
+    // and a query's documents come back unverified
+    println!("3. Query (unverified)...");
     let query = json!({ "limit": 5 });
-
-    match client.data().query(subgrove_id, query.clone()).await {
-        Ok(response) => println!("   Found {} documents\n", response.documents.len()),
-        Err(e) => println!("   Note: {}\n", e),
-    }
-
-    // 4. Query without verification (for comparison)
-    println!("4. Query without verification (unverified)...");
     match client.data().query_unverified(subgrove_id, query).await {
         Ok(response) => {
             println!("   Found {} documents", response.documents.len());
@@ -78,8 +71,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => println!("   Note: {}\n", e),
     }
 
-    // 5. Root hash comparison (both are the API's word, unverified)
-    println!("5. Root hash comparison (as the API reports them)...");
+    // 4. Root hash comparison (both are the API's word, unverified)
+    println!("4. Root hash comparison (as the API reports them)...");
     let verified_root = client.get_root_hash().await.ok();
     let local_root = client.get_root_hash_local().await.ok();
 
@@ -96,8 +89,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => println!("   Could not retrieve root hashes\n"),
     }
 
-    // 6. Summary
-    println!("6. Proof verification summary...");
+    // 5. Summary
+    println!("5. Proof verification summary...");
     println!("\n   VERIFIED READS:");
     println!("   - get() returns a value only when its proof binds it at its key");
     println!("     and its root is the app_hash of the header after the proof's block");

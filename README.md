@@ -49,7 +49,7 @@ cargo build
 
 ## Transaction submission
 
-Transactions submitted through this SDK are bincode-encoded by the client (the chain's on-the-wire format) and broadcast to CometBFT's `broadcast_tx_sync` at the consensus URL (`consensus_url` on the builder, or `ConsensusClient::new`). The client signs the exact transaction it encodes. A client built without a consensus URL can read but not write: the file and key-grant operations return a configuration error naming `consensus_url`. Byte fields of a transaction built as JSON (`signature`, `content`, `encrypted_key`, …) are arrays of numbers 0–255.
+Transactions submitted through this SDK are bincode-encoded by the client (the chain's on-the-wire format) and broadcast to CometBFT's `broadcast_tx_sync` at the consensus URL (`consensus_url` on the builder, or `ConsensusClient::new`). The client signs the exact transaction it encodes. A client built without a consensus URL can't write: the file and key-grant operations return a configuration error naming `consensus_url`. Its verified reads (`data().get`) need a consensus node too, from `consensus_url` or `light_client_config`, unless the API is on a loopback host at port 3031 (see [What is verified](#what-is-verified)); its unverified reads don't. Byte fields of a transaction built as JSON (`signature`, `content`, `encrypted_key`, …) are arrays of numbers 0–255.
 
 ### Nonces
 
@@ -79,19 +79,28 @@ use willow_sdk::{WillowClient, auth::generate_did, types::SignatureAlgorithm};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Create client
-    let client = WillowClient::new("http://localhost:3031").await?;
+    // Create a client for a local node: its API and its CometBFT RPC
+    let client = WillowClient::builder()
+        .api_url("http://localhost:3031")
+        .consensus_url("http://localhost:26657")
+        .build()
+        .await?;
 
-    // Generate DID
+    // Generate a DID. It is derived from its key, and must hold the registration fee
+    // (a transfer from a funded account) before it registers.
     let did_info = generate_did(SignatureAlgorithm::Ed25519)?;
+    client
+        .consensus()
+        .register_did(
+            &did_info.did_document,
+            &did_info.private_key_hex(),
+            &did_info.public_key_id,
+            SignatureAlgorithm::Ed25519,
+        )
+        .await?;
 
-    // Register and authenticate
-    client.register_did(&did_info.did_document).await?;
-    client.authenticate(
-        &did_info.did,
-        &did_info.private_key_hex(),
-        &did_info.public_key_id
-    ).await?;
+    // Sign each request as that DID
+    client.set_identity(&did_info.did, &did_info.private_key_hex(), &did_info.public_key_id);
 
     // Verified: the proof binds the value at its key under the chain's app hash
     let data = client.data().get("dataset_id", "key").await?;
@@ -310,7 +319,7 @@ you need them outside the example.
 
 ## GraphQL Indexing
 
-Query indexed blockchain data with cryptographic proofs:
+Query indexed blockchain data. GraphQL answers are returned unverified (see [What is verified](#what-is-verified)):
 
 ```rust
 // Query a subgrove
@@ -368,9 +377,9 @@ Subgroves are registered via consensus transactions:
 
 ```rust
 use willow_sdk::types::{RegisterSubgroveRequest, SchemaDefinition, FieldType};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
-let mut fields = HashMap::new();
+let mut fields = BTreeMap::new();
 fields.insert("id".to_string(), FieldType::String);
 fields.insert("name".to_string(), FieldType::String);
 fields.insert("balance".to_string(), FieldType::Number);

@@ -35,8 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "email": "alice@example.com"
     });
 
-    let nonce: u64 = 4; // Must be > previous nonce; increment for each tx
-                        // =========================================================================
+    // =========================================================================
 
     let client = WillowClient::builder()
         .api_url(api_url)
@@ -59,7 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         owner_did: owner_did.to_string(),
         signature: vec![],
         public_key_id: public_key_id.to_string(),
-        nonce,
+        nonce: 0, // ignored: the client takes the account's next free nonce
     };
 
     println!("Storing data: {}/{}", subgrove_id, key);
