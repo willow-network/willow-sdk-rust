@@ -139,9 +139,9 @@ impl PrivacyOperations {
     ///
     /// Grants the specified DID access to the subgrove's encryption key. Signed over
     /// [`signed_messages::grant_subgrove_key`], which binds every field of the grant and `nonce`;
-    /// a grantee that isn't a DID is refused before signing. `nonce` is held for this write in the
-    /// client's nonce tracker and settled by its outcome; take one with
-    /// [`crate::consensus::ConsensusClient::get_next_nonce`].
+    /// a grantee that isn't a DID is refused before signing, and gives `nonce` back to the client's
+    /// nonce tracker. Once sent, `nonce` is held for this write in the tracker and settled by its
+    /// outcome; take one with [`crate::consensus::ConsensusClient::get_next_nonce`].
     pub async fn grant_subgrove_key(
         &self,
         subgrove_id: &str,
@@ -160,7 +160,12 @@ impl PrivacyOperations {
             public_key_id: public_key_id.to_string(),
             nonce,
         };
-        let message = signed_messages::grant_subgrove_key(&tx)?;
+        let message = given_back(
+            consensus,
+            sender_did,
+            nonce,
+            signed_messages::grant_subgrove_key(&tx),
+        )?;
         tx.signature = signing_key.sign(message.as_bytes()).to_bytes().to_vec();
         consensus
             .submit_with_given_nonce(sender_did, nonce, &Transaction::GrantSubgroveKey(tx))
@@ -190,7 +195,12 @@ impl PrivacyOperations {
             public_key_id: public_key_id.to_string(),
             nonce,
         };
-        let message = signed_messages::revoke_subgrove_key(&tx)?;
+        let message = given_back(
+            consensus,
+            sender_did,
+            nonce,
+            signed_messages::revoke_subgrove_key(&tx),
+        )?;
         tx.signature = signing_key.sign(message.as_bytes()).to_bytes().to_vec();
         consensus
             .submit_with_given_nonce(sender_did, nonce, &Transaction::RevokeSubgroveKey(tx))
@@ -223,10 +233,96 @@ impl PrivacyOperations {
             public_key_id: public_key_id.to_string(),
             nonce,
         };
-        let message = signed_messages::rotate_subgrove_key(&tx)?;
+        let message = given_back(
+            consensus,
+            sender_did,
+            nonce,
+            signed_messages::rotate_subgrove_key(&tx),
+        )?;
         tx.signature = signing_key.sign(message.as_bytes()).to_bytes().to_vec();
         consensus
             .submit_with_given_nonce(sender_did, nonce, &Transaction::RotateSubgroveKey(tx))
             .await
+    }
+}
+
+/// `result`, giving `nonce` back to the client's tracker when it is an error: a transaction
+/// refused before it is sent leaves its nonce unused.
+fn given_back<T>(
+    consensus: &crate::consensus::ConsensusClient,
+    did: &str,
+    nonce: u64,
+    result: Result<T>,
+) -> Result<T> {
+    if result.is_err() {
+        consensus.nonce_tracker().release(did, nonce);
+    }
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::Engine;
+    use serde_json::json;
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// A key grant, rotation, or revoke the SDK refuses before sending it gives back the nonce
+    /// the caller took for it.
+    #[tokio::test]
+    async fn a_key_transaction_refused_before_sending_gives_its_nonce_back() {
+        let server = MockServer::start().await;
+        let state = [&5u64.to_be_bytes()[..], &[0, 0, 0]].concat();
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "jsonrpc": "2.0", "id": 1,
+                "result": {"response": {
+                    "code": 0,
+                    "value": base64::engine::general_purpose::STANDARD.encode(state)
+                }}
+            })))
+            .mount(&server)
+            .await;
+        let client = WillowClient::builder()
+            .api_url(&server.uri())
+            .consensus_url(&server.uri())
+            .build()
+            .await
+            .unwrap();
+        let did = "did:willow:a";
+        let key = SigningKey::from_bytes(&[7; 32]);
+        let not_a_did = EncryptedKeyGrant {
+            grantee_did: "not-a-did".into(),
+            key_epoch: 1,
+            grantee_public_key_id: "k".into(),
+            ephemeral_public_key: vec![1; 32],
+            encrypted_key: vec![2; 56],
+            granted_by: did.into(),
+            granted_at: 1,
+        };
+        let consensus = client.consensus();
+        let privacy = client.privacy();
+
+        let nonce = consensus.get_next_nonce(did).await.unwrap();
+        assert!(privacy
+            .grant_subgrove_key("sg", not_a_did.clone(), did, &key, "kid", nonce)
+            .await
+            .is_err());
+        assert!(!consensus.nonce_tracker().is_held(did, nonce), "grant");
+
+        let nonce = consensus.get_next_nonce(did).await.unwrap();
+        assert!(privacy
+            .rotate_subgrove_key("sg", 1, vec![not_a_did], did, &key, "kid", nonce)
+            .await
+            .is_err());
+        assert!(!consensus.nonce_tracker().is_held(did, nonce), "rotation");
+
+        let nonce = consensus.get_next_nonce(did).await.unwrap();
+        assert!(privacy
+            .revoke_subgrove_key("sg", "not-a-did", did, &key, "kid", nonce)
+            .await
+            .is_err());
+        assert!(!consensus.nonce_tracker().is_held(did, nonce), "revoke");
     }
 }

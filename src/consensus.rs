@@ -367,13 +367,20 @@ impl ConsensusClient {
         algorithm: SignatureAlgorithm,
         nonce: u64,
     ) -> Result<String> {
-        let tx = Self::update_did_transaction(
+        let tx = match Self::update_did_transaction(
             new_did_document,
             current_private_key_hex,
             current_public_key_id,
             algorithm,
             nonce,
-        )?;
+        ) {
+            Ok(tx) => tx,
+            Err(e) => {
+                // Refused before it was sent: the nonce is unused.
+                self.nonces.release(&new_did_document.id, nonce);
+                return Err(e);
+            }
+        };
         self.submit_with_given_nonce(&new_did_document.id, nonce, &tx)
             .await
     }

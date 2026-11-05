@@ -70,7 +70,7 @@ match consensus.transfer(from, to, amount, None, key_hex, key_id, algorithm).awa
 }
 ```
 
-A write refused as "already used" may be one whose earlier attempt landed: read what it wrote before signing it again under a fresh nonce, or it can run twice. A write refused in its block after its signature and nonce verify has spent its nonce; sign any retry under a fresh one. The key-grant operations and `update_did_with_nonce` take the nonce you pass, and hold and settle it the same way. `ConsensusClient::with_nonce_tracker` shares one tracker between clients that sign for the same identity.
+A write refused as "already used" may be one whose earlier attempt landed: read what it wrote before signing it again under a fresh nonce, or it can run twice. A write refused in its block after its signature and nonce verify has spent its nonce; sign any retry under a fresh one. The key-grant operations and `update_did_with_nonce` take the nonce you pass, and hold and settle it the same way; one the SDK refuses before sending it (a grantee that isn't a DID, …) gives the nonce back. `ConsensusClient::with_nonce_tracker` shares one tracker between clients that sign for the same identity.
 
 ## Quick Start
 
