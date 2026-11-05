@@ -702,10 +702,8 @@ impl WillowClient {
             crate::http_body::decode_checked(&response_text, crate::http_body::JsonBudget::Full)
         } else {
             // Try to parse error response
-            if let Ok(api_response) =
-                serde_json::from_str::<ApiResponse<serde_json::Value>>(&response_text)
-            {
-                if let Some(error_msg) = api_response.error {
+            if let Some(api_error) = api_error_of(&response_text) {
+                if let Some(error_msg) = api_error {
                     match status {
                         StatusCode::NOT_FOUND => Err(WillowError::NotFound(error_msg)),
                         StatusCode::UNAUTHORIZED => Err(WillowError::Authentication(error_msg)),
@@ -729,6 +727,15 @@ impl WillowClient {
             }
         }
     }
+}
+
+/// An error answer's `error`, `None` when it isn't the API's envelope. Its `data` is skipped,
+/// not decoded: an error answer is read under its route's cap (64 MiB for a query) but never
+/// counted, and decoded into `Value`s its data could take many times that.
+fn api_error_of(text: &str) -> Option<Option<String>> {
+    serde_json::from_str::<ApiResponse<serde::de::IgnoredAny>>(text)
+        .ok()
+        .map(|r| r.error)
 }
 
 /// The cap on the answer to an API request for `path` ([`crate::http_body`]): a proof's, a
@@ -1551,6 +1558,22 @@ mod tests {
     fn answer_of(len: usize) -> String {
         let pad = len - r#"{"data":""}"#.len();
         format!(r#"{{"data":"{}"}}"#, "x".repeat(pad))
+    }
+
+    /// An error answer's data is skipped, so a large one allocates next to nothing.
+    #[test]
+    fn an_error_answers_data_is_not_decoded() {
+        let body = format!(
+            r#"{{"success":false,"error":"x","data":[{}]}}"#,
+            vec![r#"{"":0}"#; 200_000].join(",")
+        );
+        let (error, held) = crate::grovedb_envelope::alloc_meter::peak(|| api_error_of(&body));
+        assert_eq!(error, Some(Some("x".to_string())));
+        assert!(
+            held < 1 << 20,
+            "{held} bytes held for a {}-byte answer",
+            body.len()
+        );
     }
 
     fn quick_retries() -> RetryConfig {

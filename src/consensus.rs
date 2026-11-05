@@ -920,9 +920,10 @@ impl ConsensusClient {
                 if let Ok(response_text) =
                     crate::http_body::text(response, crate::http_body::TX).await
                 {
-                    if let Ok(rpc_response) =
-                        serde_json::from_str::<serde_json::Value>(&response_text)
-                    {
+                    if let Ok(rpc_response) = crate::http_body::decode_checked::<serde_json::Value>(
+                        &response_text,
+                        crate::http_body::JsonBudget::Full,
+                    ) {
                         if rpc_response.get("result").is_some() {
                             return Ok(true);
                         }
@@ -1223,7 +1224,7 @@ impl ConsensusClient {
 
         let response_text = crate::http_body::text(response, crate::http_body::TX).await?;
         let rpc_response: serde_json::Value =
-            serde_json::from_str(&response_text).map_err(|e| WillowError::Serialization(e))?;
+            crate::http_body::decode_checked(&response_text, crate::http_body::JsonBudget::Full)?;
 
         if let Some(result) = rpc_response.get("result") {
             if let Some(tx_result) = result.get("tx_result") {

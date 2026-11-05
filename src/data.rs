@@ -308,7 +308,7 @@ impl DataOperations {
         let text = crate::http_body::text(http_resp, crate::http_body::LARGE).await?;
 
         if status.is_success() {
-            crate::http_body::decode_checked(&text, crate::http_body::JsonBudget::Full)
+            crate::http_body::decode_checked(&text, crate::http_body::JsonBudget::UnderProof)
         } else {
             Err(WillowError::Http {
                 status: status.as_u16(),

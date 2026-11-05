@@ -506,8 +506,12 @@ async fn handshake(
             _ => continue,
         };
 
-        if crate::http_body::check_json(text.as_bytes(), crate::http_body::JsonBudget::Full)
-            .is_err()
+        if crate::http_body::check_json_within(
+            text.as_bytes(),
+            MAX_SUBSCRIPTION_VALUES,
+            crate::http_body::JsonBudget::Full,
+        )
+        .is_err()
         {
             continue;
         }
@@ -589,7 +593,11 @@ async fn pump_socket(stream: WsStream, state: &mut TaskState) -> PumpExit {
                 };
                 // An event holding more JSON than the SDK decodes is dropped, as an
                 // unparseable one is.
-                if crate::http_body::check_json(text.as_bytes(), crate::http_body::JsonBudget::Full)
+                if crate::http_body::check_json_within(
+            text.as_bytes(),
+            MAX_SUBSCRIPTION_VALUES,
+            crate::http_body::JsonBudget::Full,
+        )
                     .is_err()
                 {
                     continue;
@@ -824,6 +832,11 @@ mod tests {
 /// entity's summary, a few KiB; tungstenite's default is 64 MiB, which a hostile server could
 /// fill with JSON that decodes to many times that, for each of the 64 events queued.
 pub const MAX_SUBSCRIPTION_MESSAGE: usize = 1 << 20;
+
+/// The most JSON one subscription message may hold, in units (see
+/// [`crate::http_body::MAX_VALUES`]): an honest event holds a few hundred, and the 64 events a
+/// slow consumer leaves queued stay a few hundred MiB at most.
+pub const MAX_SUBSCRIPTION_VALUES: usize = 1 << 16;
 
 fn websocket_config() -> tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
     tokio_tungstenite::tungstenite::protocol::WebSocketConfig {

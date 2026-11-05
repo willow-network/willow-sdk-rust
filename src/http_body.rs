@@ -79,9 +79,11 @@ pub(crate) async fn text(resp: reqwest::Response, limit: usize) -> Result<String
         .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned()))
 }
 
-/// `resp`'s body decoded from JSON, under `limit` as [`read`] reads it.
+/// `resp`'s body decoded from JSON, under `limit` as [`read`] reads it, after [`check_json`].
 pub(crate) async fn json<T: DeserializeOwned>(resp: reqwest::Response, limit: usize) -> Result<T> {
-    serde_json::from_slice(&read(resp, limit).await?).map_err(WillowError::Serialization)
+    let body = read(resp, limit).await?;
+    check_json(&body, JsonBudget::Full)?;
+    serde_json::from_slice(&body).map_err(WillowError::Serialization)
 }
 
 /// The most JSON the SDK decodes of one answer into a type holding `serde_json::Value`s, in
@@ -114,10 +116,16 @@ pub(crate) enum JsonBudget {
 /// [`MAX_VALUES`] units under `budget`, without decoding it: one pass, no allocation. It
 /// doesn't validate the JSON; the decoder refuses what isn't valid.
 pub(crate) fn check_json(data: &[u8], budget: JsonBudget) -> Result<()> {
-    if scan_units(data, MAX_VALUES, budget) {
+    check_json_within(data, MAX_VALUES, budget)
+}
+
+/// [`check_json`] with a limit of `max` units, for answers smaller than [`MAX_VALUES`] allows
+/// (a subscription event).
+pub(crate) fn check_json_within(data: &[u8], max: usize, budget: JsonBudget) -> Result<()> {
+    if scan_units(data, max, budget) {
         Ok(())
     } else {
-        Err(WillowError::ResponseTooComplex { limit: MAX_VALUES })
+        Err(WillowError::ResponseTooComplex { limit: max })
     }
 }
 
