@@ -1,21 +1,32 @@
 //! Client-side verifiable RPC: query an indexer and verify locally.
 //!
 //! This module is the SDK counterpart to the `GET /verifiable-rpc/:subgrove/:key`
-//! endpoint implemented by `willow-indexer-node`. On each response we run the
-//! two proofs side by side:
+//! endpoint implemented by the indexer node. On each response it checks:
 //!
-//!  1. **GKR proof** (if present) — confirms the indexer's claimed
-//!     `state_root` is the correct output of transforming committed
-//!     events. `GKR_PROOF_FULL` is verified locally via `willow-gkr-verify`;
-//!     circuit bytes are embedded at build time via the `registry` feature.
-//!  2. **GroveDB Merkle proof** — confirms `answer` is the value at `key`
-//!     in the tree rooted at `state_root`. Verified via GroveDB's
-//!     lightweight verify-only mode (already shipped with the SDK).
+//!  1. **GroveDB Merkle proof** — that `answer` is the Item at `key` in one
+//!     entity tree of the subgrove (`[subgroves, subgrove, indexed, <entity>]`),
+//!     in the tree rooted at the response's `state_root`
+//!     ([`crate::grovedb_envelope::verify_item_at_path`]). The entity tree is
+//!     the one the proof descends, so the indexer chooses it: nothing checks
+//!     that it is the entity the caller means. An absent answer can't be
+//!     checked (the indexer proves absence under one entity only), so it is
+//!     refused in the verifying modes.
+//!  2. **GKR proofs** (strict mode) — that each `GKR_PROOF_FULL` proof
+//!     verifies, locally via `willow-gkr-verify`, for the circuit its
+//!     `verification_key_hash` names among the circuits embedded at build time
+//!     (the `registry` feature), and that they chain to `state_root`: the last
+//!     one's output root is `state_root`, and each earlier one's is the next
+//!     one's starting root. The circuit and the configuration hash
+//!     (`config_hash`) are the response's own and are not checked against the
+//!     subgrove's registration, so this shows that an embedded circuit produced
+//!     `state_root` from the events its proof commits to, not that the
+//!     subgrove's own transformation did.
 //!
-//! Together these two proofs are equivalent to re-executing indexing from
-//! raw Ethereum events — modulo *event authenticity*, which is the client's
-//! responsibility via its Ethereum light client (already integrated; see
-//! [`crate::light_client`]).
+//! **The answer is not verified against the chain.** `state_root` is the
+//! indexer's own claim, carried in the same response: nothing here anchors it
+//! to a root the SDK trusts (consensus, or an Ethereum light client for the
+//! events), so an indexer can serve any state root with proofs that match it.
+//! [`VerifiedAnswer::state_root_anchored`] is always `false`.
 //!
 //! This module is gated behind the `verifiable-rpc` cargo feature because
 //! it adds new public surface (state-root continuity tracking,
@@ -41,43 +52,43 @@
 
 use crate::client::{SeenStateRoot, VerifyMode, WillowClient};
 use crate::errors::{Result, WillowError};
-use grovedb::{GroveDb, PathQuery, Query};
-use grovedb_version::version::GroveVersion;
 use std::time::{SystemTime, UNIX_EPOCH};
 use willow_gkr_verify::FULL_HEADER;
 use willow_types::consensus::indexing_transactions::GkrProofData;
 use willow_types::verifiable_rpc::VerifiableRpcResponse;
 
-/// Verified answer returned by [`VerifiableRpcOperations::query`].
+/// Answer returned by [`VerifiableRpcOperations::query`]: the indexer's answer,
+/// checked only against the response's own `state_root` (see the module notes).
 ///
-/// `verification` records exactly which guarantees the client was able to
-/// establish, so callers can branch on that rather than guessing from
-/// `answer` alone.
+/// `verification` records exactly which checks passed, so callers can branch on
+/// that rather than guessing from `answer` alone.
 #[derive(Debug, Clone)]
 pub struct VerifiedAnswer {
-    /// `Some(bytes)` when the key was present. `None` means the indexer
-    /// cryptographically proved the key is absent from the tree.
+    /// The value at the key. `None` only with [`VerifyMode::Disabled`], where it
+    /// is the indexer's word that the key is absent.
     pub answer: Option<Vec<u8>>,
-    /// State root the proofs tie back to.
+    /// State root the proofs tie back to: the indexer's claim.
     pub state_root: [u8; 32],
     /// Block range covered by the checkpoint that produced `state_root`.
     pub block_range: (u64, u64),
-    /// Which guarantees the client established.
+    /// Which checks passed.
     pub verification: VerificationResult,
+    /// Whether `state_root` was checked against a root the SDK trusts: always
+    /// `false`, so `answer` is unverified against the chain.
+    pub state_root_anchored: bool,
 }
 
-/// Outcome of verification for a verifiable-RPC response.
+/// Which checks a verifiable-RPC response passed. None anchors `state_root`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerificationResult {
-    /// Both the GKR proof and the GroveDB proof verified.
+    /// The GroveDB proof binds `answer` at the key under `state_root`, and the
+    /// GKR proofs verify, for the circuit and configuration the response names,
+    /// and chain to `state_root` (see the module notes).
     GkrAndGroveDb,
-    /// The GroveDB proof verified. The GKR proof was not present or the
-    /// client was in [`VerifyMode::GroveDbOnly`]. The answer is correct
-    /// relative to `state_root` but the client needs an out-of-band anchor
-    /// (typically consensus) to trust `state_root` itself.
+    /// The GroveDB proof binds `answer` at the key under `state_root`
+    /// ([`VerifyMode::GroveDbOnly`]).
     GroveDbOnly,
-    /// Verification was skipped because the client is in
-    /// [`VerifyMode::Disabled`]. Intended for debugging.
+    /// Nothing was checked: the client is in [`VerifyMode::Disabled`].
     Skipped,
 }
 
@@ -94,11 +105,14 @@ impl VerifiableRpcOperations {
         Self { client }
     }
 
-    /// Query a subgrove for the value at `key`, verifying the response
-    /// locally according to the client's [`VerifyMode`].
+    /// Query a subgrove for the value at `key`, checking the response locally
+    /// according to the client's [`VerifyMode`].
     ///
-    /// Returns [`VerifiedAnswer::answer`] as `None` when the indexer proves
-    /// the key is absent.
+    /// The answer is unverified against the chain: the checks tie it to the
+    /// response's own `state_root`, which the SDK does not anchor (see the module
+    /// notes). In the checking modes, an answer the indexer reports absent is
+    /// refused ([`WillowError::Unsupported`]): its absence proof covers one
+    /// entity tree, not the subgrove.
     pub async fn query(&self, subgrove_id: &str, key: &[u8]) -> Result<VerifiedAnswer> {
         let raw = self.query_raw(subgrove_id, key).await?;
 
@@ -112,11 +126,11 @@ impl VerifiableRpcOperations {
         let verification = match mode {
             VerifyMode::Disabled => VerificationResult::Skipped,
             VerifyMode::GroveDbOnly => {
-                verify_grovedb_proof(&raw, key)?;
+                verify_grovedb_proof(&raw, subgrove_id, key)?;
                 VerificationResult::GroveDbOnly
             }
             VerifyMode::Strict => {
-                verify_grovedb_proof(&raw, key)?;
+                verify_grovedb_proof(&raw, subgrove_id, key)?;
                 if raw.gkr_proofs.is_empty() {
                     return Err(WillowError::ProofVerificationFailed(
                         "Strict verify mode: indexer returned no GKR proofs".into(),
@@ -151,6 +165,7 @@ impl VerifiableRpcOperations {
             state_root: raw.state_root,
             block_range: raw.block_range,
             verification,
+            state_root_anchored: false,
         })
     }
 
@@ -167,7 +182,7 @@ impl VerifiableRpcOperations {
 
         let resp = self.client.http_client.get(url).send().await?;
         let status = resp.status();
-        let body = resp.text().await?;
+        let body = crate::http_body::text(resp, crate::http_body::VERIFIABLE_RPC).await?;
 
         if !status.is_success() {
             return Err(WillowError::Http {
@@ -242,35 +257,51 @@ impl VerifiableRpcOperations {
     }
 }
 
-fn verify_grovedb_proof(resp: &VerifiableRpcResponse, key: &[u8]) -> Result<()> {
+/// Check that the response's GroveDB proof proves `resp.answer` as the Item at
+/// `key` in one entity tree of the subgrove, `[subgroves, subgrove, indexed,
+/// <entity>]` (the path the proof descends), under `resp.state_root`. The
+/// response must be for `subgrove_id` and `key`.
+fn verify_grovedb_proof(resp: &VerifiableRpcResponse, subgrove_id: &str, key: &[u8]) -> Result<()> {
+    let fail = |m: String| WillowError::ProofVerificationFailed(m);
     if resp.grovedb_proof.is_empty() {
-        return Err(WillowError::ProofVerificationFailed(
-            "GroveDB proof is empty".into(),
+        return Err(fail("GroveDB proof is empty".into()));
+    }
+    if resp.subgrove_id != subgrove_id || resp.key != key {
+        return Err(fail(
+            "the response is for another subgrove or key than the one asked".into(),
         ));
     }
-
-    let empty_path: Vec<Vec<u8>> = vec![];
-    let mut query = Query::new();
-    query.insert_key(key.to_vec());
-    let path_query = PathQuery::new_unsized(empty_path, query);
-    let version = GroveVersion::latest();
-
-    // Envelope must match the (root-level) path exactly (dropped-layer omission guard).
-    crate::grovedb_envelope::check_envelope(&resp.grovedb_proof, &path_query.path)?;
-
-    let (root_hash, _verified) = GroveDb::verify_query(&resp.grovedb_proof, &path_query, version)
-        .map_err(|e| {
-        WillowError::ProofVerificationFailed(format!("GroveDB verify_query failed: {}", e))
-    })?;
-
-    if root_hash != resp.state_root {
-        return Err(WillowError::ProofVerificationFailed(format!(
+    if !resp.answer_exists {
+        return Err(WillowError::Unsupported(
+            "an absent answer can't be checked: the indexer proves absence under one entity \
+             tree, not the subgrove"
+                .into(),
+        ));
+    }
+    let path = crate::grovedb_envelope::descended_path(&resp.grovedb_proof)?;
+    let entity_tree = path.len() == 4
+        && path[0] == b"subgroves"
+        && path[1] == subgrove_id.as_bytes()
+        && path[2] == b"indexed";
+    if !entity_tree {
+        return Err(fail(
+            "the proof is not of an entity tree of the subgrove asked".into(),
+        ));
+    }
+    let (root, item) =
+        crate::grovedb_envelope::verify_item_at_path(&resp.grovedb_proof, &path, key)?;
+    if item != resp.answer {
+        return Err(fail(
+            "the answer is not the item the proof proves at the key".into(),
+        ));
+    }
+    if root != resp.state_root {
+        return Err(fail(format!(
             "GroveDB proof root {} does not match response state_root {}",
-            hex::encode(root_hash),
+            hex::encode(root),
             hex::encode(resp.state_root),
         )));
     }
-
     Ok(())
 }
 
@@ -315,7 +346,6 @@ fn verify_full(proof: &GkrProofData) -> Result<()> {
 mod tests {
     use super::*;
     use crate::client::WillowClient;
-    use sha2::{Digest, Sha256};
     use willow_gkr_verify::FULL_HEADER;
     use willow_types::consensus::indexing_transactions::{GkrProofData, GkrPublicInputs};
     use willow_types::consensus::CURRENT_PROOF_VERSION;
@@ -498,8 +528,76 @@ mod tests {
     fn verify_grovedb_rejects_empty_proof() {
         let mut resp = mk_response([0; 32], 0);
         resp.grovedb_proof.clear();
-        let err = verify_grovedb_proof(&resp, &resp.key.clone())
+        let err = verify_grovedb_proof(&resp, "sg", &resp.key.clone())
             .expect_err("empty proof must be rejected");
         assert!(err.to_string().contains("empty"));
+    }
+
+    /// A real proof over `[subgroves, aave-v3-lending, indexed, Supply]`, one key, as the
+    /// indexer serves it: the response's root and the item at the key.
+    fn fixture_response() -> VerifiableRpcResponse {
+        let b = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/grovedb-single-key.bin"
+        ))
+        .unwrap();
+        let mut o = 8;
+        let u = |o: &mut usize| {
+            let v = u64::from_le_bytes(b[*o..*o + 8].try_into().unwrap());
+            *o += 8;
+            v as usize
+        };
+        let root: [u8; 32] = b[o..o + 32].try_into().unwrap();
+        o += 32;
+        let mut path = vec![];
+        for _ in 0..u(&mut o) {
+            let n = u(&mut o);
+            path.push(b[o..o + n].to_vec());
+            o += n;
+        }
+        let n = u(&mut o);
+        let query = b[o..o + n].to_vec();
+        o += n + 16;
+        let n = u(&mut o);
+        let proof = b[o..o + n].to_vec();
+        let key = query[4..4 + query[3] as usize].to_vec();
+        let (_, item) = crate::grovedb_envelope::verify_item_at_path(&proof, &path, &key).unwrap();
+        let mut resp = mk_response(root, 500);
+        resp.subgrove_id = String::from_utf8(path[1].clone()).unwrap();
+        resp.key = key;
+        resp.answer = item;
+        resp.grovedb_proof = proof;
+        resp
+    }
+
+    #[test]
+    fn the_answer_is_bound_to_the_proof_at_its_key() {
+        let resp = fixture_response();
+        let sg = resp.subgrove_id.clone();
+        let key = resp.key.clone();
+        verify_grovedb_proof(&resp, &sg, &key).unwrap();
+
+        // Another answer beside the same proof.
+        let mut forged = resp.clone();
+        forged.answer = b"forged".to_vec();
+        assert!(verify_grovedb_proof(&forged, &sg, &key).is_err());
+        // Another subgrove or key than the one asked.
+        assert!(verify_grovedb_proof(&resp, "other-sg", &key).is_err());
+        assert!(verify_grovedb_proof(&resp, &sg, b"other-key").is_err());
+        // Another state root.
+        let mut other_root = resp.clone();
+        other_root.state_root = [9; 32];
+        assert!(verify_grovedb_proof(&other_root, &sg, &key).is_err());
+        // An absent answer can't be checked.
+        let mut absent = resp.clone();
+        absent.answer_exists = false;
+        assert!(matches!(
+            verify_grovedb_proof(&absent, &sg, &key),
+            Err(WillowError::Unsupported(_))
+        ));
+        // A lone Push(Hash(state_root)) proves nothing.
+        let mut lone = resp.clone();
+        lone.grovedb_proof = [&[0x00, 0x21, 0x01][..], &resp.state_root, &[0x00, 0x01]].concat();
+        assert!(verify_grovedb_proof(&lone, &sg, &key).is_err());
     }
 }

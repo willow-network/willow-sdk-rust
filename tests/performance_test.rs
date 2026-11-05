@@ -57,7 +57,7 @@ async fn performance_test() {
         // Try to access the app by attempting to list subgroves or perform a simple operation
         match client
             .data()
-            .query("dummy_subgrove", json!({"filters": {}}))
+            .query_unverified("dummy_subgrove", json!({"filters": {}}))
             .await
         {
             Ok(_) => {
@@ -251,7 +251,7 @@ async fn performance_test() {
     let start = Instant::now();
     match client
         .data()
-        .query(
+        .query_unverified(
             &subgrove_name,
             json!({
                 "filters": { "type": "even" }
@@ -287,7 +287,7 @@ async fn performance_test() {
     let start = Instant::now();
     match client
         .data()
-        .query(
+        .query_unverified(
             &subgrove_name,
             json!({
                 "filters": {},
@@ -326,7 +326,7 @@ async fn performance_test() {
     let start = Instant::now();
     match client
         .data()
-        .query(
+        .query_unverified(
             &subgrove_name,
             json!({
                 "filters": {},
@@ -499,37 +499,39 @@ async fn register_subgrove(
     nonce: u64,
 ) -> Result<String, Box<dyn std::error::Error>> {
     use ed25519_dalek::Signer;
-    use sha3::{Digest, Keccak256};
+    use willow_sdk::consensus::SubgroveMode;
+    use willow_sdk::signed_messages::{self, RegisterSubgroveTx};
 
-    let schema_json = serde_json::to_string(schema)?;
-    let mut hasher = Keccak256::new();
-    hasher.update(schema_json.as_bytes());
-    let schema_hash = hasher.finalize();
-    let schema_hash_hex = hex::encode(schema_hash);
+    // Every field is sent explicitly; the signature binds them all through `Config`.
+    let mut tx = RegisterSubgroveTx {
+        subgrove_id: subgrove_id.to_string(),
+        name: "Performance Test".to_string(),
+        description: String::new(),
+        schema: serde_json::to_string(schema)?,
+        owner_did: owner_did.to_string(),
+        admins: vec![],
+        initial_funding: None,
+        checkpoint_verification: Default::default(),
+        mode: SubgroveMode::DataStorage {
+            name: "Performance Test".to_string(),
+            writers: vec![],
+            free_readers: vec![],
+            read_pricing: None,
+        },
+        privacy: None,
+        initial_owner_key_grant: None,
+        template_config: None,
+        confirmation_depth: 0,
+        signature: vec![],
+        public_key_id: format!("{}#key-1", owner_did),
+        nonce,
+        cryptographic_completeness: false,
+    };
+    let message = signed_messages::register_subgrove(&tx)?;
+    tx.signature = signing_key.sign(message.as_bytes()).to_bytes().to_vec();
 
-    let message = format!(
-        "RegisterSubgrove\nID: {}\nName: Performance Test\nSchemaHash: {}\nOwner: {}\nWriters: \nReaders: \nNonce: {}",
-        subgrove_id, schema_hash_hex, owner_did, nonce
-    );
-
-    let signature = signing_key.sign(message.as_bytes());
-
-    let transaction = json!({
-        "RegisterSubgrove": {
-            "subgrove_id": subgrove_id,
-
-            "name": "Performance Test",
-            "schema": schema_json,
-            "owner_did": owner_did,
-            "writers": [],
-            "readers": [],
-            "signature": signature.to_bytes().to_vec(),
-            "public_key_id": format!("{}#key-1", owner_did),
-            "nonce": nonce,
-        }
-    });
-
-    submit_transaction(consensus, &transaction).await
+    let tx_json = ConsensusClient::serialize_tx("RegisterSubgrove", &tx)?;
+    Ok(consensus.submit_transaction_json(&tx_json).await?)
 }
 
 async fn fund_subgrove(
@@ -559,24 +561,20 @@ async fn store_data(
 ) -> Result<String, Box<dyn std::error::Error>> {
     use ed25519_dalek::Signer;
 
-    let data_json = serde_json::to_string(&data)?;
-    let message = format!("{}:{}:{}", subgrove_id, key, data_json);
-    let signature = signing_key.sign(message.as_bytes());
+    let mut tx = willow_sdk::signed_messages::StoreDataTx {
+        subgrove_id: subgrove_id.to_string(),
+        key: key.to_string(),
+        data: serde_json::to_vec(&data)?,
+        owner_did: owner_did.to_string(),
+        signature: vec![],
+        public_key_id: format!("{}#key-1", owner_did),
+        nonce,
+    };
+    let message = willow_sdk::signed_messages::store_data(&tx)?;
+    tx.signature = signing_key.sign(message.as_bytes()).to_bytes().to_vec();
 
-    let transaction = json!({
-        "StoreData": {
-
-            "subgrove_id": subgrove_id,
-            "key": key,
-            "data": data,
-            "owner_did": owner_did,
-            "signature": signature.to_bytes().to_vec(),
-            "public_key_id": format!("{}#key-1", owner_did),
-            "nonce": nonce
-        }
-    });
-
-    submit_transaction(consensus, &transaction).await
+    let tx_json = ConsensusClient::serialize_tx("StoreData", &tx)?;
+    Ok(consensus.submit_transaction_json(&tx_json).await?)
 }
 
 async fn submit_transaction(

@@ -24,12 +24,14 @@
 //! start_slot, instructions}`. The canonical schema is the
 //! `WillowManifest` type re-exported from `willow_types::consensus::manifest`.
 //!
-//! For GkrExecution subgroves bound to a circuit template (e.g.
-//! `balance-aggregator-v2`), pass `--template-config-file ./tc.json`
-//! pointing at a JSON `TemplateSubgroveConfig`. Without it,
-//! GkrExecution subgroves register without a template binding and
-//! consensus computes the wrong expected starting state at chain-tip
-//! submission time.
+//! To bind the subgrove to a circuit template, pass
+//! `--template-config-file ./tc.json` pointing at a JSON
+//! `TemplateSubgroveConfig`; it is carried in the registration as given.
+//!
+//! `--execution-mode` is `ConsensusExecution`, `IndexerExecution`, or
+//! `TeeExecution`; any other name is refused before anything is signed.
+//! The registration is signed over its `Config`: the SHA-256 of the whole
+//! transaction's bincode with an empty signature, so every field is bound.
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -87,7 +89,7 @@ struct Args {
     replace_existing: bool,
     #[arg(
         long,
-        help = "Path to a JSON file containing a TemplateSubgroveConfig. Required for GkrExecution subgroves bound to a circuit template; otherwise omit."
+        help = "Path to a JSON file containing a TemplateSubgroveConfig, to bind the subgrove to a circuit template; otherwise omit."
     )]
     template_config_file: Option<String>,
 }

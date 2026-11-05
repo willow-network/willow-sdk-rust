@@ -2,17 +2,21 @@
 //!
 //! Counterpart to the indexer's `POST /verifiable-rpc/eth/state` and
 //! `POST /verifiable-rpc/eth/call` routes. The indexer's response carries
-//! EIP-1186-shaped MPT inclusion proofs anchored at a `state_root` that
-//! Helios has already light-client-verified upstream. This module repeats
-//! the MPT walk independently so callers don't have to trust the indexer.
+//! EIP-1186-shaped MPT proofs at a `state_root` it names. This module walks
+//! them independently, and requires the proof to be of the account, slots, and
+//! block asked.
 //!
-//! Three trust modes follow the same shape as [`crate::verifiable_rpc`]:
+//! **A read is not verified against Ethereum here.** `state_root` comes from
+//! the same response, and this SDK has no Ethereum light client to check it
+//! (or `block_hash`) against a header: the walks show the values are those of
+//! the state with that root, not that the root is Ethereum's at that block.
+//! Check `state_root` against a header you trust before relying on a read.
+//! `eth_call`'s return data is not proven at all: only the state it read is.
+//!
+//! Three modes follow the same shape as [`crate::verifiable_rpc`]:
 //!
 //! - [`StateVerifyMode::Strict`]: every account proof + every storage
-//!   proof must verify against the carried `state_root`. The SDK is
-//!   responsible for separately checking that `state_root` matches the
-//!   block header it trusts via its own light client; this module only
-//!   verifies the MPT walks.
+//!   proof must verify against the carried `state_root`.
 //! - [`StateVerifyMode::AnchorOnly`]: skip the MPT walks, trust the
 //!   indexer's word. Useful when the SDK has its own out-of-band trust
 //!   path (private indexer, paid SLA).
@@ -50,7 +54,9 @@ impl Default for StateVerifyMode {
     }
 }
 
-/// Verified result of a state read.
+/// Result of a state read: in [`StateVerifyMode::Strict`], values the proofs show at
+/// `state_root`, which the indexer named (see the module notes: not verified against
+/// Ethereum).
 #[derive(Debug, Clone)]
 pub struct VerifiedStateRead {
     pub address: [u8; 20],
@@ -67,7 +73,9 @@ pub struct VerifiedStateRead {
     pub mode: StateVerifyMode,
 }
 
-/// Verified result of an `eth_call`.
+/// Result of an `eth_call`: `result` is the indexer's, unproven; in
+/// [`StateVerifyMode::Strict`] each state read it touched is walked against its
+/// `state_root` (see the module notes).
 #[derive(Debug, Clone)]
 pub struct VerifiedCall {
     pub block_number: u64,
@@ -116,6 +124,9 @@ impl EthOperations {
             WillowError::ProofVerificationFailed("response carried no state proof".into())
         })?;
 
+        if self.mode != StateVerifyMode::Disabled {
+            check_read_is_the_one_asked(proof, &raw, address, slots, block_number)?;
+        }
         if self.mode == StateVerifyMode::Strict {
             verify_state_proof(proof)?;
         }
@@ -333,7 +344,7 @@ impl EthOperations {
 
         let resp = self.client.http_client.post(url).json(&body).send().await?;
         let status = resp.status();
-        let text = resp.text().await?;
+        let text = crate::http_body::text(resp, crate::http_body::LARGE).await?;
         if !status.is_success() {
             return Err(WillowError::Http {
                 status: status.as_u16(),
@@ -361,7 +372,7 @@ impl EthOperations {
 
         let resp = self.client.http_client.post(url).json(&body).send().await?;
         let status = resp.status();
-        let text = resp.text().await?;
+        let text = crate::http_body::text(resp, crate::http_body::LARGE).await?;
         if !status.is_success() {
             return Err(WillowError::Http {
                 status: status.as_u16(),
@@ -377,6 +388,35 @@ impl WillowClient {
     pub fn eth(&self) -> EthOperations {
         EthOperations::new(self.clone())
     }
+}
+
+/// Refuse a state read whose proof isn't of `address`, exactly `slots` in order, and
+/// `block_number`, or whose state root differs from the response's.
+fn check_read_is_the_one_asked(
+    proof: &StateProof,
+    resp: &VerifiableRpcResponse,
+    address: [u8; 20],
+    slots: &[[u8; 32]],
+    block_number: u64,
+) -> Result<()> {
+    let fail = |m: &str| Err(WillowError::ProofVerificationFailed(m.to_string()));
+    if resp.state_proofs.len() != 1 {
+        return fail("a state read answered with other than one account proof");
+    }
+    if proof.address != address {
+        return fail("the proof is of another account than the one asked");
+    }
+    if proof.block_number != block_number {
+        return fail("the proof is of another block than the one asked");
+    }
+    if proof.state_root != resp.state_root {
+        return fail("the proof's state root differs from the response's");
+    }
+    let proven: Vec<[u8; 32]> = proof.storage_proofs.iter().map(|sp| sp.slot).collect();
+    if proven != slots {
+        return fail("the storage proofs are not of exactly the slots asked, in order");
+    }
+    Ok(())
 }
 
 /// Walks `proof`'s account MPT proof against `proof.state_root` and
@@ -494,6 +534,82 @@ mod tests {
         // Different slot index → different storage key.
         let slot_other = mapping_slot_for_address(vitalik, 0);
         assert_ne!(slot, slot_other);
+    }
+
+    fn proof_of(address: [u8; 20], block_number: u64, slots: &[[u8; 32]]) -> StateProof {
+        StateProof {
+            address,
+            block_number,
+            block_hash: [0u8; 32],
+            state_root: [5u8; 32],
+            account_proof: MptProof {
+                key: vec![],
+                value: vec![],
+                proof_nodes: vec![],
+            },
+            account_state: willow_types::state_proof::AccountState {
+                nonce: 0,
+                balance: [0u8; 32],
+                storage_hash: [0u8; 32],
+                code_hash: [0u8; 32],
+            },
+            storage_proofs: slots
+                .iter()
+                .map(|slot| StorageSlotProof {
+                    slot: *slot,
+                    value: [0u8; 32],
+                    proof: MptProof {
+                        key: vec![],
+                        value: vec![],
+                        proof_nodes: vec![],
+                    },
+                })
+                .collect(),
+        }
+    }
+
+    fn envelope(proofs: Vec<StateProof>) -> VerifiableRpcResponse {
+        VerifiableRpcResponse {
+            subgrove_id: String::new(),
+            key: vec![],
+            answer: vec![],
+            answer_exists: true,
+            checkpoint_id: [0; 32],
+            state_root: [5u8; 32],
+            block_range: (7, 7),
+            grovedb_proof: vec![],
+            gkr_proofs: vec![],
+            completeness_proof: None,
+            state_proofs: proofs,
+            served_at_unix_secs: 0,
+        }
+    }
+
+    /// A state read is refused unless its proof is of the account, slots (in order), and block
+    /// asked, at the response's state root.
+    #[test]
+    fn a_state_read_must_be_the_one_asked() {
+        let (a, b) = ([1u8; 20], [2u8; 20]);
+        let (s1, s2) = ([1u8; 32], [2u8; 32]);
+        let check = |proof: StateProof| {
+            let resp = envelope(vec![proof.clone()]);
+            check_read_is_the_one_asked(&proof, &resp, a, &[s1, s2], 7)
+        };
+        assert!(check(proof_of(a, 7, &[s1, s2])).is_ok());
+        assert!(check(proof_of(b, 7, &[s1, s2])).is_err(), "another account");
+        assert!(check(proof_of(a, 8, &[s1, s2])).is_err(), "another block");
+        assert!(check(proof_of(a, 7, &[s2, s1])).is_err(), "slots reordered");
+        assert!(check(proof_of(a, 7, &[s1])).is_err(), "a slot left out");
+        assert!(
+            check(proof_of(a, 7, &[s1, s2, s2])).is_err(),
+            "an extra slot"
+        );
+        let mut other_root = proof_of(a, 7, &[s1, s2]);
+        other_root.state_root = [6u8; 32];
+        assert!(check(other_root).is_err(), "another state root");
+        let proof = proof_of(a, 7, &[s1, s2]);
+        let two = envelope(vec![proof.clone(), proof.clone()]);
+        assert!(check_read_is_the_one_asked(&proof, &two, a, &[s1, s2], 7).is_err());
     }
 
     #[test]

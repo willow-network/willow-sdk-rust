@@ -1,8 +1,9 @@
-//! Light client for trustless verification of Willow state.
+//! Light client: the CometBFT headers whose app hashes verified reads check GroveDB proofs
+//! against.
 //!
-//! This module implements a standalone light client that can verify Willow
-//! query results without trusting any single node. It uses the CometBFT light
-//! client protocol to verify block headers and GroveDB proofs.
+//! Verified reads take headers from the consensus nodes the caller configures and trust them:
+//! the SDK doesn't verify validator signatures (see the trust notes below), so a read is as
+//! sound as the consensus node it asks.
 //!
 //! # Feature Flag
 //!
@@ -16,16 +17,22 @@
 //!
 //! # Architecture
 //!
-//! The light client performs two types of verification:
+//! The light client gives the roots reads are checked against, and checks proofs against them:
 //!
-//! 1. **Header Verification** (CometBFT Light Client Protocol)
-//!    - Fetches block headers from CometBFT RPC
-//!    - Verifies 2/3+ validator signatures
-//!    - Tracks validator set transitions
-//!    - Extracts trusted `app_hash` (state root)
+//! 1. **Headers** (CometBFT RPC)
+//!    - Fetches block headers from its validator endpoints: the consensus nodes the caller
+//!      configures, not the API that serves data
+//!      ([`crate::WillowClient::get_or_create_light_client`])
+//!    - `app_hash` in the header of block `H + 1` is the GroveDB root of the state after block
+//!      `H` ([`LightClient::app_hash_after`])
+//!    - Verified reads check the proof against the app hash that a consensus node the caller
+//!      configures reports, and the SDK trusts that node: it does not verify validator
+//!      signatures over CometBFT's canonical vote bytes, so a header is trusted as its
+//!      endpoints serve it (trust on first use), not by 2/3+ of the validators' signatures
 //!
-//! 2. **Proof Verification** (GroveDB)
-//!    - Verifies Merkle proofs against the trusted `app_hash`
+//! 2. **Proofs** (GroveDB)
+//!    - Verifies that a proof proves an Item at a path and key with a given value, and that its
+//!      root is that app hash ([`LightClient::verify_item`])
 //!    - Uses lightweight `grovedb/verify` feature (no RocksDB)
 //!
 //! # Example
@@ -45,8 +52,8 @@
 //! let mut client = LightClient::new(config)?;
 //! client.sync_to_latest().await?;
 //!
-//! // Verify a proof for a specific path + key
-//! let is_valid = client.verify_proof(&proof_bytes, &path, &key, None).await?;
+//! // Verify that a proof of the state after block `height` holds `value` at `path` + `key`
+//! client.verify_item(&proof_bytes, &path, &key, &value, height).await?;
 //! ```
 
 use crate::errors::{Result, WillowError};
@@ -73,19 +80,25 @@ pub struct LightClientConfig {
     /// Validator RPC endpoints to fetch headers from.
     pub validator_endpoints: Vec<String>,
 
-    /// Minimum validators that must agree for consensus.
+    /// How many endpoints must report the chain's latest height
+    /// ([`LightClient::latest_chain_height`]) for a verified read to check its recency: every
+    /// `data().get` needs that many to answer. Default: 1.
     #[serde(default = "default_min_validators")]
     pub min_validators_for_consensus: usize,
 
-    /// Trust threshold as (numerator, denominator), default: (2, 3).
+    /// Trust threshold as (numerator, denominator), default: (2, 3). Read only by the header
+    /// check of [`LightClient::sync_to_latest`]; not applied to verified reads, which take
+    /// headers as their endpoints serve them.
     #[serde(default = "default_trust_threshold")]
     pub trust_threshold: (u64, u64),
 
-    /// How long headers remain valid, default: 24 hours.
+    /// How long headers remain valid, default: 24 hours. Read by the header check of
+    /// [`LightClient::sync_to_latest`] and by [`LightClient::prune_old_headers`].
     #[serde(default = "default_trusting_period")]
     pub trusting_period: Duration,
 
-    /// Maximum allowed clock drift, default: 10 seconds.
+    /// Maximum allowed clock drift, default: 10 seconds. Read only by the header check of
+    /// [`LightClient::sync_to_latest`].
     #[serde(default = "default_clock_drift")]
     pub max_clock_drift: Duration,
 
@@ -93,10 +106,24 @@ pub struct LightClientConfig {
     #[serde(default = "default_rpc_timeout")]
     pub rpc_timeout: Duration,
 
-    /// Whether to automatically sync to the latest height on creation.
-    /// Default: true.
+    /// Whether [`LightClient::new_async`] syncs to the latest height before returning.
+    /// [`LightClient::new`] and the client builder never sync. Default: true.
     #[serde(default = "default_auto_sync")]
     pub auto_sync: bool,
+
+    /// How many blocks behind the chain's latest height a verified read's state may be, or its
+    /// proof's height ahead of it ([`LightClient::verify_root_after`]). The API chooses the
+    /// state it proves, so an older one is refused unless the chain still holds it. Default:
+    /// [`DEFAULT_MAX_PROOF_LAG_BLOCKS`].
+    #[serde(default = "default_max_proof_lag_blocks")]
+    pub max_proof_lag_blocks: u64,
+}
+
+/// The default [`LightClientConfig::max_proof_lag_blocks`].
+pub const DEFAULT_MAX_PROOF_LAG_BLOCKS: u64 = 20;
+
+fn default_max_proof_lag_blocks() -> u64 {
+    DEFAULT_MAX_PROOF_LAG_BLOCKS
 }
 
 fn default_min_validators() -> usize {
@@ -143,6 +170,7 @@ impl LightClientConfigBuilder {
                 max_clock_drift: default_clock_drift(),
                 rpc_timeout: default_rpc_timeout(),
                 auto_sync: default_auto_sync(),
+                max_proof_lag_blocks: default_max_proof_lag_blocks(),
             },
         }
     }
@@ -153,13 +181,15 @@ impl LightClientConfigBuilder {
         self
     }
 
-    /// Sets the minimum validators required for consensus.
+    /// Sets how many endpoints must report the chain's latest height for a verified read
+    /// ([`LightClientConfig::min_validators_for_consensus`]).
     pub fn min_validators_for_consensus(mut self, min: usize) -> Self {
         self.config.min_validators_for_consensus = min;
         self
     }
 
-    /// Sets the trust threshold (numerator/denominator).
+    /// Sets the trust threshold (numerator/denominator) of [`LightClient::sync_to_latest`]'s
+    /// header check. Not applied to verified reads.
     pub fn trust_threshold(mut self, numerator: u64, denominator: u64) -> Self {
         self.config.trust_threshold = (numerator, denominator);
         self
@@ -183,10 +213,17 @@ impl LightClientConfigBuilder {
         self
     }
 
-    /// Sets whether to automatically sync to the latest height on creation.
-    /// Default: true.
+    /// Sets whether [`LightClient::new_async`] syncs to the latest height before returning; the
+    /// client builder never syncs. Default: true.
     pub fn auto_sync(mut self, auto_sync: bool) -> Self {
         self.config.auto_sync = auto_sync;
+        self
+    }
+
+    /// Sets how many blocks behind the chain's latest height a verified read's state may be.
+    /// Default: [`DEFAULT_MAX_PROOF_LAG_BLOCKS`].
+    pub fn max_proof_lag_blocks(mut self, blocks: u64) -> Self {
+        self.config.max_proof_lag_blocks = blocks;
         self
     }
 
@@ -331,10 +368,11 @@ pub struct TrustedState {
 // Light Client
 // ============================================================================
 
-/// CometBFT light client for trustless Willow verification.
+/// CometBFT light client: the headers verified reads check GroveDB proofs against.
 ///
-/// Maintains verified headers and can verify GroveDB proofs against
-/// the `app_hash` in those headers.
+/// Holds headers and verifies GroveDB proofs against the `app_hash` in them. Verified reads
+/// take headers as the configured endpoints serve them, trusting those endpoints (see the
+/// module notes).
 pub struct LightClient {
     config: LightClientConfig,
     /// Verified headers indexed by height.
@@ -474,10 +512,10 @@ impl LightClient {
         Ok(())
     }
 
-    /// Gets the verified root hash (app_hash) from the latest trusted header.
-    ///
-    /// This is the cryptographically verified root hash that proofs should be
-    /// verified against for trustless data verification.
+    /// Gets the app_hash of the latest header this client holds: the GroveDB root of the state
+    /// after the block before it. The header is trusted as its endpoints served it (see the
+    /// module notes). To check a proof of the state after block `H`, use
+    /// [`Self::app_hash_after`]`(H)`, not this.
     ///
     /// If no trusted headers are available, this will auto-initialize using
     /// trust-on-first-use.
@@ -726,6 +764,7 @@ impl LightClient {
 
     /// Fetches a block from a specific endpoint.
     async fn fetch_block_from_endpoint(&self, endpoint: &str, height: u64) -> Result<LightBlock> {
+        let endpoint = endpoint.trim_end_matches('/');
         // Fetch commit
         let commit_url = if height == 0 {
             format!("{}/commit", endpoint)
@@ -733,15 +772,16 @@ impl LightClient {
             format!("{}/commit?height={}", endpoint, height)
         };
 
-        let commit_resp: serde_json::Value = self
+        let commit_resp = self
             .http_client
             .get(&commit_url)
             .send()
             .await
-            .map_err(|e| WillowError::Network(e.to_string()))?
-            .json()
-            .await
             .map_err(|e| WillowError::Network(e.to_string()))?;
+        let commit_resp: serde_json::Value =
+            crate::http_body::json(commit_resp, crate::http_body::SMALL)
+                .await
+                .map_err(|e| WillowError::Network(e.to_string()))?;
 
         // Fetch validators
         let actual_height = commit_resp["result"]["signed_header"]["header"]["height"]
@@ -750,15 +790,16 @@ impl LightClient {
             .unwrap_or(height);
 
         let validators_url = format!("{}/validators?height={}", endpoint, actual_height);
-        let validators_resp: serde_json::Value = self
+        let validators_resp = self
             .http_client
             .get(&validators_url)
             .send()
             .await
-            .map_err(|e| WillowError::Network(e.to_string()))?
-            .json()
-            .await
             .map_err(|e| WillowError::Network(e.to_string()))?;
+        let validators_resp: serde_json::Value =
+            crate::http_body::json(validators_resp, crate::http_body::SMALL)
+                .await
+                .map_err(|e| WillowError::Network(e.to_string()))?;
 
         // Parse into LightBlock
         self.parse_light_block(&commit_resp, &validators_resp)
@@ -822,33 +863,21 @@ impl LightClient {
         })
     }
 
-    /// Verifies a GroveDB proof against a trusted header.
-    ///
-    /// # Arguments
-    ///
-    /// * `proof` - The GroveDB proof bytes
-    /// * `query_result` - The query result to verify
-    /// * `height` - Optional height to verify against (uses latest if None)
-    ///
-    /// # Returns
-    ///
-    /// `Ok(true)` if the proof is valid, `Ok(false)` if invalid.
+    /// Fetches the latest app_hash from CometBFT's `/block_results` endpoint, as the endpoint
+    /// reports it (unverified). Not a root to check a proof against: it isn't tied to the
+    /// proof's height, and CometBFT 0.38 leaves it empty there. Use [`Self::app_hash_after`].
     #[cfg(not(feature = "no-light-client"))]
-    /// Fetches the current app_hash from CometBFT's `/block_results` endpoint.
-    ///
-    /// `/block_results` returns the `app_hash` from `ResponseFinalizeBlock`,
-    /// which is the GroveDB root hash AFTER the latest block was executed.
-    /// Block headers have a 1-block lag (block H's header contains the
-    /// app_hash from block H-1), so `/block_results` is the only reliable
-    /// way to get the hash matching a proof from the current state.
     pub async fn fetch_current_app_hash(&self) -> Result<Vec<u8>> {
         use base64::Engine;
 
         for endpoint in &self.config.validator_endpoints {
-            let url = format!("{}/block_results", endpoint);
+            let url = format!("{}/block_results", endpoint.trim_end_matches('/'));
             match self.http_client.get(&url).send().await {
                 Ok(resp) => {
-                    if let Ok(json) = resp.json::<serde_json::Value>().await {
+                    if let Ok(json) =
+                        crate::http_body::json::<serde_json::Value>(resp, crate::http_body::LARGE)
+                            .await
+                    {
                         if let Some(hash_b64) = json
                             .get("result")
                             .and_then(|r| r.get("app_hash"))
@@ -875,64 +904,220 @@ impl LightClient {
         ))
     }
 
-    pub async fn verify_proof(
+    /// The GroveDB root of the state after block `height`: the `app_hash` in the header of block
+    /// `height + 1`. A header this client holds is used; otherwise the header is fetched from
+    /// the validator endpoints (`/commit?height=`), waiting up to the RPC timeout for the chain
+    /// to produce it. The header is taken as the endpoints serve it (see the module notes).
+    pub async fn app_hash_after(&self, height: u64) -> Result<Vec<u8>> {
+        let next = height
+            .checked_add(1)
+            .ok_or_else(|| WillowError::LightClient(format!("no block after height {height}")))?;
+        if let Some(block) = self.get_header_by_height(next).await {
+            return Ok(block.header.app_hash);
+        }
+        if self.config.validator_endpoints.is_empty() {
+            return Err(WillowError::LightClient(
+                "No validator endpoints configured".to_string(),
+            ));
+        }
+        let deadline = tokio::time::Instant::now() + self.config.rpc_timeout;
+        loop {
+            for endpoint in &self.config.validator_endpoints {
+                if let Some(app_hash) = self.fetch_app_hash_at(endpoint, next).await {
+                    return Ok(app_hash);
+                }
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(WillowError::LightClient(format!(
+                    "no header at height {next} (the state after block {height}) from any \
+                     validator endpoint"
+                )));
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+    }
+
+    /// The `app_hash` of the header at exactly `height`: a header this client holds, else the
+    /// first endpoint's that serves it.
+    async fn app_hash_at(&self, height: u64) -> Result<Vec<u8>> {
+        if let Some(block) = self.get_header_by_height(height).await {
+            return Ok(block.header.app_hash);
+        }
+        for endpoint in &self.config.validator_endpoints {
+            if let Some(app_hash) = self.fetch_app_hash_at(endpoint, height).await {
+                return Ok(app_hash);
+            }
+        }
+        Err(WillowError::LightClient(format!(
+            "no header at height {height} from any validator endpoint"
+        )))
+    }
+
+    /// The chain's latest height as the validator endpoints report it (CometBFT `/status`): the
+    /// highest height that a majority of the endpoints that answer, and at least
+    /// `min_validators_for_consensus` of them, have reached, or the latest header this client
+    /// holds if that is higher. An endpoint reporting a height far above or below the others'
+    /// moves it only with a majority. It trusts the endpoints as the headers do.
+    pub async fn latest_chain_height(&self) -> Result<u64> {
+        let answers = futures_util::future::join_all(
+            self.config
+                .validator_endpoints
+                .iter()
+                .map(|endpoint| self.fetch_status_height(endpoint)),
+        )
+        .await;
+        let mut heights: Vec<u64> = answers.into_iter().flatten().collect();
+        let needed = self.config.min_validators_for_consensus.max(1);
+        if heights.len() < needed {
+            return Err(WillowError::LightClient(format!(
+                "{} validator endpoints reported the latest height; {needed} are needed",
+                heights.len()
+            )));
+        }
+        // Highest first: the k-th has been reached by k endpoints.
+        heights.sort_unstable_by(|a, b| b.cmp(a));
+        let reached = heights[needed.max(heights.len() / 2 + 1) - 1];
+        let held = self
+            .get_latest_header()
+            .await
+            .map_or(0, |block| block.header.height);
+        Ok(reached.max(held))
+    }
+
+    /// The latest height `endpoint`'s `/status` reports.
+    async fn fetch_status_height(&self, endpoint: &str) -> Option<u64> {
+        let url = format!("{}/status", endpoint.trim_end_matches('/'));
+        let resp = self.http_client.get(&url).send().await.ok()?;
+        let body: serde_json::Value = crate::http_body::json(resp, crate::http_body::SMALL)
+            .await
+            .ok()?;
+        body["result"]["sync_info"]["latest_block_height"]
+            .as_str()?
+            .parse::<u64>()
+            .ok()
+            .filter(|h| *h > 0)
+    }
+
+    /// Check that `root` is the chain's state after block `height`, and recent; return the
+    /// height of the header found to carry it (the value proven is the chain's state as of that
+    /// header, the state after the block before it).
+    ///
+    /// A header at `H + 1` carries the app hash from after block `H`. The node leaves its state,
+    /// and so its app hash, unchanged in a block without transactions, and the API serves as a
+    /// proof's height the last block with transactions, so the same app hash is in every header
+    /// from `H + 1` up to the next block with transactions. With `L` the chain's latest height
+    /// ([`Self::latest_chain_height`]) and `lag` the config's `max_proof_lag_blocks`:
+    ///
+    /// - the header at `height + 1` ([`Self::app_hash_after`]) must carry `root`, or this is
+    ///   [`WillowError::ProofVerificationFailed`];
+    /// - when `L - height` is at most `lag`, that header's height is returned;
+    /// - otherwise the state is older than the lag, and is accepted only if the chain still
+    ///   holds it: the latest header's height is returned if it carries `root`, else the oldest
+    ///   header within the lag (at `L - lag + 1`) if it does;
+    /// - else, or when `height` is more than `lag` ahead of `L`, this is
+    ///   [`WillowError::ProofHeightOutOfRange`]: a stale state (the proof may be genuine).
+    pub async fn verify_root_after(&self, root: &[u8], height: u64) -> Result<u64> {
+        let lag = self.config.max_proof_lag_blocks;
+        let latest = self.latest_chain_height().await?;
+        if height > latest && height - latest > lag {
+            return Err(WillowError::ProofHeightOutOfRange(format!(
+                "the proof is of the state after block {height}, {} blocks ahead of the chain's \
+                 latest height {latest}; at most {lag} is accepted (max_proof_lag_blocks)",
+                height - latest
+            )));
+        }
+        let next = height
+            .checked_add(1)
+            .ok_or_else(|| WillowError::LightClient(format!("no block after height {height}")))?;
+        let carried = self.app_hash_after(height).await?;
+        if carried.as_slice() != root {
+            return Err(WillowError::ProofVerificationFailed(format!(
+                "Root hash mismatch: the proof computes {} but the header after block {height} \
+                 has app hash {}",
+                hex::encode(root),
+                hex::encode(&carried)
+            )));
+        }
+        if latest.saturating_sub(height) <= lag {
+            return Ok(next);
+        }
+        // Older than the lag. A header G is within it when `L - (G - 1) <= lag`, from
+        // `L - lag + 1` up (none when `lag` is 0). Each app hash is in one run of consecutive
+        // headers starting at `next`, so a header within the lag carries it only if the oldest
+        // one does.
+        if lag > 0 {
+            for header in [latest, latest - lag + 1] {
+                if self.app_hash_at(header).await?.as_slice() == root {
+                    return Ok(header);
+                }
+            }
+        }
+        Err(WillowError::ProofHeightOutOfRange(format!(
+            "the proof is of the state after block {height}, {} blocks behind the chain's latest \
+             height {latest}, and the chain has changed it since: no header within {lag} blocks \
+             carries its root (max_proof_lag_blocks)",
+            latest - height
+        )))
+    }
+
+    /// The `app_hash` of the header at exactly `height`, from `endpoint`'s `/commit`.
+    async fn fetch_app_hash_at(&self, endpoint: &str, height: u64) -> Option<Vec<u8>> {
+        let url = format!(
+            "{}/commit?height={}",
+            endpoint.trim_end_matches('/'),
+            height
+        );
+        let resp = self.http_client.get(&url).send().await.ok()?;
+        let body: serde_json::Value = crate::http_body::json(resp, crate::http_body::SMALL)
+            .await
+            .ok()?;
+        let header = &body["result"]["signed_header"]["header"];
+        let served_height = header["height"].as_str()?.parse::<u64>().ok()?;
+        let app_hash = hex::decode(header["app_hash"].as_str()?).ok()?;
+        (served_height == height && app_hash.len() == 32).then_some(app_hash)
+    }
+
+    /// Verify that `proof`, a proof of the state after block `height`, proves an Item at `key`
+    /// in the subtree at `path` whose bytes are `value`, and that the root it computes is
+    /// [`Self::app_hash_after`]`(height)`. Returns that root. See
+    /// [`crate::grovedb_envelope::verify_item_at_path`] for what passes.
+    ///
+    /// This checks the value as of `height`, however old: it doesn't refuse a state the chain
+    /// has since changed. When whoever served the proof chose `height`, check the root with
+    /// [`Self::verify_root_after`] instead, as `data().get` does.
+    #[cfg(not(feature = "no-light-client"))]
+    pub async fn verify_item(
         &self,
         proof: &[u8],
         path: &[Vec<u8>],
         key: &[u8],
-        height: Option<u64>,
-    ) -> Result<bool> {
-        use grovedb::GroveDb;
-        use grovedb::PathQuery;
-        use grovedb::Query;
-
-        // Get the expected root hash.
-        // For a specific height, use the cached header. For "latest" (the common
-        // case), fetch the current app_hash directly from abci_info — block
-        // headers have a 1-block lag so the latest header's app_hash is always
-        // one block behind the current GroveDB state.
-        let expected_root = if let Some(h) = height {
-            let header = self.get_header_by_height(h).await.ok_or_else(|| {
-                WillowError::LightClient(format!("No verified header at height {}", h))
-            })?;
-            header.header.app_hash
-        } else {
-            self.fetch_current_app_hash().await?
-        };
-
-        // The PathQuery must match EXACTLY what the server used to generate the proof.
-        // Server generates with: PathQuery::new_unsized(data_path, Query::new_single_key(key))
-        let query = Query::new_single_key(key.to_vec());
-        let path_query = PathQuery::new_unsized(path.to_vec(), query);
-
-        let grove_version = grovedb_version::version::GroveVersion::default();
-
-        // Envelope must descend every path segment (dropped-layer omission guard).
-        crate::grovedb_envelope::check_envelope(proof, path)?;
-
-        match GroveDb::verify_query(proof, &path_query, &grove_version) {
-            Ok((computed_root, _verified_items)) => {
-                if computed_root.as_slice() != expected_root.as_slice() {
-                    return Err(WillowError::ProofVerificationFailed(format!(
-                        "Root hash mismatch: proof computed {} but consensus header has {}",
-                        hex::encode(&computed_root),
-                        hex::encode(expected_root)
-                    )));
-                }
-
-                // Proof verified: the data at this path+key is authenticated by the
-                // consensus root hash. The Merkle proof guarantees integrity.
-                Ok(true)
-            }
-            Err(e) => Err(WillowError::ProofVerificationFailed(format!(
-                "GroveDB proof verification failed: {}",
-                e
-            ))),
+        value: &[u8],
+        height: u64,
+    ) -> Result<[u8; 32]> {
+        let (root, item) = crate::grovedb_envelope::verify_item_at_path(proof, path, key)?;
+        if item != value {
+            return Err(WillowError::ProofVerificationFailed(
+                "the proof proves another value at the path and key".to_string(),
+            ));
         }
+        let trusted = self.app_hash_after(height).await?;
+        if root.as_slice() != trusted.as_slice() {
+            return Err(WillowError::ProofVerificationFailed(format!(
+                "Root hash mismatch: the proof computes {} but the header after block {height} \
+                 has app hash {}",
+                hex::encode(root),
+                hex::encode(trusted)
+            )));
+        }
+        Ok(root)
     }
 
-    /// Verifies a proof (stub when no-light-client feature is enabled).
-    #[cfg(feature = "no-light-client")]
+    /// Not supported: always [`WillowError::Unsupported`].
+    ///
+    /// It bound no value to the key (it returned `true` for any item there), and checked a
+    /// proof of the latest state against an app hash not tied to the proof's height. Use
+    /// [`Self::verify_item`].
+    #[deprecated(note = "binds no value; use LightClient::verify_item")]
     pub async fn verify_proof(
         &self,
         _proof: &[u8],
@@ -940,12 +1125,14 @@ impl LightClient {
         _key: &[u8],
         _height: Option<u64>,
     ) -> Result<bool> {
-        Err(WillowError::LightClient(
-            "Proof verification disabled with 'no-light-client' feature".to_string(),
+        Err(WillowError::Unsupported(
+            "verify_proof binds no value to the key; use LightClient::verify_item".to_string(),
         ))
     }
 
-    /// Verifies a hex-encoded proof.
+    /// Not supported: always [`WillowError::Unsupported`]. Use [`Self::verify_item`].
+    #[deprecated(note = "binds no value; use LightClient::verify_item")]
+    #[allow(deprecated)]
     pub async fn verify_proof_hex(
         &self,
         proof_hex: &str,
@@ -995,8 +1182,9 @@ impl LightClient {
 
     /// Exports the current trusted state for persistence.
     ///
-    /// Returns a serializable state containing verified headers that can be
-    /// saved to disk and restored later using `import_trusted_state`.
+    /// Returns a serializable state containing the headers this client holds, as their
+    /// endpoints served them, that can be saved to disk and restored later using
+    /// `import_trusted_state`.
     ///
     /// # Example
     ///
@@ -1015,8 +1203,9 @@ impl LightClient {
 
     /// Imports previously exported trusted state.
     ///
-    /// This restores headers that were previously verified, allowing the
-    /// light client to resume from where it left off without re-syncing.
+    /// This restores headers that were exported earlier, allowing the light client to resume
+    /// from where it left off without re-syncing. A verified read uses a header this client
+    /// holds before asking an endpoint, so import only state you exported yourself.
     ///
     /// # Arguments
     ///

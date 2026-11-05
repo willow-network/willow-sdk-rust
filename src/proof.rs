@@ -1,132 +1,57 @@
-//! Proof verification for Willow query results.
+//! Proof verification for Willow reads.
 //!
-//! This module provides utilities for verifying cryptographic proofs
-//! returned by Willow queries. Full proof verification uses GroveDB's
-//! lightweight verify-only mode (no RocksDB dependency).
+//! A proof is checked here only for what it binds: an Item at a given GroveDB path and key whose
+//! bytes are a given value ([`ProofVerifier::verify_item_at_path`]). The root it computes is the
+//! proof's own, so a read is verified only once that root is compared with one the caller trusts
+//! (for chain state, the app hash of the CometBFT header after the proof's block, which
+//! [`crate::light_client::LightClient::verify_item`] checks). A lone root hash, a proof of
+//! another path or key, or a proof that names no path proves nothing.
 //!
 //! Disable with the `no-light-client` feature for minimal dependencies.
 
 use crate::errors::{Result, WillowError};
 use serde_json::Value;
 
-#[cfg(not(feature = "no-light-client"))]
-use grovedb::{GroveDb, PathQuery, Query};
+/// The GroveDB path of a subgrove's data: `[subgroves, subgrove_id, data]`.
+pub fn subgrove_data_path(subgrove_id: &str) -> Vec<Vec<u8>> {
+    vec![
+        b"subgroves".to_vec(),
+        subgrove_id.as_bytes().to_vec(),
+        b"data".to_vec(),
+    ]
+}
+
+const PATHLESS: &str = "a proof checked without the GroveDB path and key it is for proves only a \
+                        root hash, not any data; use ProofVerifier::verify_item_at_path";
 
 /// Proof verification functionality.
-///
-/// With `no-light-client` feature, only basic proof parsing is available.
 pub struct ProofVerifier;
 
 impl ProofVerifier {
-    /// Verify a query proof and extract the root hash.
+    /// Not supported: always [`WillowError::Unsupported`].
     ///
-    /// # Arguments
-    /// * `proof_hex` - Hex-encoded GroveDB proof from query response
-    /// * `documents` - The documents returned in the query (for result verification)
-    ///
-    /// # Returns
-    /// * `Ok(root_hash)` - The computed root hash (hex-encoded) if verification succeeds
-    /// * `Err` if there was an error during verification
-    ///
-    /// Disabled with `no-light-client` feature.
-    #[cfg(not(feature = "no-light-client"))]
-    pub fn verify_query_proof(proof_hex: &str, _documents: &[Value]) -> Result<String> {
-        let proof_bytes = hex::decode(proof_hex).map_err(|e| {
-            WillowError::ProofVerificationFailed(format!("Invalid proof hex: {}", e))
-        })?;
-
-        if proof_bytes.is_empty() {
-            return Err(WillowError::ProofVerificationFailed(
-                "Empty proof provided".to_string(),
-            ));
-        }
-
-        // Use GroveDB's verify_query to extract the root hash
-        let empty_path: Vec<Vec<u8>> = vec![];
-        let query = Query::new_range_full();
-        let path_query = PathQuery::new_unsized(empty_path, query);
-        let grove_version = grovedb_version::version::GroveVersion::default();
-
-        // Envelope must match the (root-level) path exactly (dropped-layer omission guard).
-        crate::grovedb_envelope::check_envelope(&proof_bytes, &path_query.path)?;
-
-        match GroveDb::verify_query(&proof_bytes, &path_query, &grove_version) {
-            Ok((root_hash, _verified_items)) => Ok(hex::encode(root_hash)),
-            Err(e) => Err(WillowError::ProofVerificationFailed(format!(
-                "GroveDB verification failed: {}",
-                e
-            ))),
-        }
+    /// It checked a proof at the empty path with no key and returned the root it computed,
+    /// which a lone `Push(Hash(root))` passes for any root, and it bound none of `documents`.
+    #[deprecated(note = "proves only a root hash; use ProofVerifier::verify_item_at_path")]
+    pub fn verify_query_proof(_proof_hex: &str, _documents: &[Value]) -> Result<String> {
+        Err(WillowError::Unsupported(PATHLESS.to_string()))
     }
 
-    /// Verify a query proof (stub with no-light-client feature).
-    #[cfg(feature = "no-light-client")]
-    pub fn verify_query_proof(proof_hex: &str, _documents: &[Value]) -> Result<String> {
-        let proof_bytes = hex::decode(proof_hex).map_err(|e| {
-            WillowError::ProofVerificationFailed(format!("Invalid proof hex: {}", e))
-        })?;
-
-        if proof_bytes.is_empty() {
-            return Err(WillowError::ProofVerificationFailed(
-                "Empty proof provided".to_string(),
-            ));
-        }
-
-        Err(WillowError::ProofVerificationFailed(
-            "Proof verification disabled with 'no-light-client' feature. \
-             Remove this feature to enable verification."
-                .to_string(),
-        ))
+    /// Not supported: always [`WillowError::Unsupported`].
+    ///
+    /// It checked a proof at the empty path and ignored `value`.
+    #[deprecated(note = "binds no path or value; use ProofVerifier::verify_item_at_path")]
+    pub fn verify_item_proof(_proof_hex: &str, _key: &str, _value: &Value) -> Result<String> {
+        Err(WillowError::Unsupported(PATHLESS.to_string()))
     }
 
-    /// Verify a single item proof and extract root hash.
-    #[cfg(not(feature = "no-light-client"))]
-    pub fn verify_item_proof(proof_hex: &str, key: &str, _value: &Value) -> Result<String> {
-        let proof_bytes = hex::decode(proof_hex).map_err(|e| {
-            WillowError::ProofVerificationFailed(format!("Invalid proof hex: {}", e))
-        })?;
-
-        if proof_bytes.is_empty() {
-            return Err(WillowError::ProofVerificationFailed(
-                "Empty proof provided".to_string(),
-            ));
-        }
-
-        // Construct a single-key query
-        let empty_path: Vec<Vec<u8>> = vec![];
-        let mut query = Query::new();
-        query.insert_key(key.as_bytes().to_vec());
-        let path_query = PathQuery::new_unsized(empty_path, query);
-        let grove_version = grovedb_version::version::GroveVersion::default();
-
-        // Envelope must match the (root-level) path exactly (dropped-layer omission guard).
-        crate::grovedb_envelope::check_envelope(&proof_bytes, &path_query.path)?;
-
-        match GroveDb::verify_query(&proof_bytes, &path_query, &grove_version) {
-            Ok((root_hash, _)) => Ok(hex::encode(root_hash)),
-            Err(e) => Err(WillowError::ProofVerificationFailed(format!(
-                "Failed to verify proof for key '{}': {}",
-                key, e
-            ))),
-        }
-    }
-
-    /// Verify a single item proof (stub with no-light-client feature).
-    #[cfg(feature = "no-light-client")]
-    pub fn verify_item_proof(proof_hex: &str, _key: &str, _value: &Value) -> Result<String> {
-        let proof_bytes = hex::decode(proof_hex).map_err(|e| {
-            WillowError::ProofVerificationFailed(format!("Invalid proof hex: {}", e))
-        })?;
-
-        if proof_bytes.is_empty() {
-            return Err(WillowError::ProofVerificationFailed(
-                "Empty proof provided".to_string(),
-            ));
-        }
-
-        Err(WillowError::ProofVerificationFailed(
-            "Proof verification disabled with 'no-light-client' feature.".to_string(),
-        ))
+    /// Not supported: always [`WillowError::Unsupported`].
+    ///
+    /// It compared the root of a proof checked at the empty path with `expected_root_hex`, which
+    /// a lone `Push(Hash(expected_root))` passes.
+    #[deprecated(note = "proves only a root hash; use ProofVerifier::verify_item_against_root")]
+    pub fn verify_against_root(_proof_hex: &str, _expected_root_hex: &str) -> Result<bool> {
+        Err(WillowError::Unsupported(PATHLESS.to_string()))
     }
 
     /// Parse proof bytes without verification.
@@ -137,39 +62,98 @@ impl ProofVerifier {
             .map_err(|e| WillowError::ProofVerificationFailed(format!("Invalid proof hex: {}", e)))
     }
 
-    /// Verify a proof against an expected root hash.
+    /// Check that `proof_hex` proves an Item at `key` in the subtree at `path` whose bytes are
+    /// `value`, and return the root it computes. See
+    /// [`crate::grovedb_envelope::verify_item_at_path`] for what passes.
     ///
-    /// This is the recommended verification method when you have a trusted
-    /// root hash from a verified block header.
+    /// The root is the proof's own: the value is verified only once the caller finds it equal to
+    /// a root it trusts ([`Self::verify_item_against_root`]).
     #[cfg(not(feature = "no-light-client"))]
-    pub fn verify_against_root(proof_hex: &str, expected_root_hex: &str) -> Result<bool> {
-        let computed_root = Self::verify_query_proof(proof_hex, &[])?;
-        Ok(computed_root == expected_root_hex)
+    pub fn verify_item_at_path(
+        proof_hex: &str,
+        path: &[Vec<u8>],
+        key: &[u8],
+        value: &[u8],
+    ) -> Result<[u8; 32]> {
+        let max_hex = 2 * crate::grovedb_envelope::MAX_PROOF_BYTES;
+        if proof_hex.len() > max_hex {
+            return Err(WillowError::ProofVerificationFailed(format!(
+                "a proof of {} hex characters; at most {max_hex} are accepted",
+                proof_hex.len()
+            )));
+        }
+        let proof = Self::parse_proof_hex(proof_hex)?;
+        let (root, item) = crate::grovedb_envelope::verify_item_at_path(&proof, path, key)?;
+        if item != value {
+            return Err(WillowError::ProofVerificationFailed(
+                "the proof proves another value at the path and key".to_string(),
+            ));
+        }
+        Ok(root)
     }
 
-    /// Verify a proof against an expected root hash (stub).
+    /// [`Self::verify_item_at_path`], with the root it computes required to be `trusted_root`.
+    #[cfg(not(feature = "no-light-client"))]
+    pub fn verify_item_against_root(
+        proof_hex: &str,
+        path: &[Vec<u8>],
+        key: &[u8],
+        value: &[u8],
+        trusted_root: &[u8; 32],
+    ) -> Result<()> {
+        let root = Self::verify_item_at_path(proof_hex, path, key, value)?;
+        if &root != trusted_root {
+            return Err(WillowError::ProofVerificationFailed(format!(
+                "Root hash mismatch: the proof computes {}, not the trusted root {}",
+                hex::encode(root),
+                hex::encode(trusted_root)
+            )));
+        }
+        Ok(())
+    }
+
+    /// Not available with the `no-light-client` feature: always [`WillowError::Unsupported`].
     #[cfg(feature = "no-light-client")]
-    pub fn verify_against_root(_proof_hex: &str, _expected_root_hex: &str) -> Result<bool> {
-        Err(WillowError::ProofVerificationFailed(
-            "Proof verification disabled with 'no-light-client' feature.".to_string(),
+    pub fn verify_item_at_path(
+        _proof_hex: &str,
+        _path: &[Vec<u8>],
+        _key: &[u8],
+        _value: &[u8],
+    ) -> Result<[u8; 32]> {
+        Err(WillowError::Unsupported(
+            "proof verification is disabled with the no-light-client feature".to_string(),
+        ))
+    }
+
+    /// Not available with the `no-light-client` feature: always [`WillowError::Unsupported`].
+    #[cfg(feature = "no-light-client")]
+    pub fn verify_item_against_root(
+        _proof_hex: &str,
+        _path: &[Vec<u8>],
+        _key: &[u8],
+        _value: &[u8],
+        _trusted_root: &[u8; 32],
+    ) -> Result<()> {
+        Err(WillowError::Unsupported(
+            "proof verification is disabled with the no-light-client feature".to_string(),
         ))
     }
 }
 
 /// Extension trait for QueryResponse to add verification methods.
 pub trait QueryResponseExt {
-    /// Verify the proof and compute the root hash.
+    /// Not supported: always [`WillowError::Unsupported`]. A query's documents come without
+    /// their keys, so nothing binds them to the proof (see [`crate::data::DataOperations::query`]).
     fn verify_proof(&self) -> Result<String>;
 }
 
 impl QueryResponseExt for crate::data::QueryResponse {
     fn verify_proof(&self) -> Result<String> {
-        match &self.proof {
-            Some(proof) => ProofVerifier::verify_query_proof(proof, &self.documents),
-            None => Err(WillowError::ProofVerificationFailed(
-                "Query response does not contain proof data".to_string(),
-            )),
-        }
+        Err(WillowError::Unsupported(
+            "a query's documents can't be verified: the API serves them without their keys, and \
+             nothing binds them to the proof or to the query's selection"
+                .to_string(),
+        ))
     }
 }
 
@@ -178,21 +162,39 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_invalid_proof_hex() {
-        let result = ProofVerifier::verify_query_proof("invalid_hex", &[]);
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Invalid proof hex"));
+    #[allow(deprecated)]
+    fn the_pathless_checks_refuse() {
+        let mut lone = vec![0x00, 0x21, 0x01];
+        lone.extend_from_slice(&[7; 32]);
+        lone.extend_from_slice(&[0x00, 0x01]);
+        let lone = hex::encode(lone);
+        let root = hex::encode([7; 32]);
+        for result in [
+            ProofVerifier::verify_query_proof(&lone, &[]).map(|_| ()),
+            ProofVerifier::verify_item_proof(&lone, "k", &Value::Null).map(|_| ()),
+            ProofVerifier::verify_against_root(&lone, &root).map(|_| ()),
+        ] {
+            assert!(
+                matches!(result, Err(WillowError::Unsupported(_))),
+                "{result:?}"
+            );
+        }
     }
 
+    #[cfg(not(feature = "no-light-client"))]
     #[test]
-    fn test_empty_proof() {
-        let proof = hex::encode(vec![]);
-        let result = ProofVerifier::verify_query_proof(&proof, &[]);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Empty proof"));
+    fn a_lone_root_hash_proves_no_item() {
+        let mut lone = vec![0x00, 0x21, 0x01];
+        lone.extend_from_slice(&[7; 32]);
+        lone.extend_from_slice(&[0x00, 0x01]);
+        let lone = hex::encode(lone);
+        for path in [vec![], subgrove_data_path("sg-1")] {
+            assert!(ProofVerifier::verify_item_at_path(&lone, &path, b"k", b"{}").is_err());
+            assert!(
+                ProofVerifier::verify_item_against_root(&lone, &path, b"k", b"{}", &[7; 32])
+                    .is_err()
+            );
+        }
     }
 
     #[test]
@@ -202,5 +204,6 @@ mod tests {
         let result = ProofVerifier::parse_proof_hex(&hex_str);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), data);
+        assert!(ProofVerifier::parse_proof_hex("invalid_hex").is_err());
     }
 }

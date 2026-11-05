@@ -1,0 +1,125 @@
+{
+  "private_key_seed_hex": "0303030303030303030303030303030303030303030303030303030303030303",
+  "public_key_id": "did:willow:a#key-1",
+  "ed25519_public_key_hex": "ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d1",
+  "secp256k1_public_key_compressed_hex": "02531fe6068134503d2723133227c867ac8fa6c83c537e9a44c3c5bdbdcb1fe337",
+  "vectors": [
+    {
+      "name": "RegisterSubgrove (data)",
+      "transaction_json": "{\"RegisterSubgrove\":{\"subgrove_id\":\"notes-1\",\"name\":\"Notes\",\"description\":\"Team notes\",\"schema\":\"{\\\"version\\\":1,\\\"fields\\\":{},\\\"indexes\\\":[],\\\"required_fields\\\":[]}\",\"owner_did\":\"did:willow:a\",\"admins\":[\"did:willow:b\"],\"initial_funding\":5000000000000000000,\"checkpoint_verification\":{\"required_tee\":null},\"mode\":{\"DataStorage\":{\"name\":\"Notes\",\"writers\":[\"did:willow:a\"],\"free_readers\":[\"did:willow:c\"],\"read_pricing\":{\"enabled\":true,\"price_per_query\":1000000000000000,\"owner_revenue_share_bps\":8000}}},\"privacy\":null,\"initial_owner_key_grant\":null,\"template_config\":null,\"confirmation_depth\":0,\"signature\":[],\"public_key_id\":\"did:willow:a#key-1\",\"nonce\":3,\"cryptographic_completeness\":false}}",
+      "unsigned_bincode_hex": "07000000000000006e6f7465732d3105000000000000004e6f7465730a000000000000005465616d206e6f7465733b000000000000007b2276657273696f6e223a312c226669656c6473223a7b7d2c22696e6465786573223a5b5d2c2272657175697265645f6669656c6473223a5b5d7d0c000000000000006469643a77696c6c6f773a6101000000000000000c000000000000006469643a77696c6c6f773a62010000f444829163450000000000000000000000000005000000000000004e6f74657301000000000000000c000000000000006469643a77696c6c6f773a6101000000000000000c000000000000006469643a77696c6c6f773a6301010080c6a47e8d03000000000000000000401f000000000000000000000000000000000012000000000000006469643a77696c6c6f773a61236b65792d31030000000000000000",
+      "message": "RegisterSubgrove\nSubgrove: notes-1\nOwner: did:willow:a\nConfig: 3fdf0598579f7a9587988427f36e78b991bbb2c5bbe853db5642ef786bb5e84a\nNonce: 3",
+      "ed25519_signature_hex": "c142a91e2b89474053d741a1e58beb6ea25af865ed84fe6134e0f5e3f487be06a7a3ec85aabb28855fe599a79a95aee7350af7815927bfbb5b6c803959b6860a",
+      "secp256k1_keccak256_hex": "d8ef6d290de69f1e31f4b39b26c954adf3050e1ea6f44045e6b44e40e965fc93",
+      "secp256k1_compact_signature_hex": "c8cc23f6d270366b7d4c13f1a3a8d97c1491b68dd2995f6fd1950207ea64deca4d520d75a4a66e423213fd53e6526e44216ba4a4ed98d44af7301c1d1cdc02f6"
+    },
+    {
+      "name": "RegisterSubgrove (data, defaults)",
+      "transaction_json": "{\"RegisterSubgrove\":{\"subgrove_id\":\"sg-1\",\"name\":\"\",\"description\":\"\",\"schema\":\"{\\\"version\\\":1,\\\"fields\\\":{},\\\"indexes\\\":[],\\\"required_fields\\\":[]}\",\"owner_did\":\"did:willow:a\",\"admins\":[],\"initial_funding\":null,\"checkpoint_verification\":{\"required_tee\":null},\"mode\":{\"DataStorage\":{\"name\":\"\",\"writers\":[],\"free_readers\":[],\"read_pricing\":null}},\"privacy\":null,\"initial_owner_key_grant\":null,\"template_config\":null,\"confirmation_depth\":0,\"signature\":[],\"public_key_id\":\"did:willow:a#key-1\",\"nonce\":4,\"cryptographic_completeness\":false}}",
+      "unsigned_bincode_hex": "040000000000000073672d31000000000000000000000000000000003b000000000000007b2276657273696f6e223a312c226669656c6473223a7b7d2c22696e6465786573223a5b5d2c2272657175697265645f6669656c6473223a5b5d7d0c000000000000006469643a77696c6c6f773a6100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000012000000000000006469643a77696c6c6f773a61236b65792d31040000000000000000",
+      "message": "RegisterSubgrove\nSubgrove: sg-1\nOwner: did:willow:a\nConfig: 738b48f387da85bdc776c2966f94c811f49f922e59b5dae7c90a12bb67a97aa7\nNonce: 4",
+      "ed25519_signature_hex": "0c9cd66eb5b2d51a07d3eda1aecd746c0c6aa2f6370d6368099b23aab4caa19c05be4d7d3150edf510826dcca0cfe58cd3456735516e87947c5fb10ac573370b",
+      "secp256k1_keccak256_hex": "e35d37f8cb34c8fcf1ab7c9bb4b31c9a26afd8f014dc679ac0ca1fd07203422c",
+      "secp256k1_compact_signature_hex": "d71c148d479fed358f6f3780cbf17c51b65f09466c43d283c5edce36fe32fc442da1195edb90b7d9c39529e52bd0a0f21d5ef11a1baa8b3849c3fe6266a495c5"
+    },
+    {
+      "name": "RegisterSubgrove (file)",
+      "transaction_json": "{\"RegisterSubgrove\":{\"subgrove_id\":\"files-1\",\"name\":\"Files\",\"description\":\"\",\"schema\":\"{\\\"version\\\":1,\\\"fields\\\":{},\\\"indexes\\\":[],\\\"required_fields\\\":[]}\",\"owner_did\":\"did:willow:a\",\"admins\":[],\"initial_funding\":1,\"checkpoint_verification\":{\"required_tee\":null},\"mode\":{\"FileStorage\":{\"name\":\"Files\",\"max_file_size\":104857600,\"replication_factor\":3,\"writers\":[\"did:willow:a\"],\"free_readers\":[],\"read_pricing\":null,\"retention_period\":0}},\"privacy\":null,\"initial_owner_key_grant\":null,\"template_config\":null,\"confirmation_depth\":0,\"signature\":[],\"public_key_id\":\"did:willow:a#key-1\",\"nonce\":5,\"cryptographic_completeness\":false}}",
+      "unsigned_bincode_hex": "070000000000000066696c65732d31050000000000000046696c657300000000000000003b000000000000007b2276657273696f6e223a312c226669656c6473223a7b7d2c22696e6465786573223a5b5d2c2272657175697265645f6669656c6473223a5b5d7d0c000000000000006469643a77696c6c6f773a61000000000000000001010000000000000000000000000000000001000000050000000000000046696c657300004006000000000301000000000000000c000000000000006469643a77696c6c6f773a61000000000000000000000000000000000000000000000000000000000000000012000000000000006469643a77696c6c6f773a61236b65792d31050000000000000000",
+      "message": "RegisterSubgrove\nSubgrove: files-1\nOwner: did:willow:a\nConfig: c28c220c1f74d7c4217d5bda7741eb289977ca29f3a4ff76cf2aad4f603bcb5b\nNonce: 5",
+      "ed25519_signature_hex": "c9d157022e42f86618ad9be8ea1e517239a559e35a4b50d37cd734c9660dc240faa4b56f74f319185eea0542583a21b079d4109e4180a4aee7dd740a194b8504",
+      "secp256k1_keccak256_hex": "7085e4718bccd58a659968f7a375ec9c60940e0527a8d47efebc151d62eeca39",
+      "secp256k1_compact_signature_hex": "c1680bcd96d4fa26cee522e32e6e54a9a6945af8a76aa077c94790e994435b0553911442f16a297447a48cb1911de02cf59f1f8f8e969fa97831e8c5cb4eabb2"
+    },
+    {
+      "name": "RegisterSubgrove (private, non-ASCII, large nonce)",
+      "transaction_json": "{\"RegisterSubgrove\":{\"subgrove_id\":\"private-1\",\"name\":\"Notizen \u00fc\",\"description\":\"\u4e16\u754c\",\"schema\":\"{\\\"version\\\":1,\\\"fields\\\":{},\\\"indexes\\\":[],\\\"required_fields\\\":[]}\",\"owner_did\":\"did:willow:a\",\"admins\":[],\"initial_funding\":null,\"checkpoint_verification\":{\"required_tee\":null},\"mode\":{\"DataStorage\":{\"name\":\"Notizen \u00fc\",\"writers\":[\"did:willow:a\"],\"free_readers\":[],\"read_pricing\":null}},\"privacy\":{\"allowed_indexers\":[\"did:willow:idx\"],\"commitment_frequency\":{\"EveryNBlocks\":100}},\"initial_owner_key_grant\":{\"grantee_did\":\"did:willow:a\",\"key_epoch\":0,\"grantee_public_key_id\":\"did:willow:a#key-1\",\"ephemeral_public_key\":[64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64,64],\"encrypted_key\":[65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65,65],\"granted_by\":\"did:willow:a\",\"granted_at\":1800000000},\"template_config\":null,\"confirmation_depth\":2,\"signature\":[],\"public_key_id\":\"did:willow:a#key-1\",\"nonce\":4294967297,\"cryptographic_completeness\":false}}",
+      "unsigned_bincode_hex": "0900000000000000707269766174652d310a000000000000004e6f74697a656e20c3bc0600000000000000e4b896e7958c3b000000000000007b2276657273696f6e223a312c226669656c6473223a7b7d2c22696e6465786573223a5b5d2c2272657175697265645f6669656c6473223a5b5d7d0c000000000000006469643a77696c6c6f773a6100000000000000000000000000000a000000000000004e6f74697a656e20c3bc01000000000000000c000000000000006469643a77696c6c6f773a61000000000000000000010101000000000000000e000000000000006469643a77696c6c6f773a696478010000006400000000000000010c000000000000006469643a77696c6c6f773a610000000012000000000000006469643a77696c6c6f773a61236b65792d312000000000000000404040404040404040404040404040404040404040404040404040404040404048000000000000004141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141410c000000000000006469643a77696c6c6f773a6100d2496b000000000002000000000000000000000012000000000000006469643a77696c6c6f773a61236b65792d31010000000100000000",
+      "message": "RegisterSubgrove\nSubgrove: private-1\nOwner: did:willow:a\nConfig: 07307fdf9ef4260f35c6f9e21c01db1e40f7cd3aae1955a445c5c646fc1cad0e\nNonce: 4294967297",
+      "ed25519_signature_hex": "5a085101588c1c3d10c827f707c244260abbe14a3bdb5e9c4f605f00cee99b36e6e3935d3105923a3794945bbf239df990a6689ad1c091ac073dc96fb7d2df07",
+      "secp256k1_keccak256_hex": "a0dd87ceb5223925ed1f2fde41375aa418d1610dc25aa90eee60f6d03b1c5113",
+      "secp256k1_compact_signature_hex": "0f3c436dd6d605622a5479bbfffc7d3a1ca1175dcbf2c2ea25f751910a53944a23da99c1f7b500705d404b3c9bfba1819d08248fa5652a7150dd0535df0ed08f"
+    },
+    {
+      "name": "RegisterSubgrove (indexing)",
+      "transaction_json": "{\"RegisterSubgrove\":{\"subgrove_id\":\"idx-2\",\"name\":\"Index\",\"description\":\"d\",\"schema\":\"{\\\"version\\\":1,\\\"fields\\\":{},\\\"indexes\\\":[],\\\"required_fields\\\":[]}\",\"owner_did\":\"did:willow:a\",\"admins\":[],\"initial_funding\":null,\"checkpoint_verification\":{\"required_tee\":\"AwsNitro\"},\"mode\":{\"BlockchainIndexing\":{\"manifest_content\":[115,112,101,99,86,101,114,115,105,111,110,58,32,49,46,48,46,48],\"wasm_modules\":[{\"name\":\"map\",\"hash\":[51,51,51,51,51,51,51,51,51,51,51,51,51,51,51,51,51,51,51,51,51,51,51,51,51,51,51,51,51,51,51,51],\"content\":[0,97,115,109]}],\"execution_mode\":{\"IndexerExecution\":{\"sampling_rate_percent\":10}},\"indexer_config\":{\"min_indexers\":1,\"max_indexers\":3,\"reward_per_epoch\":2000000000000000000,\"epoch_length\":100,\"min_indexer_stake\":10000000000000000000000},\"retention_window\":{\"Blocks\":1000},\"completeness\":{\"log_config_hash\":[1,2,3,4],\"tx_config_hash\":[5,6,7,8],\"deferred\":true,\"bond_amount\":0},\"historical_auth_mode\":\"BftEquivalent\"}},\"privacy\":null,\"initial_owner_key_grant\":null,\"template_config\":{\"template_id\":\"erc20\",\"template_version\":1,\"variant_id\":\"transfers\",\"parameters\":[1,2,3],\"contracts\":[\"0x00000000000000000000000000000000000000aa\"],\"event_signatures\":[\"Transfer(address,address,uint256)\"],\"chain\":\"ethereum\"},\"confirmation_depth\":0,\"signature\":[],\"public_key_id\":\"did:willow:a#key-1\",\"nonce\":6,\"cryptographic_completeness\":true}}",
+      "unsigned_bincode_hex": "05000000000000006964782d320500000000000000496e6465780100000000000000643b000000000000007b2276657273696f6e223a312c226669656c6473223a7b7d2c22696e6465786573223a5b5d2c2272657175697265645f6669656c6473223a5b5d7d0c000000000000006469643a77696c6c6f773a6100000000000000000001000000000200000012000000000000007370656356657273696f6e3a20312e302e30010000000000000003000000000000006d6170333333333333333333333333333333333333333333333333333333333333333304000000000000000061736d010000000a01030000c84e676dc11b00000000000000006400000000000000000040b2bac9e0191e0200000000000000000000e803000000000000010100000002000000030000000400000005000000060000000700000008000000010000000000000000000000000000000000000000000001050000000000000065726332300100000009000000000000007472616e7366657273030000000000000001020301000000000000002a00000000000000307830303030303030303030303030303030303030303030303030303030303030303030303030306161010000000000000021000000000000005472616e7366657228616464726573732c616464726573732c75696e7432353629010800000000000000657468657265756d00000000000000000000000012000000000000006469643a77696c6c6f773a61236b65792d31060000000000000001",
+      "message": "RegisterSubgrove\nSubgrove: idx-2\nOwner: did:willow:a\nConfig: 36d6021610991c38d7ae21300e1f027f4313dc3a62f642ab1367a8fb4841e5f7\nNonce: 6",
+      "ed25519_signature_hex": "bba281bd2dc18706df25ebfdf3b3df0bc9533fd72c9a426dc88fdcff943586d836727cf6d61eb2ab2540e0dcd50dc430271c9ac0075a026fb14e1530c6894103",
+      "secp256k1_keccak256_hex": "8995ecb9c3ccc9194af26349d6b1f025f0eb3dbf05d9570f4740aeafca98c9fd",
+      "secp256k1_compact_signature_hex": "567fb7db7f2d9521049827b3cabcd8588909922480219997f9f7fabb40a302ab06605f197dc0877044a51375a4f46466c6166a8d29fc22b02ab01bb05c19931b"
+    },
+    {
+      "name": "GrantSubgroveKey",
+      "transaction_json": "{\"GrantSubgroveKey\":{\"subgrove_id\":\"private-1\",\"encrypted_key_grant\":{\"grantee_did\":\"did:willow:b\",\"key_epoch\":0,\"grantee_public_key_id\":\"did:willow:b#key-1\",\"ephemeral_public_key\":[80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80],\"encrypted_key\":[81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81,81],\"granted_by\":\"did:willow:a\",\"granted_at\":1800000000},\"sender_did\":\"did:willow:a\",\"signature\":[],\"public_key_id\":\"did:willow:a#key-1\",\"nonce\":12}}",
+      "unsigned_bincode_hex": null,
+      "message": "GrantSubgroveKey\nSubgrove: private-1\nSender: did:willow:a\nGrantee: did:willow:b\nGranteeKey: did:willow:b#key-1\nKeyEpoch: 0\nEphemeralKey: 5050505050505050505050505050505050505050505050505050505050505050\nEncryptedKey: 515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151\nGrantedBy: did:willow:a\nGrantedAt: 1800000000\nNonce: 12",
+      "ed25519_signature_hex": "f47fa024cd103e64862599d69c227846bb9f36af0de48a9fc2a37c1d97ef9e183fd952c7b395d043ee2237c0328281f78906bacd892a5f8125fa772d1ec68507",
+      "secp256k1_keccak256_hex": "00ac1394356d9c5f985b8e50e42ac99bf2d5458c7849ea81f2ceaf12c95a421a",
+      "secp256k1_compact_signature_hex": "e370e87eca7acfe0c42cf7874e406f7bdc3b66e7f2fd08812fe5218f90edac1161e5ab0bd6067f3b678f4887561c053cf7255ea73bbad75d7ca44e2f40dd4b86"
+    },
+    {
+      "name": "RotateSubgroveKey",
+      "transaction_json": "{\"RotateSubgroveKey\":{\"subgrove_id\":\"private-1\",\"new_epoch\":1,\"new_grants\":[{\"grantee_did\":\"did:willow:a\",\"key_epoch\":1,\"grantee_public_key_id\":\"did:willow:a#key-1\",\"ephemeral_public_key\":[96,96,96,96,96,96,96,96,96,96,96,96,96,96,96,96,96,96,96,96,96,96,96,96,96,96,96,96,96,96,96,96],\"encrypted_key\":[97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97],\"granted_by\":\"did:willow:a\",\"granted_at\":1800000000},{\"grantee_did\":\"did:willow:b\",\"key_epoch\":1,\"grantee_public_key_id\":\"did:willow:b#key-1\",\"ephemeral_public_key\":[112,112,112,112,112,112,112,112,112,112,112,112,112,112,112,112,112,112,112,112,112,112,112,112,112,112,112,112,112,112,112,112],\"encrypted_key\":[113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113],\"granted_by\":\"did:willow:a\",\"granted_at\":1800000000}],\"sender_did\":\"did:willow:a\",\"signature\":[],\"public_key_id\":\"did:willow:a#key-1\",\"nonce\":13}}",
+      "unsigned_bincode_hex": null,
+      "message": "RotateSubgroveKey\nSubgrove: private-1\nSender: did:willow:a\nNewEpoch: 1\nGrants: 2\nGrantee: did:willow:a\nGranteeKey: did:willow:a#key-1\nKeyEpoch: 1\nEphemeralKey: 6060606060606060606060606060606060606060606060606060606060606060\nEncryptedKey: 616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161\nGrantedBy: did:willow:a\nGrantedAt: 1800000000\nGrantee: did:willow:b\nGranteeKey: did:willow:b#key-1\nKeyEpoch: 1\nEphemeralKey: 7070707070707070707070707070707070707070707070707070707070707070\nEncryptedKey: 717171717171717171717171717171717171717171717171717171717171717171717171717171717171717171717171717171717171717171717171717171717171717171717171\nGrantedBy: did:willow:a\nGrantedAt: 1800000000\nNonce: 13",
+      "ed25519_signature_hex": "55b097e65d89ed89f74716ce736f40d90091082aee50a6790351939447267417dad7d8fbab75cdda2ef1df8a46f325bd0defb351b4b09ae3abd2d9694811fe02",
+      "secp256k1_keccak256_hex": "48b584fff332a8fe4f2ebc53b2c67f2e3de4454b54c82fd038bc6c7b70d67a1a",
+      "secp256k1_compact_signature_hex": "5070d9f95dc1ccae9fcb17f9581066592aa2a74e218f49d41fdcd931ea39cfd738069ec4a6056936f8017858d55cd1def2576e88e5476b99b3106c2c2df4f459"
+    },
+    {
+      "name": "UnregisterStorageNode",
+      "transaction_json": "{\"UnregisterStorageNode\":{\"node_did\":\"did:willow:a\",\"signature\":[],\"public_key_id\":\"did:willow:a#key-1\",\"nonce\":14}}",
+      "unsigned_bincode_hex": null,
+      "message": "UnregisterStorageNode\nNode: did:willow:a\nNonce: 14",
+      "ed25519_signature_hex": "8fdba5dc2dc7126966ebce1f299cfac82feeb319590ac60da0b8e974e6d171a2a7ccb398d6e28566a222a43cceb76d1cba3cba3124fef230e40a1e8db1f9c60a",
+      "secp256k1_keccak256_hex": "139102403cedc4d4bcd01983a0f1eb4d7ece72cc002cfeb53c389ad88ec4e4b8",
+      "secp256k1_compact_signature_hex": "be0d4275d5793d76500277b96ea9629149c251b0474e0502872be294d3f8cc18120f765158b41b9ad9523322fb89fb0b071a01dfd4369b8250dbd9c567a343b3"
+    },
+    {
+      "name": "UpdateSubgroveReadPricing",
+      "transaction_json": "{\"UpdateSubgroveReadPricing\":{\"subgrove_id\":\"notes-1\",\"owner_did\":\"did:willow:a\",\"read_pricing\":{\"enabled\":true,\"price_per_query\":2000000000000000,\"owner_revenue_share_bps\":9000},\"signature\":[],\"public_key_id\":\"did:willow:a#key-1\",\"nonce\":15}}",
+      "unsigned_bincode_hex": null,
+      "message": "UpdateSubgroveReadPricing\nSubgrove: notes-1\nOwner: did:willow:a\nEnabled: true\nPrice: 2000000000000000\nOwnerShareBps: 9000\nNonce: 15",
+      "ed25519_signature_hex": "bcc7dee95e2eec02f4053110cf25658987e6f861972e0dfbd7154beff796e40add80842ca04a8ae20e485999be98fbb916f024c6cd30f880237783fc48420a0b",
+      "secp256k1_keccak256_hex": "f6219cf9ca2e821a93e59e9737816adcdeba8936b6512139b01964198b6ec03e",
+      "secp256k1_compact_signature_hex": "5ad56c8decb2b60ef3fdb94dbbf5dc781cbfca43a4353906900911d81eeff7c56625a3d48d20b518af0c5c60a314d1ee5b43a4ff8836f916e1fb06929a9304c2"
+    },
+    {
+      "name": "UpdateSubgroveReadPricing (none)",
+      "transaction_json": "{\"UpdateSubgroveReadPricing\":{\"subgrove_id\":\"notes-1\",\"owner_did\":\"did:willow:a\",\"read_pricing\":null,\"signature\":[],\"public_key_id\":\"did:willow:a#key-1\",\"nonce\":16}}",
+      "unsigned_bincode_hex": null,
+      "message": "UpdateSubgroveReadPricing\nSubgrove: notes-1\nOwner: did:willow:a\nPricing: none\nNonce: 16",
+      "ed25519_signature_hex": "b7c5ce5efb70c27109f3ef17a2d0f33640ff1eb60191bc362140a7c1f2c41b83c3a0010060770e570b8989d680dd3f4120ff0910272a76bebec8ca05217edd03",
+      "secp256k1_keccak256_hex": "bb2f60c402ff56237011eaa3051cd52b91e4733cdaa0822f4fa8b4c618281b96",
+      "secp256k1_compact_signature_hex": "af782ebafa092cf464008c40a6ef4a11fa10cdbaa77be6868194842fc8f27ded283f6218576b065ed4f0f1e982e3e016932147a6472e58513c2adbcf4567b9d9"
+    },
+    {
+      "name": "BlockContentHash",
+      "transaction_json": "{\"BlockContentHash\":{\"content_hash\":[119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119],\"reason\":\"Reported malware\",\"admin_did\":\"did:willow:a\",\"signature\":[],\"public_key_id\":\"did:willow:a#key-1\",\"nonce\":17}}",
+      "unsigned_bincode_hex": null,
+      "message": "BlockContentHash\nAdmin: did:willow:a\nContentHash: 7777777777777777777777777777777777777777777777777777777777777777\nReason: Reported malware\nNonce: 17",
+      "ed25519_signature_hex": "f0f27576c5d34a4208f8aa749adecefed2f3e185fdae8476eb1eae0d44564adca5f5c8d312588fd13ae46463a4d8f7c837f063c350c35bc9eaf4fe968cc1720f",
+      "secp256k1_keccak256_hex": "57c5bbe5a4bc3fe2751fb3ad3160ef7d46ea4d6ac9233b13fa008b77cd2c79d6",
+      "secp256k1_compact_signature_hex": "fba2512664fb806e07e790b11a016cf1c992d23b8f597e95199c9f5230eecd5d12ac6cf293d454b11dd631fdddce4efd3281b71772dd3756c089ebf6659857b2"
+    },
+    {
+      "name": "UnblockContentHash",
+      "transaction_json": "{\"UnblockContentHash\":{\"content_hash\":[119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119],\"admin_did\":\"did:willow:a\",\"signature\":[],\"public_key_id\":\"did:willow:a#key-1\",\"nonce\":18}}",
+      "unsigned_bincode_hex": null,
+      "message": "UnblockContentHash\nAdmin: did:willow:a\nContentHash: 7777777777777777777777777777777777777777777777777777777777777777\nNonce: 18",
+      "ed25519_signature_hex": "676949b43e3a4670cfb290176a6bc94cb9d02ae4bbdb779429fd912a25da04e098b633a22a2a6e7d8e84010c627253a38ec2a17a433329ffe3f8deb15e6f2e06",
+      "secp256k1_keccak256_hex": "e0c64c75df4b6097924eb59aa0c47c1d51ccdbe1c59f2b880ac3eba70b496f5b",
+      "secp256k1_compact_signature_hex": "cc9992389f53beaa58b7331ba22b564fc8788dea6758cba906e6460d9ccba0d819f38d06a4f2b0c03418d5978f5ad006cf3ad7ee5b97911af1ae527df9ebe776"
+    },
+    {
+      "name": "ReportContent",
+      "transaction_json": "{\"ReportContent\":{\"content_hash\":[119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119,119],\"reason\":\"Spam\",\"reporter_did\":\"did:willow:a\",\"signature\":[],\"public_key_id\":\"did:willow:a#key-1\",\"nonce\":19}}",
+      "unsigned_bincode_hex": null,
+      "message": "ReportContent\nReporter: did:willow:a\nContentHash: 7777777777777777777777777777777777777777777777777777777777777777\nReason: Spam\nNonce: 19",
+      "ed25519_signature_hex": "5b0d73ed5a0200f8c74bde770aa39c6b79871c917554bae6e7c9281eb6e579754d6b3c9647faf34a8a8c9464418674ae7bcc47fa39c7220262f06f79889f8201",
+      "secp256k1_keccak256_hex": "cd153cf1d4415442552d11a8b314b8224cc1f3074dfebac3afd99dc9f95eca52",
+      "secp256k1_compact_signature_hex": "4e537d8c305331f80a22951e3142a8f1756bb53eb726a87c6dfa14d3c1c8a29a4769b5500d4f58b352e173fee4d3fb2151697ffddd95f9d8b99ff06d7c79ba5e"
+    }
+  ]
+}

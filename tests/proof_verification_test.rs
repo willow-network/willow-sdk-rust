@@ -207,7 +207,7 @@ async fn test_get_unverified_skips_proof_check() {
 }
 
 #[tokio::test]
-async fn test_query_with_automatic_proof_verification() {
+async fn test_query_refuses_verification_and_query_unverified_returns_documents() {
     let (client, consensus, did_info, signing_key, subgrove_id) =
         match setup_test_environment().await {
             Ok(setup) => setup,
@@ -245,7 +245,8 @@ async fn test_query_with_automatic_proof_verification() {
     // Wait for data to be indexed
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
-    // Test automatic proof verification on QUERY
+    // A query's documents come without their keys, so nothing binds them to the proof: the
+    // verified query refuses, and query_unverified returns them unverified.
     let query = json!({
         "filters": {
             "value": {"$gte": 15}
@@ -253,20 +254,21 @@ async fn test_query_with_automatic_proof_verification() {
         "limit": 10
     });
 
+    let refused = client.data().query(&subgrove_id, query.clone()).await;
+    assert!(
+        matches!(refused, Err(willow_sdk::WillowError::Unsupported(_))),
+        "{refused:?}"
+    );
+
     let response = client
         .data()
-        .query(&subgrove_id, query)
+        .query_unverified(&subgrove_id, query)
         .await
-        .expect("Failed to execute query with proof verification");
+        .expect("Failed to execute unverified query");
 
     // Should have 2 results (value >= 15)
     assert_eq!(response.documents.len(), 2);
-
-    // Verify root hash is present (only when proof was verified)
-    assert!(
-        response.verified_root_hash.is_some(),
-        "Expected verified root hash in response"
-    );
+    assert!(response.verified_root_hash.is_none());
 }
 
 #[tokio::test]

@@ -1,16 +1,16 @@
 # Willow Rust SDK
 
-A Rust SDK for interacting with the Willow decentralized data infrastructure protocol. Provides trustless verification of all data operations through an embedded CometBFT light client and GroveDB proof verification.
+A Rust SDK for interacting with the Willow decentralized data infrastructure protocol. A value read by key is verified with a GroveDB proof against the app hash of a CometBFT header; see [What is verified](#what-is-verified) for each read.
 
 ## Features
 
-- **Trustless by Default**: Embedded light client verifies all data against blockchain consensus
+- **Verified Reads by Key**: `data().get` returns a value only when its proof binds it at its key under the chain's app hash
 - **GroveDB Proof Verification**: Merkle proofs verified locally using lightweight verify-only mode
 - **DID Authentication**: Ed25519 and secp256k1 signature support
-- **Automatic Proof Verification**: All `get()` and `query()` operations verify proofs automatically
+- **Nonces per Identity**: concurrent writes take distinct nonces from the node's window
 - **File Storage**: Upload, download, list, and delete files with chunk Merkle verification
 - **File Encryption**: XChaCha20-Poly1305 encryption/decryption for private files
-- **GraphQL Indexing**: Query indexed blockchain data with cryptographic proofs
+- **GraphQL Indexing**: Query indexed blockchain data
 - **Token Operations**: Check balances, fees, and token information
 - **Async/Await**: Built on Tokio for high performance
 - **Zero-Cost Abstractions**: Rust native with minimal overhead
@@ -28,7 +28,7 @@ willow-sdk = { git = "https://github.com/willow-network/willow-sdk-rust" }
 tokio = { version = "1", features = ["full"] }
 ```
 
-To disable proof verification (if you trust your node):
+To build without proof verification (reads by key then refuse; use the `_unverified` reads):
 
 ```toml
 [dependencies]
@@ -49,13 +49,28 @@ cargo build
 
 ## Transaction submission
 
-Transactions submitted through this SDK go to the API server's
-`POST /tx/submit` endpoint. The server accepts the JSON-encoded
-transaction, bincode-encodes it (the chain's on-the-wire format), and
-forwards to CometBFT's `broadcast_tx_sync`. `api_url` is therefore
-**required** whenever you submit a tx; `consensus_rpc_url` is only
-used for read-only RPC queries (status, block, validators) and may be
-omitted or pointed at the same endpoint.
+Transactions submitted through this SDK are bincode-encoded by the client (the chain's on-the-wire format) and broadcast to CometBFT's `broadcast_tx_sync` at the consensus URL (`consensus_url` on the builder, or `ConsensusClient::new`). The client signs the exact transaction it encodes. A client built without a consensus URL can't write: the file and key-grant operations return a configuration error naming `consensus_url`. Its verified reads (`data().get`) need a consensus node too, from `consensus_url` or `light_client_config`, unless the API is on a loopback host at port 3031 (see [What is verified](#what-is-verified)); its unverified reads don't. Byte fields of a transaction built as JSON (`signature`, `content`, `encrypted_key`, …) are arrays of numbers 0–255.
+
+### Nonces
+
+The node accepts a nonce in `base + 1 ..= base + 24` that it hasn't used, and `base` advances only over used nonces with no gap. Every write path of `ConsensusClient` (and so the data, file, and key-grant operations) takes its nonce from the client's `NonceTracker`, shared by every clone of the client:
+
+- it reads the account's nonce state over the CometBFT RPC (ABCI `/store/account_nonce_state/{did}`: the base as a big-endian u64, then 3 bytes in which bit `i % 8` of byte `i / 8` marks `base + 1 + i` used), falling back to the base alone from the API's `GET /account/{did}/nonce`;
+- it hands out the lowest nonce in the window that the chain doesn't show used and that no write from this client took within the last 120 s (the node holds a pending transaction's nonce for 3 blocks or 120 s), under a lock, so concurrent writes take distinct nonces. When all 24 are taken it fails with `WillowError::NonceWindowFull`, never a nonce past the window;
+- a submission CheckTx refuses gives its nonce back, unless the node's refusal of that nonce says it is held by a pending transaction (`Nonce N of … is held by a pending transaction`), used (`Invalid nonce: N already used`, `Invalid nonce: N <= base nonce`), or spent (`… (nonce N spent)`). A submission whose fate is unknown (a network or RPC error) keeps its nonce for 120 s, and CometBFT already holding the exact bytes (`tx already exists in cache`) counts as accepted. A new submission the mempool didn't admit (full, or over its size limit) is `WillowError::NotAdmitted` and gives its nonce back; a rebroadcast that meets a full mempool, or can't be sent, stays `SubmissionUnknown` with the nonce held, since the earlier attempt may be pending.
+
+**Retry a write under its own nonce.** A write that was sent and whose outcome is unknown (the node's answer was lost or unreadable, or its RPC answered an error) may yet land. It fails with `WillowError::SubmissionUnknown`, which carries a `SignedSubmission`: the DID, the nonce its signature covers, the exact bytes broadcast, and their hash. To retry it, send those bytes again with `ConsensusClient::rebroadcast(&submission)`: whichever attempt lands first spends the nonce and the other is refused, so the write runs at most once, and CometBFT answers bytes its mempool already holds as `tx already exists in cache`, which counts as accepted. Calling `transfer`, `fund_subgrove`, `store_data`, or any other write again instead signs it under a new nonce, and then both can land.
+
+```rust
+match consensus.transfer(from, to, amount, None, key_hex, key_id, algorithm).await {
+    Err(WillowError::SubmissionUnknown { submission, .. }) => {
+        let tx_hash = consensus.rebroadcast(&submission).await?;
+    }
+    other => { other?; }
+}
+```
+
+A write refused as "already used" may be one whose earlier attempt landed: read what it wrote before signing it again under a fresh nonce, or it can run twice. A write refused in its block after its signature and nonce verify has spent its nonce; sign any retry under a fresh one. The key-grant operations and `update_did_with_nonce` take the nonce you pass, and hold and settle it the same way; one the SDK refuses before sending it (a grantee that isn't a DID, …) gives the nonce back. `ConsensusClient::with_nonce_tracker` shares one tracker between clients that sign for the same identity.
 
 ## Quick Start
 
@@ -64,45 +79,64 @@ use willow_sdk::{WillowClient, auth::generate_did, types::SignatureAlgorithm};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Create client
-    let client = WillowClient::new("http://localhost:3031").await?;
+    // Create a client for a local node: its API and its CometBFT RPC
+    let client = WillowClient::builder()
+        .api_url("http://localhost:3031")
+        .consensus_url("http://localhost:26657")
+        .build()
+        .await?;
 
-    // Generate DID
+    // Generate a DID. It is derived from its key, and must hold the registration fee
+    // (a transfer from a funded account) before it registers.
     let did_info = generate_did(SignatureAlgorithm::Ed25519)?;
+    client
+        .consensus()
+        .register_did(
+            &did_info.did_document,
+            &did_info.private_key_hex(),
+            &did_info.public_key_id,
+            SignatureAlgorithm::Ed25519,
+        )
+        .await?;
 
-    // Register and authenticate
-    client.register_did(&did_info.did_document).await?;
-    client.authenticate(
-        &did_info.did,
-        &did_info.private_key_hex(),
-        &did_info.public_key_id
-    ).await?;
+    // Sign each request as that DID
+    client.set_identity(&did_info.did, &did_info.private_key_hex(), &did_info.public_key_id);
 
-    // All data operations automatically verify proofs
+    // Verified: the proof binds the value at its key under the chain's app hash
     let data = client.data().get("dataset_id", "key").await?;
 
     Ok(())
 }
 ```
 
+## What is verified
+
+A read is presented as verified only when a proof binds that exact data at the GroveDB path and key asked, against a root that doesn't come from the response itself.
+
+- **`data().get(subgrove, key)`** reads the value and its proof, and returns the value only when the proof proves an Item at `key` in the subgrove's data tree (`[subgroves, subgrove, data]`) whose bytes are the value served, and the root it computes is the `app_hash` of the CometBFT header at the proof's height + 1 (the state after block `H` is committed in block `H + 1`'s header). The header comes from the light client's validator endpoints, over the CometBFT RPC: those of `light_client_config` when set, else the consensus URL. Only an API on a loopback host (`localhost`, `127.0.0.1`, `::1`) at port 3031, as a local node runs, implies its node at port 26657 without one; any other API URL with no consensus URL is a configuration error (`WillowError::Config`). A missing proof or height, another value, another root, or no header is an error; nothing is returned unverified. A key the API reports missing is `NotFound`, unproven.
+- **Recency**: the API chooses the height it proves at, so `data().get` refuses a state more than `max_proof_lag_blocks` (default 20, on `LightClientConfig`) behind the chain's latest height (the endpoints' CometBFT `/status`), unless a header within that lag still carries the same root (a block without transactions leaves the app hash unchanged, so an idle chain's old state is still its state); it refuses a height that far ahead too. Both are `WillowError::ProofHeightOutOfRange`, distinct from a forged proof's `ProofVerificationFailed`. `data().get_verified` returns the value with the height of the header found to carry its root (`VerifiedValue { value, height }`): the value is the chain's state as of that header, not necessarily as of now. The light client's `verify_item` checks a proof at the height you pass, however old; `LightClient::verify_root_after` applies the recency rule.
+- **Proof checks** refuse what grovedb 3.1.0's verifier alone accepts: a proof that doesn't descend the asked path, children attached under an opaque `Hash` node (a forged subtree that still hashes to the real root), an item whose value its root doesn't bind (a `KVValueHash` node carries only the value's hash into the root), and a lone root hash (`Push(Hash(root))`). They also refuse an element of exactly 63 bytes (an Item with a 60-byte value and no flags) outside a subgrove's data tree, since a proof can't tell its `KV` node from a subtree's or a reference's; a subgrove's data tree (`[subgroves, <id>, data]`), which holds only Items, accepts it. Before grovedb (whose 3.1.0 decoder trusts the lengths it reads) sees a proof, the SDK bounds-checks its encoding without recursion (every length within the bytes left, at most 64 levels of nesting and 1024 layers, at most 1 MiB, ample for a proof of one key) and decodes every node value as an element within its 64 KiB bound, so a hostile proof is refused rather than crashing the process. It checks a layer's ops one at a time as it decodes them, never holding them all. `ProofVerifier::verify_item_at_path` and `verify_item_against_root`, and the light client's `verify_item`, check a proof for an Item at a path and key with a given value. The path-less `verify_query_proof`, `verify_item_proof`, `verify_against_root`, and the light client's `verify_proof` are deprecated and refuse.
+- **Trust model**: verified reads check the proof against the app hash that a consensus node the caller configures reports, and the SDK trusts that node: it does not verify validator signatures over CometBFT's canonical vote bytes. The light client takes headers as its endpoints serve them, trusting the first, so it does not check 2/3+ of the validators' signatures, and `LightClientConfig::trust_threshold` is not applied to verified reads. Configure endpoints you trust.
+- **Unverified**: `data().query` and `query_historical_verified` refuse (`WillowError::Unsupported`), since the API serves a query's documents without their keys and a historical answer without the indexer's proof, and the checkpoint root comes from the same API. `query_unverified`, `query_historical`, `sql`, and GraphQL return their answers unverified, as do `get_root_hash` and `get_root_hash_local` (the API's word).
+- **Verifiable RPC** (`verifiable_rpc().query`) binds the indexer's answer to its GroveDB proof at the key in one entity tree (the one the proof descends, which the indexer chooses), and in strict mode checks that the GKR proofs verify and chain to the response's `state_root`, for the circuit (`verification_key_hash`) and configuration hash the response names: neither is checked against the subgrove's registration, so this doesn't prove the subgrove's own transformation. And `state_root` is the indexer's own, from the same response: the answer is unverified against the chain (`state_root_anchored` is `false`). An absent answer is refused in the checking modes.
+- **Ethereum state reads** (`eth()`) require the proof to be of the account, slots, and block asked, and walk it against the `state_root` in the same response. The SDK has no Ethereum light client, so check `state_root` against a header you trust; `eth_call`'s return data is not proven.
+- **Block completeness** (`verify_block_completeness`) checks the indexer's served logs against the `events_commitment` the consensus RPC answers without a proof: it trusts that RPC node, not the indexer.
+- **File downloads** check each chunk against the manifest's chunk Merkle root and content hash; the manifest itself is the API's, unproven. A manifest the chain refuses (no data, over 1 GiB or 262,144 chunks, a chunk count that doesn't fit the total and chunk sizes, chunks under 4 KiB in a file of more than one) is refused before any chunk is fetched, and so is a chunk longer than the manifest's chunk size or chunks past its total size.
+
 ## Light Client Configuration
 
-For trustless verification against multiple validators:
+The consensus nodes verified reads take headers from:
 
 ```rust
 use willow_sdk::{WillowClient, LightClientConfig};
-use std::time::Duration;
 
 let light_client_config = LightClientConfig::builder("willow-mainnet")
     .validator_endpoints(vec![
         "http://validator1:26657".to_string(),
         "http://validator2:26657".to_string(),
-        "http://validator3:26657".to_string(),
     ])
-    .trust_threshold(2, 3)  // 2/3+ validator signatures required
-    .trusting_period(Duration::from_secs(86400))  // 24 hours
-    .max_clock_drift(Duration::from_secs(10))
-    .auto_sync(true)  // Sync to latest on creation
+    .min_validators_for_consensus(1)  // Endpoints that must report the latest height
+    .max_proof_lag_blocks(20)  // Refuse a verified read's state older than this
     .build();
 
 let client = WillowClient::builder()
@@ -111,13 +145,17 @@ let client = WillowClient::builder()
     .build()
     .await?;
 
-// All operations now verified against validator consensus
+// Verified against the header after the proof's block, from these endpoints
 let data = client.data().get("dataset_id", "key").await?;
 ```
 
+The SDK trusts these endpoints. A verified read takes each header it needs from the first endpoint that serves it, and doesn't verify validator signatures, so list only consensus nodes you trust. Each `data().get` also asks every endpoint for the chain's latest height (CometBFT `/status`), to check the proof's recency, and needs at least `min_validators_for_consensus` of them (default 1) to answer: with that set to 2 and only one node running, every verified read fails.
+
+`trust_threshold`, `trusting_period`, and `max_clock_drift` are read only by the header check of `LightClient::sync_to_latest`, which verified reads don't use: `trust_threshold` is not applied to verified reads. `auto_sync` applies only to `LightClient::new_async`; the client builder never syncs.
+
 ### Persisting Light Client State
 
-Save and restore verified headers across sessions:
+Save and restore the headers the light client holds across sessions. They are as their endpoints served them, not verified against validator signatures, and a verified read uses a header it holds before asking an endpoint, so import only state you saved yourself:
 
 ```rust
 // Export state before shutdown
@@ -133,30 +171,24 @@ client.light_client().unwrap().import_trusted_state(state).await?;
 
 ## Data Operations
 
-### Retrieve Data (Verified by Default)
+### Retrieve Data
 
 ```rust
-// Automatically verifies proof against consensus
+// Verified: the value its proof binds at the key, under the chain's app hash
 let data = client.data().get("dataset_id", "key").await?;
 
-// Query with automatic proof verification
-let response = client.data().query("dataset_id", json!({
+// A query's documents are returned unverified
+let response = client.data().query_unverified("dataset_id", json!({
     "filters": { "status": "active" },
     "limit": 10
 })).await?;
-
-// Check the verified root hash
-if let Some(root_hash) = response.verified_root_hash {
-    println!("Verified against root: {}", root_hash);
-}
 ```
 
-### Skip Verification (For Performance)
+### Unverified Reads
 
 ```rust
-// When you trust the node or need maximum performance
+// When you trust the node
 let data = client.data().get_unverified("dataset_id", "key").await?;
-let response = client.data().query_unverified("dataset_id", query).await?;
 ```
 
 ### Store, Update, and Delete Data
@@ -173,12 +205,12 @@ let request = StoreDataRequest {
     owner_did: did_info.did.clone(),
     signature: vec![],
     public_key_id: did_info.public_key_id.clone(),
-    nonce: 1,
+    nonce: 0, // ignored: the client takes the nonce
 };
 let tx_hash = consensus_client.store_data(request, &signing_key).await?;
 ```
 
-`data` is sent as its JSON text. The client fetches the nonce, then signs labelled lines that bind it and every field the transaction writes, joined by `\n` (the byte 0x0A) with no trailing newline. Text fields go in verbatim as UTF-8:
+`data` is sent as its JSON text. The client takes the nonce ([Nonces](#nonces)), then signs labelled lines that bind it and every field the transaction writes, joined by `\n` (the byte 0x0A) with no trailing newline. Text fields go in verbatim as UTF-8:
 
 ```text
 StoreData
@@ -189,7 +221,7 @@ DataHash: <lowercase hex SHA-256 of the data bytes the transaction carries>
 Nonce: <nonce>
 ```
 
-`UpdateData` signs the same lines under its own name. `DeleteData` and a file delete's `DeleteFileManifest` sign `Subgrove`, `Key`, `Owner`, and `Nonce`. A file upload's `StoreFileManifest` signs every manifest field: `Subgrove`, `Key`, `Owner`, `Filename`, `ContentType`, `TotalSize`, `ContentHash`, `ChunkCount`, `ChunkSize`, `ChunkMerkleRoot`, `Encryption` (`none`, or `<key epoch>:<hex nonce>`), and `Nonce`. A subgrove ID, key, owner DID, filename, or content type holding the byte 0x0A is refused. A write the node refuses in its block after its signature and nonce verify still spends its nonce; calling again fetches the next free nonce and signs anew. The `signed_messages` module builds each message from the transaction it signs (`store_data`, `update_data`, `delete_data`, `store_file_manifest`, `delete_file_manifest`).
+`UpdateData` signs the same lines under its own name. `DeleteData` and a file delete's `DeleteFileManifest` sign `Subgrove`, `Key`, `Owner`, and `Nonce`. A file upload's `StoreFileManifest` signs every manifest field: `Subgrove`, `Key`, `Owner`, `Filename`, `ContentType`, `TotalSize`, `ContentHash`, `ChunkCount`, `ChunkSize`, `ChunkMerkleRoot`, `Encryption` (`none`, or `<key epoch>:<hex nonce>`), and `Nonce`. A subgrove ID, key, owner DID, filename, or content type holding the byte 0x0A is refused. A write the node refuses in its block after its signature and nonce verify still spends its nonce; calling again takes the next free nonce and signs anew. Writes in flight together may land in any order, so send a write that depends on another (an update of a key being stored) only after the first has landed. A file upload sends its chunks only once its manifest has landed and executed. `files().upload` and `files().delete` need a signing key and its key ID (the node refuses an unsigned file transaction): without them they fail with `WillowError::Validation` before anything is sent. `store_data` refuses `data` that isn't a JSON object, as the node does, before taking a nonce. The `signed_messages` module builds each message from the transaction it signs (`store_data`, `update_data`, `delete_data`, `store_file_manifest`, `delete_file_manifest`).
 
 ## DID Operations
 
@@ -287,7 +319,7 @@ you need them outside the example.
 
 ## GraphQL Indexing
 
-Query indexed blockchain data with cryptographic proofs:
+Query indexed blockchain data. GraphQL answers are returned unverified (see [What is verified](#what-is-verified)):
 
 ```rust
 // Query a subgrove
@@ -345,9 +377,9 @@ Subgroves are registered via consensus transactions:
 
 ```rust
 use willow_sdk::types::{RegisterSubgroveRequest, SchemaDefinition, FieldType};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
-let mut fields = HashMap::new();
+let mut fields = BTreeMap::new();
 fields.insert("id".to_string(), FieldType::String);
 fields.insert("name".to_string(), FieldType::String);
 fields.insert("balance".to_string(), FieldType::Number);
@@ -364,19 +396,56 @@ let request = RegisterSubgroveRequest {
     }),
     owner_did: did_info.did.clone(),
     admins: vec![],
+    initial_funding: None,
     writers: vec![did_info.did.clone()],
     readers: vec![],
     signature: vec![],
     public_key_id: did_info.public_key_id.clone(),
-    nonce: 1,
+    nonce: 0, // ignored: the client takes the nonce
 };
 let tx_hash = consensus_client.register_subgrove(request, &signing_key).await?;
 ```
 
-## Root Hash Verification
+`register_subgrove`, `register_file_subgrove`, and `register_blockchain_subgrove` (from a `SubgroveDefinition`) build the whole `RegisterSubgroveTx`, every field set explicitly, take the nonce, and sign five lines:
+
+```text
+RegisterSubgrove
+Subgrove: <subgrove_id>
+Owner: <owner_did>
+Config: <hex SHA-256 of the RegisterSubgroveTx's bincode with an empty signature>
+Nonce: <nonce>
+```
+
+`Config` hashes the transaction struct (not the `Transaction` enum) with bincode 1.x's default encoding, so it binds every field of every mode: name, description, schema, admins, initial funding, TEE requirement, mode settings, privacy, owner key grant, template, confirmation depth, key ID, nonce, and cryptographic completeness. The client broadcasts exactly the transaction it hashed. `signed_messages::register_subgrove` builds the message for any `RegisterSubgroveTx`, and `signed_messages::register_subgrove_config` gives the hash; both are the node's own forms from `willow_types::consensus::signed_messages`.
+
+A registration the node refuses whatever its signature is refused before signing (`signed_messages::check_register_subgrove`): a DataStorage or FileStorage registration whose subgrove ID isn't 1 to 64 ASCII letters, digits, `-`, or `_` starting with a letter or digit, whose admins, writers, or free readers aren't DIDs (`did:willow:` then letters, digits, `-`, or `_`, at most 128 bytes), or whose `schema` doesn't parse as the node's `SchemaDefinition` (`{"version": 1, "fields": {"<name>": "string" | "number" | "boolean" | "array" | "object" | "bytes"}, "indexes": [], "required_fields": [...]}`, each key optional) or declares indexes; and a private DataStorage registration whose `initial_owner_key_grant` isn't key epoch 0 to the owner. A subgrove definition's `execution_mode` must be `ConsensusExecution`, `IndexerExecution`, or `TeeExecution`, and its `required_tee` `AwsNitro`, `IntelSgx`, or `AmdSev`; any other value is refused before signing.
+
+### Private subgroves: key grants
+
+`client.privacy()` grants, rotates, and revokes a private subgrove's key with the nonce you pass (take one with `ConsensusClient::get_next_nonce`). A grant signs every field of the `EncryptedKeyGrant`:
+
+```text
+GrantSubgroveKey
+Subgrove: <subgrove_id>
+Sender: <sender_did>
+Grantee: <grantee_did>
+GranteeKey: <grantee_public_key_id>
+KeyEpoch: <key_epoch>
+EphemeralKey: <hex of ephemeral_public_key>
+EncryptedKey: <hex of encrypted_key>
+GrantedBy: <granted_by>
+GrantedAt: <granted_at>
+Nonce: <nonce>
+```
+
+A grant's or rotation's grantee must be a DID (`did:willow:` then letters, digits, `-`, or `_`), so a revoke can remove it. A rotation signs `RotateSubgroveKey`, `Subgrove`, `Sender`, `NewEpoch`, `Grants` (the count), then each grant's seven lines from `Grantee` to `GrantedAt` in order, then `Nonce`; a rotation with no grants, or a grant at another key epoch than `NewEpoch`, is refused. A revoke signs `RevokeSubgroveKey:{subgrove_id}:{revokee_did}:{sender_did}:{nonce}`; a subgrove ID holding `:`, or a revokee or sender that isn't a `did:willow:` DID of letters, digits, `-`, and `_`, is refused. `files().unregister_storage_node` signs `UnregisterStorageNode`, `Node`, and `Nonce`. The `signed_messages` module builds each (`grant_subgrove_key`, `rotate_subgrove_key`, `revoke_subgrove_key`, `unregister_storage_node`). A subgrove ID, owner, sender, or node DID, or a grant's grantee, key ID, or granter, holding the byte 0x0A is refused, and each of these transactions spends its nonce when the node refuses it in its block, as the data writes do.
+
+## Root Hashes
+
+Both are the API's word, unverified; verified reads check proofs against a CometBFT header instead.
 
 ```rust
-// Get consensus-verified root hash (recommended for security)
+// The root the API reports as committed
 let verified_root = client.get_root_hash().await?;
 
 // Get local node's root hash (for debugging)
@@ -393,15 +462,19 @@ if verified_root != local_root {
 ```rust
 use willow_sdk::{WillowError, Result};
 
-match client.data().get("subgrove", "dataset", "key").await {
+match client.data().get("subgrove", "key").await {
     Ok(data) => println!("Data: {}", data),
     Err(WillowError::NotFound(msg)) => println!("Not found: {}", msg),
     Err(WillowError::ProofVerificationFailed(msg)) => {
-        // Data tampering or stale state detected
+        // The proof doesn't bind the value served, or its root isn't the chain's
         eprintln!("Proof verification failed: {}", msg);
     }
+    Err(WillowError::ProofHeightOutOfRange(msg)) => {
+        // A genuine proof of a state the chain has since changed: read again
+        println!("Stale answer: {}", msg);
+    }
+    Err(WillowError::Unsupported(msg)) => println!("Can't verify this read: {}", msg),
     Err(WillowError::NotAuthenticated) => println!("Please authenticate"),
-    Err(WillowError::SessionExpired) => println!("Session expired"),
     Err(WillowError::LightClient(msg)) => println!("Light client error: {}", msg),
     Err(e) => println!("Error: {}", e),
 }
@@ -425,6 +498,12 @@ let client = WillowClient::builder()
     .build()
     .await?;
 ```
+
+Every request the SDK sends times out: after the builder's `timeout` (default 30 s, `client::DEFAULT_TIMEOUT`) for the API, the consensus RPC, and storage nodes, and after the light client's `rpc_timeout` for its validator endpoints. A `ConsensusClient` made with `ConsensusClient::new` uses the default; `with_http_client` gives it your own `reqwest::Client`. A subscription's WebSocket must be open (connected, `connection_ack` received, `subscribe` sent) within the client's `timeout` (`WillowSubscriptions::with_timeout` for one made directly); an open subscription waits for events without one.
+
+### Answer size limits
+
+The SDK reads each answer a piece at a time and refuses it once it passes the cap of its route (`WillowError::ResponseTooLarge`), before decoding any of it, so a server can't make it hold an answer of any size; such an answer is not retried. The caps are in `willow_sdk::http_body`: 4 MiB for answers of fixed shape (`SMALL`; the chain's `max_tx_bytes`), a little over 2 MiB for a `/proof` (`PROOF`: a proof of at most 1 MiB, in hex), 2 MiB for a file chunk (`CHUNK`, what a storage node stores; a download also refuses a chunk longer than the manifest's chunk size), 12 MiB for CometBFT's `tx` (`TX`), 20 MiB for a verifiable-RPC answer (`VERIFIABLE_RPC`), and 64 MiB (`LARGE`) for the lists the API doesn't page (subgroves, validators, indexers, a subgrove's key grants, a DID's permissions: the chain bounds no data subgrove's schema or access lists, so any account can push one past 4 MiB) and for answers whose size the request sets (queries, GraphQL, SQL, historical queries, matched logs, Ethereum state reads). A cap bounds the bytes read, not the memory decoding them takes, which can be a multiple of it, so before decoding an answer (an error answer's data is skipped, not decoded) the SDK also counts the JSON it holds and refuses one past 2,097,152 units (`WillowError::ResponseTooComplex`; each string, number, or literal costs one, each array or object eight, and a number under a SQL or GraphQL answer's top-level proof a sixteenth). A subscription message is at most 1 MiB (`subscriptions::MAX_SUBSCRIPTION_MESSAGE`) and 65,536 units (`subscriptions::MAX_SUBSCRIPTION_VALUES`); one past either is dropped or ends the connection, so an event larger than that is lost.
 
 ## Validators
 
@@ -451,24 +530,11 @@ cargo test test_generate_did
 
 ## Security Model
 
-The SDK provides three levels of security:
+See [What is verified](#what-is-verified). In short:
 
-1. **Full Trustless** (default — `VerifyMode::Strict`)
-   - Light client verifies 2/3+ validator signatures on block headers
-   - Extracts trusted `app_hash` from consensus
-   - Verifies GroveDB proofs against `app_hash`
-   - Verifies GKR proofs end-to-end against the embedded circuit registry
-   - No trust in any single node required
-
-2. **GroveDB-Only** (opt-in via `VerifyMode::GroveDbOnly`)
-   - Verifies GroveDB proofs locally against the response's `state_root`
-   - Caller anchors `state_root` out-of-band (e.g. via the consensus light client)
-   - Useful when the GKR-proof check is too expensive for the workload
-
-3. **Unverified** (opt-in via `_unverified` methods or `VerifyMode::Disabled`)
-   - Trusts the node completely
-   - Maximum performance
-   - Use only with trusted nodes
+1. **Verified** — `data().get`, and the proof checks that take a path and key: the proof binds the value at its key, and its root is the `app_hash` of a CometBFT header from the light client's endpoints (taken as those endpoints serve it).
+2. **Checked against the response's own root** — verifiable RPC (`VerifyMode::Strict` also verifies the GKR proofs) and Ethereum state reads: consistent with the root the indexer names, unverified against the chain.
+3. **Unverified** — queries, historical answers, GraphQL and SQL, root hashes, the `_unverified` reads, and `VerifyMode::Disabled`: the node's word.
 
 ## License
 

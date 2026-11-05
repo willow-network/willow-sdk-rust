@@ -4,10 +4,11 @@
 //!
 //! ## Features
 //!
-//! - **Trustless verification by default**: Embedded light client verifies all data
+//! - **Verified reads by key**: `data().get` returns a value only when a GroveDB proof binds it
+//!   at its path and key under the app hash of a CometBFT header
 //! - **DID management**: Ed25519 and secp256k1 support for decentralized identity
 //! - **Authenticated data operations**: CRUD with cryptographic signatures
-//! - **Merkle proof verification**: All data verified against blockchain consensus
+//! - **Nonces per identity**: concurrent writes take distinct nonces from the node's window
 //! - **Type-safe API**: Strong error handling with Result types
 //! - **Async/await support**: Built for Tokio runtime
 //!
@@ -32,7 +33,7 @@
 //!         DEVNET_VALIDATOR_1.public_key_id
 //!     );
 //!
-//!     // All data operations are automatically verified against consensus
+//!     // Verified: the proof binds the value at its key under the chain's app hash
 //!     let data = client.data().get("dataset", "key").await?;
 //!
 //!     // Consensus operations (DID registration, transfers, etc.)
@@ -42,16 +43,25 @@
 //! }
 //! ```
 //!
-//! ## Light Client Verification
+//! ## What is verified
 //!
-//! The SDK includes an embedded light client that provides trustless verification
-//! by default. This uses GroveDB's lightweight verify-only mode (no RocksDB).
+//! A read is presented as verified only when a proof binds that exact data at the GroveDB path
+//! and key asked against a root the SDK trusts, one that doesn't come from the response itself:
 //!
-//! - **Trustless**: Verifies proofs against CometBFT consensus
-//! - **Lightweight**: Only ~5 additional dependencies
-//! - **Automatic**: All data operations verified by default
+//! - `data().get` checks that the proof proves the served value as the Item at the key in the
+//!   subgrove's data tree, and that its root is the app hash of the CometBFT header after the
+//!   proof's block, read by the light client from the consensus RPC. The light client takes
+//!   headers as its endpoints serve them (trusting the first), without checking the validators'
+//!   commit signatures.
+//! - `data().query` and `query_historical_verified` refuse ([`WillowError::Unsupported`]):
+//!   nothing binds a query's documents or a historical answer to a proof and a trusted root.
+//!   Their `_unverified` and plain forms return answers unverified, as do GraphQL and SQL.
+//! - The verifiable-RPC and Ethereum state reads check their proofs against the state root the
+//!   indexer names in the same response, so their answers are unverified against the chain.
+//! - [`ProofVerifier::verify_item_at_path`] and the light client's `verify_item` check a proof
+//!   for an Item at a path and key; the path-less checks refuse.
 //!
-//! To disable verification (if you trust your node):
+//! Proofs use GroveDB's lightweight verify-only mode (no RocksDB). To build without it:
 //! ```toml
 //! [dependencies]
 //! willow-sdk = { version = "0.1", features = ["no-light-client"] }
@@ -79,9 +89,11 @@ pub mod eth_state;
 pub mod files;
 #[cfg(not(feature = "no-light-client"))]
 pub mod grovedb_envelope;
+pub mod http_body;
 pub mod indexers;
 pub mod indexing;
 pub mod light_client;
+pub mod nonces;
 pub mod privacy;
 pub mod proof;
 pub mod registration;
@@ -102,6 +114,7 @@ pub use completeness::{
 pub use consensus::{ConsensusClient, Transaction};
 pub use data::{
     CheckpointInfo, DataOperations, HistoricalQueryRequest, HistoricalQueryResponse, QueryResponse,
+    VerifiedValue,
 };
 pub use erc8004::{
     AgentReputationSummary, DisputeStats, Erc8004AgentListItem, Erc8004AgentListResponse,
@@ -109,7 +122,7 @@ pub use erc8004::{
     Erc8004ValidationSummary, ReputationAttestation, ReputationHistoryEvent,
     ReputationHistoryResponse, ValidationStatusBreakdown,
 };
-pub use errors::{Result, WillowError};
+pub use errors::{Result, SignedSubmission, WillowError};
 #[cfg(feature = "verifiable-rpc")]
 pub use eth_state::{
     verify_call_result, verify_state_proof, EthOperations, StateVerifyMode, VerifiedCall,

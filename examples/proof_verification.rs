@@ -33,8 +33,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   The SDK automatically:");
     println!("   - Requests the data from the API");
     println!("   - Fetches the proof for that item");
-    println!("   - Verifies the proof using the light client (if configured)");
-    println!("   - Compares against the consensus root hash");
+    println!("   - Checks the proof proves that value at its key");
+    println!("   - Compares its root with the header after the proof's block");
     println!("   - Returns error if verification fails\n");
 
     match client.data().get(subgrove_id, "test-key").await {
@@ -58,28 +58,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => println!("   Note: {}\n", e),
     }
 
-    // 3. Query with verification
-    println!("3. Query with automatic verification...");
+    // 3. Query: nothing binds a query's documents to a proof, so `data().query` always refuses
+    // and a query's documents come back unverified
+    println!("3. Query (unverified)...");
     let query = json!({ "limit": 5 });
-
-    match client.data().query(subgrove_id, query.clone()).await {
-        Ok(response) => {
-            println!("   Found {} documents", response.documents.len());
-            if let Some(root_hash) = &response.verified_root_hash {
-                println!(
-                    "   Verified against root: {}...",
-                    &root_hash[..32.min(root_hash.len())]
-                );
-            }
-            if response.proof.is_some() {
-                println!("   Proof was included and verified\n");
-            }
-        }
-        Err(e) => println!("   Note: {}\n", e),
-    }
-
-    // 4. Query without verification (for comparison)
-    println!("4. Query without verification (unverified)...");
     match client.data().query_unverified(subgrove_id, query).await {
         Ok(response) => {
             println!("   Found {} documents", response.documents.len());
@@ -89,14 +71,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => println!("   Note: {}\n", e),
     }
 
-    // 5. Root hash comparison
-    println!("5. Root hash comparison...");
+    // 4. Root hash comparison (both are the API's word, unverified)
+    println!("4. Root hash comparison (as the API reports them)...");
     let verified_root = client.get_root_hash().await.ok();
     let local_root = client.get_root_hash_local().await.ok();
 
     match (verified_root, local_root) {
         (Some(v), Some(l)) => {
-            println!("   Consensus root: {}...", &v[..32.min(v.len())]);
+            println!("   Committed root: {}...", &v[..32.min(v.len())]);
             println!("   Local root:     {}...", &l[..32.min(l.len())]);
             if v == l {
                 println!("   Node is in sync with consensus\n");
@@ -107,20 +89,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => println!("   Could not retrieve root hashes\n"),
     }
 
-    // 6. Summary
-    println!("6. Proof verification summary...");
-    println!("\n   AUTOMATIC VERIFICATION (recommended):");
-    println!("   - Use get() and query() methods");
-    println!("   - Proofs verified against consensus root hash");
-    println!("   - Returns error if verification fails");
-    println!("   - Provides cryptographic guarantee of data integrity\n");
+    // 5. Summary
+    println!("5. Proof verification summary...");
+    println!("\n   VERIFIED READS:");
+    println!("   - get() returns a value only when its proof binds it at its key");
+    println!("     and its root is the app_hash of the header after the proof's block");
+    println!("   - The header comes from the light client's validator endpoints");
+    println!("     (commit signatures are not checked)");
+    println!("   - query() refuses: a query's documents aren't bound to its proof\n");
 
-    println!("   WITH LIGHT CLIENT (trustless):");
-    println!("   - Configure with LightClientConfigBuilder");
-    println!("   - Verifies validator signatures (2/3+ threshold)");
-    println!("   - No trust required in any single node\n");
-
-    println!("   SKIP VERIFICATION (use with caution):");
+    println!("   UNVERIFIED (use with caution):");
     println!("   - Use get_unverified() and query_unverified()");
     println!("   - Maximum performance");
     println!("   - Only with trusted nodes");

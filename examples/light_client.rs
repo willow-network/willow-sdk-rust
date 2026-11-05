@@ -1,14 +1,13 @@
 //! Light client example for the Willow Rust SDK
 //!
 //! This example demonstrates:
-//! - Configuring a light client for trustless verification
-//! - Verifying data against multiple validators
-//! - Exporting and importing trusted state
+//! - Configuring the light client's validator endpoints
+//! - Verifying a value against a header from those endpoints
+//! - Exporting the headers the light client holds
 //!
 //! Run with: cargo run --example light_client
 
 use serde_json::json;
-use std::time::Duration;
 use willow_sdk::{LightClientConfigBuilder, WillowClient, DEVNET_VALIDATOR_1};
 
 #[tokio::main]
@@ -16,25 +15,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Willow SDK - Light Client Example");
     println!("==================================\n");
 
-    // 1. Configure light client with multiple validators
+    // 1. Configure the consensus nodes verified reads take headers from. The SDK trusts them:
+    // it takes each header from the first that serves it and doesn't verify validator
+    // signatures, so list only nodes you trust. Every verified read needs
+    // `min_validators_for_consensus` of them to report the chain's latest height.
     println!("1. Configuring light client...");
     let light_client_config = LightClientConfigBuilder::new("willow-testnet")
-        .validator_endpoints(vec![
-            "http://localhost:26657".to_string(), // Node 1
-            "http://localhost:26757".to_string(), // Node 2
-            "http://localhost:26857".to_string(), // Node 3
-        ])
-        .trust_threshold(2, 3) // Require 2/3+ validator agreement
-        .trusting_period(Duration::from_secs(86400)) // 24 hours
-        .max_clock_drift(Duration::from_secs(10))
-        .min_validators_for_consensus(2)
-        .auto_sync(true)
+        .validator_endpoints(vec!["http://localhost:26657".to_string()])
+        .min_validators_for_consensus(1)
+        .max_proof_lag_blocks(20)
         .build();
 
     println!("   Chain ID: willow-testnet");
-    println!("   Validators: 3 endpoints configured");
-    println!("   Trust threshold: 2/3");
-    println!("   Trusting period: 24 hours\n");
+    println!("   Endpoints: 1, trusted as it serves headers (no signature check)\n");
 
     // 2. Create client with light client
     println!("2. Creating client with light client...");
@@ -61,44 +54,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     println!("   Authenticated as: {}", DEVNET_VALIDATOR_1.did);
 
-    // 4. Retrieve with full trustless verification
+    // 4. Retrieve a verified value by key
     // Note: Data must first be stored via consensus transactions
-    println!("\n4. Retrieving data with trustless verification...");
-    println!("   This verifies:");
-    println!("   - 2/3+ validator signatures on block headers");
-    println!("   - GroveDB Merkle proof against consensus app_hash");
-    println!("   - Data integrity without trusting any single node\n");
+    println!("\n4. Retrieving a verified value...");
+    println!("   This checks:");
+    println!("   - the GroveDB proof proves this value at its key in the subgrove's data");
+    println!("   - its root is the app_hash of the header after the proof's block,");
+    println!("     read from the validator endpoints (not from the API)\n");
 
     match client.data().get("secure-data", "entry-1").await {
         Ok(data) => {
-            println!("   Data retrieved and CRYPTOGRAPHICALLY VERIFIED:");
+            println!("   Data retrieved and verified:");
             println!("   {}", serde_json::to_string_pretty(&data)?);
         }
         Err(e) => println!("   Note: {}", e),
     }
 
-    // 5. Query with verification
-    println!("\n5. Querying with trustless verification...");
+    // 5. Query (a query's documents are returned unverified)
+    println!("\n5. Querying (unverified)...");
     let query = json!({ "limit": 10 });
 
-    match client.data().query("secure-data", query).await {
+    match client.data().query_unverified("secure-data", query).await {
         Ok(response) => {
-            println!("   Query returned {} documents", response.documents.len());
-            if let Some(root_hash) = &response.verified_root_hash {
-                println!(
-                    "   Verified against root: {}...",
-                    &root_hash[..16.min(root_hash.len())]
-                );
-            }
+            println!(
+                "   Query returned {} documents (unverified)",
+                response.documents.len()
+            );
         }
         Err(e) => println!("   Note: {}", e),
     }
 
-    // 6. Export trusted state for persistence
-    println!("\n6. Exporting trusted state...");
+    // 6. Export the headers the light client holds, for persistence
+    println!("\n6. Exporting the light client's headers...");
     if let Some(lc) = client.light_client() {
         let state = lc.export_trusted_state().await;
-        println!("   Exported {} trusted headers", state.headers.len());
+        println!("   Exported {} headers", state.headers.len());
 
         // In production, you would serialize and save this:
         // let json = serde_json::to_string(&state)?;
@@ -109,17 +99,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 7. Show verification comparison
     println!("\n7. Verification comparison...");
-    println!("\n   LIGHT CLIENT (trustless):");
-    println!("   + Verifies validator signatures (2/3+ threshold)");
-    println!("   + Validates block header chain");
-    println!("   + Verifies proofs against consensus app_hash");
-    println!("   + No trust in any single node required");
-    println!("   - Slightly higher latency\n");
-
-    println!("   STANDARD VERIFICATION (root hash):");
-    println!("   + Fast verification");
-    println!("   + Verifies GroveDB proofs locally");
-    println!("   - Trusts that API returns correct root hash\n");
+    println!("\n   VERIFIED READS (data().get):");
+    println!("   + The proof binds the value at its key in the subgrove's data");
+    println!("   + Its root is checked against a header from the validator endpoints");
+    println!("   - Headers are trusted as those endpoints serve them; commit");
+    println!("     signatures are not checked\n");
 
     println!("   UNVERIFIED (performance mode):");
     println!("   + Fastest response times");

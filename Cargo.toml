@@ -60,9 +60,11 @@ willow-types = { version = "0.1", path = "../willow-types-extract" }
 willow-gkr-verify = { version = "0.1", path = "../willow-gkr-verify-extract", features = ["registry"], optional = true }
 
 # Light client dependencies - uses grovedb verify feature for lightweight proof verification
-# These are included by default for trustless verification
+# These are included by default; the SDK checks proofs against headers from the consensus node it is given
 grovedb = { version = "3.1.0", default-features = false, features = ["verify"] }
 grovedb-version = "3.1.0"
+# grovedb's own merk line: decodes a proof layer's ops for the checks grovedb's verifier skips
+grovedb-merk = { version = "3.1.0", default-features = false, features = ["verify"] }
 # grovedb's bincode line (the SDK's own `bincode` is 1.x); decodes the proof envelope
 bincode2 = { package = "bincode", version = "=2.0.0-rc.3" }
 
@@ -78,6 +80,8 @@ getrandom = { version = "0.2", features = ["js"] }
 getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
 
 [dev-dependencies]
+# grovedb-merk's op encoding, to build proofs in tests
+ed = "0.2.2"
 tokio-test = "0.4"
 wiremock = "0.5"
 pretty_assertions = "1.4"

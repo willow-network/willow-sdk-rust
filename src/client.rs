@@ -25,6 +25,36 @@ use std::time::Duration;
 use tokio::sync::OnceCell;
 use url::Url;
 
+/// How long a request the SDK sends may take, unless the caller sets another timeout.
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// An HTTP client whose requests time out after `timeout`.
+pub(crate) fn http_client_with_timeout(timeout: Duration) -> Client {
+    Client::builder()
+        .timeout(timeout)
+        .build()
+        .expect("an HTTP client with a timeout and default settings")
+}
+
+/// The CometBFT RPC of a local node, beside an API on a loopback host at port 3031: the same
+/// URL at port 26657. `None` for any other API URL.
+#[cfg(not(feature = "no-light-client"))]
+fn local_consensus_rpc(api: &Url) -> Option<String> {
+    let loopback = match api.host()? {
+        url::Host::Domain(domain) => domain.eq_ignore_ascii_case("localhost"),
+        url::Host::Ipv4(ip) => ip == std::net::Ipv4Addr::LOCALHOST,
+        url::Host::Ipv6(ip) => ip == std::net::Ipv6Addr::LOCALHOST,
+    };
+    if !loopback || api.port() != Some(3031) {
+        return None;
+    }
+    let mut rpc = api.clone();
+    rpc.set_port(Some(26657)).ok()?;
+    rpc.set_path("");
+    rpc.set_query(None);
+    Some(rpc.as_str().trim_end_matches('/').to_string())
+}
+
 /// Identity for per-request signing
 #[derive(Clone, Debug)]
 struct ClientIdentity {
@@ -38,6 +68,8 @@ struct ClientIdentity {
 #[derive(Clone)]
 pub struct WillowClient {
     pub(crate) http_client: Client,
+    /// The timeout of `http_client`, for the clients the SDK makes for other servers.
+    pub(crate) timeout: Duration,
     base_url: Url,
     /// Optional indexer URL for routing GraphQL/SQL queries to an indexer node.
     indexer_url: Option<Url>,
@@ -67,7 +99,8 @@ pub struct WillowClient {
 pub enum VerifyMode {
     /// Require both a valid GKR proof and a valid GroveDB proof. Default.
     /// `GKR_PROOF_FULL` proofs are verified end-to-end against
-    /// compiled-circuit bytes embedded at build time.
+    /// compiled-circuit bytes embedded at build time, for the circuit and
+    /// configuration hash the response names (see [`crate::verifiable_rpc`]).
     Strict,
     /// Require a GroveDB proof; accept responses without a full GKR
     /// check. Caller anchors `state_root` out-of-band (e.g. via the
@@ -308,9 +341,17 @@ impl WillowClient {
     /// creates and initializes one using trust-on-first-use. The initialization
     /// is thread-safe and happens only once.
     ///
-    /// Trust-on-first-use bootstrap: the first verified header is trusted,
-    /// and every subsequent header chains from it cryptographically. Pin a
-    /// known-good checkpoint header in production deployments.
+    /// The light client created here reads headers from the consensus node the caller
+    /// configures: the consensus URL. Only for an API on a loopback host (`localhost`,
+    /// `127.0.0.1`, `::1`) at port 3031, as a local node runs, does it read them from the same
+    /// host at port 26657 without one. Any other API URL with no consensus URL is a
+    /// configuration error: the root a read is checked against comes from a node the caller
+    /// chose, not from the API that served the data.
+    ///
+    /// Verified reads check the proof against the app hash that consensus node reports, and the
+    /// SDK trusts that node: it does not verify validator signatures over CometBFT's canonical
+    /// vote bytes (see [`crate::light_client`]). Configure `light_client_config` with the
+    /// endpoints you trust.
     ///
     /// Returns `None` if `no-light-client` feature is enabled.
     #[cfg(not(feature = "no-light-client"))]
@@ -324,8 +365,18 @@ impl WillowClient {
         let lc = self
             .light_client_once
             .get_or_try_init(|| async {
-                // Derive CometBFT RPC endpoint from API URL (typically :3031 -> :26657)
-                let rpc_endpoint = self.base_url.to_string().replace(":3031", ":26657");
+                let rpc_endpoint = match self.consensus_opt() {
+                    Some(consensus) => consensus.rpc_url().trim_end_matches('/').to_string(),
+                    None => local_consensus_rpc(&self.base_url).ok_or_else(|| {
+                        WillowError::Config(
+                            "a verified read checks its proof against the app hash a consensus \
+                             node reports, and the SDK trusts that node: set consensus_url or \
+                             light_client_config on the builder (only an API on a loopback host \
+                             at port 3031 implies its local node at port 26657)"
+                                .to_string(),
+                        )
+                    })?,
+                };
 
                 let config = LightClientConfig::builder("willow-chain")
                     .validator_endpoints(vec![rpc_endpoint])
@@ -391,6 +442,7 @@ impl WillowClient {
     /// the `source` in [`crate::subscriptions::SubscribeOptions`].
     pub fn subscriptions(&self) -> crate::subscriptions::WillowSubscriptions {
         crate::subscriptions::WillowSubscriptions::new(self.base_url.clone(), self.indexers.clone())
+            .with_timeout(self.timeout)
     }
 
     /// Get indexing operations (GraphQL, subgroves)
@@ -467,16 +519,26 @@ impl WillowClient {
         self.consensus_client.as_ref().map(|c| c.as_ref())
     }
 
+    /// The consensus client, or a clear error naming `operation` when no consensus URL is set:
+    /// a transaction has no server to go to without one.
+    pub(crate) fn require_consensus(&self, operation: &str) -> Result<&ConsensusClient> {
+        self.consensus_opt().ok_or_else(|| {
+            WillowError::Config(format!(
+                "{operation} submits a transaction and needs a consensus URL; set consensus_url(..) on the builder"
+            ))
+        })
+    }
+
     /// Check the health of the Willow node
     pub async fn health(&self) -> Result<HealthStatus> {
         self.request("GET", "/health", None::<&()>, false).await
     }
 
-    /// Get the verified root hash from the blockchain consensus.
+    /// Get the root hash the API reports as committed (`GET /state/root-hash/verified`).
     ///
-    /// This method returns the root hash that has been verified through blockchain consensus,
-    /// providing stronger security guarantees than the local root hash. This is the recommended
-    /// method for applications that need cryptographic proof of the current state.
+    /// The API's word, unverified: this SDK checks no signature or proof of it. To check a proof
+    /// against the chain, use the light client's [`LightClient::app_hash_after`], which reads the
+    /// header from the CometBFT RPC.
     ///
     /// # Returns
     /// The current verified root hash as a hex string
@@ -500,11 +562,8 @@ impl WillowClient {
 
     /// Get the local root hash from the node's current state.
     ///
-    /// This method returns the root hash from the node's local state, which may not yet be
-    /// verified through consensus. This is useful for debugging or when you need the absolute
-    /// latest state, but it provides weaker security guarantees than `get_root_hash()`.
-    ///
-    /// For most applications, use `get_root_hash()` instead for verified blockchain state.
+    /// This method returns the root hash from the node's local state, as the API reports it
+    /// (unverified, like [`Self::get_root_hash`]). Useful for debugging.
     ///
     /// # Returns
     /// The current local root hash as a hex string
@@ -562,6 +621,12 @@ impl WillowClient {
                 .await
             {
                 Ok(result) => return Ok(result),
+                // Asking again would read as much again.
+                Err(
+                    e @ (WillowError::ResponseTooLarge { .. }
+                    | WillowError::ResponseTooComplex { .. }
+                    | WillowError::Serialization(_)),
+                ) => return Err(e),
                 Err(e) => {
                     last_error = Some(e);
                     if attempt < self.retry_config.max_attempts - 1 {
@@ -631,16 +696,14 @@ impl WillowClient {
         let status = response.status();
 
         // Parse response
-        let response_text = response.text().await?;
+        let response_text = crate::http_body::text(response, answer_limit(path)).await?;
 
         if status.is_success() {
-            serde_json::from_str(&response_text).map_err(|e| WillowError::Serialization(e))
+            crate::http_body::decode_checked(&response_text, crate::http_body::JsonBudget::Full)
         } else {
             // Try to parse error response
-            if let Ok(api_response) =
-                serde_json::from_str::<ApiResponse<serde_json::Value>>(&response_text)
-            {
-                if let Some(error_msg) = api_response.error {
+            if let Some(api_error) = api_error_of(&response_text) {
+                if let Some(error_msg) = api_error {
                     match status {
                         StatusCode::NOT_FOUND => Err(WillowError::NotFound(error_msg)),
                         StatusCode::UNAUTHORIZED => Err(WillowError::Authentication(error_msg)),
@@ -663,6 +726,34 @@ impl WillowClient {
                 })
             }
         }
+    }
+}
+
+/// An error answer's `error`, `None` when it isn't the API's envelope. Its `data` is skipped,
+/// not decoded: an error answer is read under its route's cap (64 MiB for a query) but never
+/// counted, and decoded into `Value`s its data could take many times that.
+fn api_error_of(text: &str) -> Option<Option<String>> {
+    serde_json::from_str::<ApiResponse<serde::de::IgnoredAny>>(text)
+        .ok()
+        .map(|r| r.error)
+}
+
+/// The cap on the answer to an API request for `path` ([`crate::http_body`]): a proof's, a
+/// query's (whose size the request sets), or the small answers of every other route.
+fn answer_limit(path: &str) -> usize {
+    let path = path.split('?').next().unwrap_or(path);
+    let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+    match segments.as_slice() {
+        ["proof", ..] => crate::http_body::PROOF,
+        ["query" | "historical" | "sql" | "graphql" | "a2a", ..] => crate::http_body::LARGE,
+        // The lists the API doesn't page, which grow with the chain.
+        ["subgroves"]
+        | ["subgroves", "indexed"]
+        | ["indexers"]
+        | ["validators"]
+        | ["key-grants", _]
+        | ["did", _, "permissions"] => crate::http_body::LARGE,
+        _ => crate::http_body::SMALL,
     }
 }
 
@@ -700,7 +791,7 @@ impl Default for WillowClientBuilder {
             consensus_url: None,
             indexer_url: None,
             api_key: None,
-            timeout: Duration::from_secs(30),
+            timeout: DEFAULT_TIMEOUT,
             retry_config: RetryConfig::default(),
             #[cfg(not(feature = "no-light-client"))]
             light_client_config: None,
@@ -788,7 +879,8 @@ impl WillowClientBuilder {
         self
     }
 
-    /// Set the light client configuration for trustless verification.
+    /// Set the light client configuration: the consensus nodes verified reads take headers from,
+    /// which the SDK trusts (it doesn't verify validator signatures).
     ///
     /// Not available with `no-light-client` feature.
     #[cfg(not(feature = "no-light-client"))]
@@ -847,15 +939,19 @@ impl WillowClientBuilder {
         };
 
         // Create consensus client if configured
-        let consensus_client = self
-            .consensus_url
-            .map(|url| Arc::new(ConsensusClient::new_with_api(&url, base_url.as_str())));
+        let consensus_client = self.consensus_url.map(|url| {
+            Arc::new(
+                ConsensusClient::new_with_api(&url, base_url.as_str())
+                    .with_http_client(http_client_with_timeout(self.timeout)),
+            )
+        });
 
         let indexers =
             WillowIndexers::new(http_client.clone(), base_url.clone(), indexer_url.clone());
 
         Ok(WillowClient {
             http_client,
+            timeout: self.timeout,
             base_url,
             indexer_url,
             indexers,
@@ -875,6 +971,35 @@ impl WillowClientBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Without a consensus URL, only an API on a loopback host at port 3031 implies the node
+    /// whose app hash verified reads trust (the same host at port 26657).
+    #[cfg(not(feature = "no-light-client"))]
+    #[tokio::test]
+    async fn only_a_loopback_api_implies_its_consensus_node() {
+        for api in [
+            "http://api.example.invalid:3031",
+            "https://api.example.invalid",
+        ] {
+            let client = WillowClient::new(api).await.unwrap();
+            let err = client.get_or_create_light_client().await.err().unwrap();
+            assert!(matches!(err, WillowError::Config(_)), "{api}: {err}");
+        }
+        for (api, rpc) in [
+            ("http://localhost:3031", Some("http://localhost:26657")),
+            ("http://127.0.0.1:3031/", Some("http://127.0.0.1:26657")),
+            ("http://[::1]:3031", Some("http://[::1]:26657")),
+            ("http://localhost:8080", None),
+            ("http://10.0.0.5:3031", None),
+            ("https://api.willow.tech", None),
+        ] {
+            assert_eq!(
+                local_consensus_rpc(&Url::parse(api).unwrap()).as_deref(),
+                rpc,
+                "{api}"
+            );
+        }
+    }
 
     // ========================================================================
     // Client Creation Tests
@@ -1427,5 +1552,145 @@ mod tests {
         let builder = WillowClientBuilder::default();
         assert!(builder.api_url.is_none());
         assert_eq!(builder.timeout, Duration::from_secs(30));
+    }
+
+    /// A JSON answer of exactly `len` bytes.
+    fn answer_of(len: usize) -> String {
+        let pad = len - r#"{"data":""}"#.len();
+        format!(r#"{{"data":"{}"}}"#, "x".repeat(pad))
+    }
+
+    /// An error answer's data is skipped, so a large one allocates next to nothing.
+    #[test]
+    fn an_error_answers_data_is_not_decoded() {
+        let body = format!(
+            r#"{{"success":false,"error":"x","data":[{}]}}"#,
+            vec![r#"{"":0}"#; 200_000].join(",")
+        );
+        let (error, held) = crate::grovedb_envelope::alloc_meter::peak(|| api_error_of(&body));
+        assert_eq!(error, Some(Some("x".to_string())));
+        assert!(
+            held < 1 << 20,
+            "{held} bytes held for a {}-byte answer",
+            body.len()
+        );
+    }
+
+    fn quick_retries() -> RetryConfig {
+        RetryConfig {
+            max_attempts: 3,
+            initial_delay: Duration::from_millis(1),
+            max_delay: Duration::from_millis(1),
+            exponential_base: 1.0,
+        }
+    }
+
+    /// An answer over its route's cap is refused, and not retried; one at the cap is read. A
+    /// route whose honest answers can be larger (a query) takes more.
+    #[tokio::test]
+    async fn an_answer_over_its_routes_cap_is_refused_without_a_retry() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let small = 4 << 20;
+        let proof = (2 << 20) + (64 << 10);
+        let cases = [
+            ("GET", "/health", small, true),
+            ("GET", "/state/root-hash", small + 1, false),
+            ("GET", "/proof/sg/k", proof, true),
+            ("GET", "/proof/sg/other", proof + 1, false),
+            ("POST", "/query/sg", small + 1, true),
+        ];
+        let server = MockServer::start().await;
+        for (verb, route, len, _) in cases {
+            Mock::given(method(verb))
+                .and(path(route))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_raw(answer_of(len).into_bytes(), "application/json"),
+                )
+                .mount(&server)
+                .await;
+        }
+        let client = WillowClient::builder()
+            .api_url(&server.uri())
+            .retry_config(quick_retries())
+            .build()
+            .await
+            .unwrap();
+        for (verb, route, len, read) in cases {
+            let body = (verb == "POST").then(|| serde_json::json!({}));
+            let result = client
+                .request::<serde_json::Value, _>(verb, route, body.as_ref(), false)
+                .await;
+            if read {
+                assert!(result.is_ok(), "{route} ({len} bytes): {result:?}");
+                continue;
+            }
+            let err = result.err().map(|e| e.to_string());
+            assert!(
+                err.as_deref()
+                    .is_some_and(|e| e.contains("over the SDK's limit")),
+                "{route} ({len} bytes): {err:?}"
+            );
+            let sent = server.received_requests().await.unwrap();
+            assert_eq!(
+                sent.iter().filter(|r| r.url.path() == route).count(),
+                1,
+                "{route} was retried"
+            );
+        }
+    }
+
+    /// A server on a local port that answers every request with `body` in 1 MiB chunks, with no
+    /// length (chunked transfer encoding).
+    async fn chunked_server(body: Vec<u8>) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                let body = body.clone();
+                tokio::spawn(async move {
+                    let mut request = [0u8; 8192];
+                    let _ = socket.read(&mut request).await;
+                    let head = "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\
+                                transfer-encoding: chunked\r\nconnection: close\r\n\r\n";
+                    if socket.write_all(head.as_bytes()).await.is_err() {
+                        return;
+                    }
+                    for chunk in body.chunks(1 << 20) {
+                        let framed =
+                            [format!("{:x}\r\n", chunk.len()).as_bytes(), chunk, b"\r\n"].concat();
+                        if socket.write_all(&framed).await.is_err() {
+                            return;
+                        }
+                    }
+                    let _ = socket.write_all(b"0\r\n\r\n").await;
+                });
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    /// A server that sends no length is cut off once its answer passes the cap.
+    #[tokio::test]
+    async fn an_answer_with_no_length_is_cut_off_at_the_cap() {
+        let url = chunked_server(answer_of((4 << 20) + 1).into_bytes()).await;
+        let client = WillowClient::builder()
+            .api_url(&url)
+            .retry_config(quick_retries())
+            .build()
+            .await
+            .unwrap();
+        let result = client
+            .request::<serde_json::Value, ()>("GET", "/health", None, false)
+            .await;
+        let err = result.err().map(|e| e.to_string());
+        assert!(
+            err.as_deref()
+                .is_some_and(|e| e.contains("over the SDK's limit")),
+            "{err:?}"
+        );
     }
 }

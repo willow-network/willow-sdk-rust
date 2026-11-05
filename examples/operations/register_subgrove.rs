@@ -32,8 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let subgrove_id = "users";
     let subgrove_name = "Users Collection";
 
-    let nonce: u64 = 2; // Must be > previous nonce; increment for each tx
-                        // =========================================================================
+    // =========================================================================
 
     let client = WillowClient::builder()
         .api_url(api_url)
@@ -71,7 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         readers: vec![], // empty = public read
         signature: vec![],
         public_key_id: public_key_id.to_string(),
-        nonce,
+        nonce: 0, // ignored: the client takes the account's next free nonce
     };
 
     println!("Registering subgrove: {}", subgrove_id);

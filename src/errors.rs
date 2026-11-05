@@ -68,9 +68,76 @@ pub enum WillowError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
+    /// The SDK can't do what was asked as asked: for a read, it can't verify the answer, and
+    /// returns nothing rather than return it unverified.
+    #[error("Unsupported: {0}")]
+    Unsupported(String),
+
+    /// Every nonce the node accepts for this identity (the 24 above its base) is used or held by
+    /// a write in flight; send more once earlier writes land.
+    #[error("Nonce window full: {0}")]
+    NonceWindowFull(String),
+
+    /// A verified read's proof is of a state more than the light client's
+    /// `max_proof_lag_blocks` behind the chain's latest height (a stale answer the chain has
+    /// since changed), or its height is that far ahead of it. The proof may be genuine, and
+    /// reading again may get a current one; a proof whose root the chain's header doesn't carry
+    /// is [`WillowError::ProofVerificationFailed`] instead.
+    #[error("Proof height out of range: {0}")]
+    ProofHeightOutOfRange(String),
+
+    /// A signed transaction was sent and its outcome is unknown: the node's answer was lost or
+    /// unreadable, or its RPC answered an error. It may yet land. Retry it only by sending the
+    /// same bytes under the same nonce
+    /// ([`crate::consensus::ConsensusClient::rebroadcast`]): signing it again takes a new
+    /// nonce, and then both can land.
+    #[error("Transaction outcome unknown (nonce {} of {}): {message}", submission.nonce, submission.did)]
+    SubmissionUnknown {
+        /// The transaction as it was sent.
+        submission: Box<SignedSubmission>,
+        /// Why the outcome is unknown.
+        message: String,
+    },
+
+    /// An answer longer than the cap of its route ([`crate::http_body`]), refused once the SDK
+    /// had read `limit` bytes of it, before decoding any.
+    #[error("the answer is over the SDK's limit of {limit} bytes for its route")]
+    ResponseTooLarge {
+        /// The route's cap, in bytes.
+        limit: usize,
+    },
+
+    /// An answer holding more JSON than the SDK decodes into `serde_json::Value`s
+    /// ([`crate::http_body::MAX_VALUES`] units), refused before decoding any of it: decoded, a
+    /// list of empty objects or of numbers takes many times its length. Not retried.
+    #[error("the answer holds more JSON values than the SDK decodes ({limit})")]
+    ResponseTooComplex {
+        /// The limit, in units.
+        limit: usize,
+    },
+
+    /// A write CometBFT's mempool didn't admit (it is full, or the transaction is over its size
+    /// limit): nothing was admitted, so this submission won't land, and its nonce is given back.
+    #[error("Transaction not admitted: {0}")]
+    NotAdmitted(String),
+
     /// Generic error with custom message
     #[error("{0}")]
     Custom(String),
+}
+
+/// A signed transaction as it was sent: the signer's DID, the nonce its signature covers, and
+/// the exact bytes broadcast.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignedSubmission {
+    /// The DID whose nonce the transaction carries.
+    pub did: String,
+    /// The nonce the signature covers.
+    pub nonce: u64,
+    /// The bincode of the transaction, as broadcast to CometBFT.
+    pub tx_bytes: Vec<u8>,
+    /// Its CometBFT hash: SHA-256 of `tx_bytes`, upper-case hex.
+    pub tx_hash: String,
 }
 
 impl From<reqwest::Error> for WillowError {
