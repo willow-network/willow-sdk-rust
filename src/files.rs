@@ -184,21 +184,27 @@ impl FileOperations {
 
     /// Download a file from a FileStorage subgrove.
     ///
-    /// 1. Gets the manifest from the validator API (with GroveDB proof)
-    /// 2. Downloads chunks from a storage node
-    /// 3. Verifies each chunk against the chunk Merkle tree
-    /// 4. Verifies the reassembled file against the content hash
+    /// 1. Gets the manifest from the API ([`Self::metadata`]): the API's word, unproven. A
+    ///    manifest the chain refuses (no data, over 1 GiB or 262,144 chunks, a chunk count that
+    ///    doesn't fit the total and chunk sizes, or chunks under 4 KiB in a file of more than
+    ///    one) is refused before any chunk is fetched.
+    /// 2. Downloads chunks from a storage node, each refused once it passes the manifest's
+    ///    chunk size (or the 2 MiB a storage node stores, [`crate::http_body::CHUNK`]), and
+    ///    all of them once they pass its total size
+    /// 3. Verifies the chunks against the manifest's chunk Merkle root, and the file's length
+    ///    and hash against its total size and content hash
     pub async fn download(
         &self,
         subgrove_id: &str,
         file_key: &str,
         storage_node_endpoint: &str,
     ) -> Result<Vec<u8>> {
-        // Get manifest from validator
         let manifest = self.metadata(subgrove_id, file_key).await?;
+        check_manifest(&manifest)?;
 
         let content_hash_hex = &manifest.content_hash;
         let chunk_count = manifest.chunk_count;
+        let chunk_limit = (manifest.chunk_size as usize).min(crate::http_body::CHUNK);
 
         // Download chunks from storage node
         let http = crate::client::http_client_with_timeout(self.client.timeout);
@@ -224,10 +230,30 @@ impl FileOperations {
                 )));
             }
 
-            let chunk_data = resp
-                .bytes()
-                .await
-                .map_err(|e| WillowError::Network(format!("Failed to read chunk {}: {}", i, e)))?;
+            let chunk_data = match crate::http_body::read(resp, chunk_limit).await {
+                Ok(chunk) => chunk,
+                Err(WillowError::ResponseTooLarge { .. })
+                    if chunk_limit == manifest.chunk_size as usize =>
+                {
+                    return Err(WillowError::ProofVerificationFailed(format!(
+                        "chunk {i} is longer than the manifest's chunk size of {} bytes",
+                        manifest.chunk_size
+                    )))
+                }
+                Err(e @ WillowError::ResponseTooLarge { .. }) => return Err(e),
+                Err(e) => {
+                    return Err(WillowError::Network(format!(
+                        "Failed to read chunk {}: {}",
+                        i, e
+                    )))
+                }
+            };
+            if (file_data.len() + chunk_data.len()) as u64 > manifest.total_size {
+                return Err(WillowError::ProofVerificationFailed(format!(
+                    "the chunks run past the manifest's total size of {} bytes at chunk {i}",
+                    manifest.total_size
+                )));
+            }
 
             let chunk_hash: [u8; 32] = Sha256::digest(&chunk_data).into();
             chunk_hashes.push(chunk_hash);
@@ -245,6 +271,13 @@ impl FileOperations {
                 "Chunk Merkle root mismatch".to_string(),
             ));
         }
+        if file_data.len() as u64 != manifest.total_size {
+            return Err(WillowError::ProofVerificationFailed(format!(
+                "the chunks hold {} bytes, not the manifest's total size of {}",
+                file_data.len(),
+                manifest.total_size
+            )));
+        }
 
         // Verify content hash
         let computed_hash = Sha256::digest(&file_data);
@@ -261,7 +294,8 @@ impl FileOperations {
         Ok(file_data)
     }
 
-    /// Get file manifest metadata with GroveDB proof.
+    /// A file's manifest, as the API serves it (`GET /files/{subgrove}/{key}`): the API's word,
+    /// with no proof checked.
     pub async fn metadata(&self, subgrove_id: &str, file_key: &str) -> Result<FileManifest> {
         self.client
             .request(
@@ -371,6 +405,41 @@ impl FileOperations {
         }
         Ok(())
     }
+}
+
+/// Refuse a manifest the chain refuses ([`willow_types::storage`]'s limits, as the node checks a
+/// `StoreFileManifest`): no data (a zero total size, chunk count, or chunk size), more than
+/// `MAX_FILE_SIZE` (1 GiB) or `MAX_CHUNK_COUNT` (262,144 chunks), a total size that the chunk
+/// count and chunk size don't fit (`(count - 1) * size < total <= count * size`), or chunks
+/// under `MIN_CHUNK_SIZE` (4 KiB) in a file of more than one. Such a manifest names no file the
+/// chain holds, and its counts would set what a download reads.
+fn check_manifest(manifest: &FileManifest) -> Result<()> {
+    use willow_types::storage::{MAX_CHUNK_COUNT, MAX_FILE_SIZE, MIN_CHUNK_SIZE};
+    let (total, count, size) = (
+        manifest.total_size,
+        manifest.chunk_count as u64,
+        manifest.chunk_size as u64,
+    );
+    let why = if total == 0 || count == 0 || size == 0 {
+        "it holds no data".to_string()
+    } else if total > MAX_FILE_SIZE {
+        format!("{total} bytes, over the chain's maximum of {MAX_FILE_SIZE}")
+    } else if count > MAX_CHUNK_COUNT as u64 {
+        format!("{count} chunks, over the chain's maximum of {MAX_CHUNK_COUNT}")
+    } else if total > count * size || total <= (count - 1) * size {
+        format!("{count} chunks of {size} bytes don't hold {total} bytes")
+    } else if count > 1 && size < MIN_CHUNK_SIZE as u64 {
+        format!(
+            "chunks of {size} bytes, under the chain's minimum of {MIN_CHUNK_SIZE} for a file \
+             of more than one"
+        )
+    } else {
+        return Ok(());
+    };
+    Err(WillowError::ProofVerificationFailed(format!(
+        "the manifest of {} is one the chain refuses: {why}",
+        manifest.file_key
+    )))
 }
 
 /// The key and key ID a file transaction is signed with: the node refuses one unsigned.
@@ -521,5 +590,100 @@ mod tests {
         let err = files.delete("sg", "k", None, None).await.unwrap_err();
         assert!(matches!(err, WillowError::Validation(_)), "{err}");
         assert!(server.received_requests().await.unwrap().is_empty());
+    }
+
+    /// A manifest of `chunks`' hashes, with the sizes given (which needn't fit them).
+    fn manifest(chunks: &[Vec<u8>], count: u32, chunk_size: u32, total: u64) -> serde_json::Value {
+        let hashes: Vec<[u8; 32]> = chunks.iter().map(|c| Sha256::digest(c).into()).collect();
+        serde_json::json!({
+            "file_key": "k", "filename": "f.bin", "content_type": "application/octet-stream",
+            "total_size": total,
+            "content_hash": hex::encode(Sha256::digest(chunks.concat())),
+            "chunk_count": count, "chunk_size": chunk_size,
+            "chunk_merkle_root": hex::encode(compute_merkle_root(&hashes)),
+            "owner_did": "did:willow:a", "created_at": 0, "updated_at": 0, "encrypted": false,
+        })
+    }
+
+    /// Download `k` from a server that is both the API, serving `manifest`, and the storage
+    /// node, serving `chunks`; with the chunk requests the storage node received.
+    async fn download(manifest: serde_json::Value, chunks: &[Vec<u8>]) -> (Result<Vec<u8>>, usize) {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, ResponseTemplate};
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/files/sg/k"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(manifest))
+            .mount(&server)
+            .await;
+        for (i, chunk) in chunks.iter().enumerate() {
+            Mock::given(method("GET"))
+                .and(path(format!("/chunk/sg/k/{i}")))
+                .respond_with(ResponseTemplate::new(200).set_body_bytes(chunk.clone()))
+                .mount(&server)
+                .await;
+        }
+        let client = WillowClient::builder()
+            .api_url(&server.uri())
+            .build()
+            .await
+            .unwrap();
+        let result = client.files().download("sg", "k", &server.uri()).await;
+        let sent = server.received_requests().await.unwrap();
+        let chunk_requests = sent
+            .iter()
+            .filter(|r| r.url.path().starts_with("/chunk/"))
+            .count();
+        (result, chunk_requests)
+    }
+
+    #[tokio::test]
+    async fn a_download_reads_chunks_that_fit_the_manifest() {
+        let chunks = vec![vec![1u8; 4096], vec![2u8; 10]];
+        let (result, _) = download(manifest(&chunks, 2, 4096, 4106), &chunks).await;
+        assert_eq!(result.unwrap(), chunks.concat());
+    }
+
+    /// The manifest is the API's, unproven: one the chain would refuse (no data, over 1 GiB or
+    /// 262,144 chunks, a chunk count that doesn't fit the total and chunk sizes, or chunks
+    /// under 4 KiB in a file of more than one) is refused before any chunk is fetched.
+    #[tokio::test]
+    async fn a_manifest_the_chain_would_refuse_is_refused_before_any_chunk_is_fetched() {
+        let chunks = vec![vec![7u8; 10], vec![8u8; 10]];
+        for (count, chunk_size, total) in [
+            (0, 4096, 0),
+            (1, 0, 0),
+            (1025, 1 << 20, (1 << 30) + 1),
+            (262_145, 4096, 262_144 * 4096 + 1),
+            (u32::MAX, 1, u32::MAX as u64),
+            (3, 4096, 10),
+            (2, 8, 16),
+        ] {
+            let (result, fetched) =
+                download(manifest(&chunks, count, chunk_size, total), &chunks).await;
+            assert!(result.is_err(), "{count} x {chunk_size} for {total}");
+            assert_eq!(fetched, 0, "{count} x {chunk_size} for {total}");
+        }
+    }
+
+    /// A storage node and API that agree can still serve more than the manifest says: a chunk
+    /// longer than `chunk_size`, or chunks that run past `total_size`, are refused.
+    #[tokio::test]
+    async fn chunks_longer_than_the_manifest_says_are_refused() {
+        let long = vec![vec![3u8; 8192]];
+        let (result, _) = download(manifest(&long, 1, 4096, 4096), &long).await;
+        assert!(
+            result.is_err(),
+            "a chunk over chunk_size: {:?}",
+            result.map(|d| d.len())
+        );
+
+        let past = vec![vec![4u8; 4096], vec![5u8; 4096]];
+        let (result, _) = download(manifest(&past, 2, 4096, 4097), &past).await;
+        assert!(
+            result.is_err(),
+            "past total_size: {:?}",
+            result.map(|d| d.len())
+        );
     }
 }
