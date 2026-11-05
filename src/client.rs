@@ -25,6 +25,17 @@ use std::time::Duration;
 use tokio::sync::OnceCell;
 use url::Url;
 
+/// How long a request the SDK sends may take, unless the caller sets another timeout.
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// An HTTP client whose requests time out after `timeout`.
+pub(crate) fn http_client_with_timeout(timeout: Duration) -> Client {
+    Client::builder()
+        .timeout(timeout)
+        .build()
+        .expect("an HTTP client with a timeout and default settings")
+}
+
 /// Identity for per-request signing
 #[derive(Clone, Debug)]
 struct ClientIdentity {
@@ -38,6 +49,8 @@ struct ClientIdentity {
 #[derive(Clone)]
 pub struct WillowClient {
     pub(crate) http_client: Client,
+    /// The timeout of `http_client`, for the clients the SDK makes for other servers.
+    pub(crate) timeout: Duration,
     base_url: Url,
     /// Optional indexer URL for routing GraphQL/SQL queries to an indexer node.
     indexer_url: Option<Url>,
@@ -725,7 +738,7 @@ impl Default for WillowClientBuilder {
             consensus_url: None,
             indexer_url: None,
             api_key: None,
-            timeout: Duration::from_secs(30),
+            timeout: DEFAULT_TIMEOUT,
             retry_config: RetryConfig::default(),
             #[cfg(not(feature = "no-light-client"))]
             light_client_config: None,
@@ -872,15 +885,19 @@ impl WillowClientBuilder {
         };
 
         // Create consensus client if configured
-        let consensus_client = self
-            .consensus_url
-            .map(|url| Arc::new(ConsensusClient::new_with_api(&url, base_url.as_str())));
+        let consensus_client = self.consensus_url.map(|url| {
+            Arc::new(
+                ConsensusClient::new_with_api(&url, base_url.as_str())
+                    .with_http_client(http_client_with_timeout(self.timeout)),
+            )
+        });
 
         let indexers =
             WillowIndexers::new(http_client.clone(), base_url.clone(), indexer_url.clone());
 
         Ok(WillowClient {
             http_client,
+            timeout: self.timeout,
             base_url,
             indexer_url,
             indexers,

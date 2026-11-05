@@ -111,10 +111,11 @@ pub struct ConsensusClient {
 }
 
 impl ConsensusClient {
-    /// Create a new consensus client
+    /// Create a new consensus client. Its requests time out after
+    /// [`crate::client::DEFAULT_TIMEOUT`]; [`Self::with_http_client`] sets another client.
     pub fn new(consensus_rpc_url: &str) -> Self {
         Self {
-            http_client: Client::new(),
+            http_client: crate::client::http_client_with_timeout(crate::client::DEFAULT_TIMEOUT),
             consensus_rpc_url: consensus_rpc_url.to_string(),
             api_url: None,
             nonces: Arc::new(NonceTracker::new()),
@@ -128,6 +129,13 @@ impl ConsensusClient {
             api_url: Some(api_url.to_string()),
             ..Self::new(consensus_rpc_url)
         }
+    }
+
+    /// Send requests with `http_client` (its timeout, proxy, and TLS settings) instead of the
+    /// client's own.
+    pub fn with_http_client(mut self, http_client: Client) -> Self {
+        self.http_client = http_client;
+        self
     }
 
     /// Hand out nonces from `nonces` instead of this client's own tracker, so clients that sign
@@ -1458,6 +1466,30 @@ mod tests {
             assert!(matches!(err, WillowError::Validation(_)), "{data}: {err}");
         }
         assert!(server.received_requests().await.unwrap().is_empty());
+    }
+
+    /// The clock is paused, so it runs ahead to the next timer whenever the test waits: a
+    /// request with no timeout waits out the 600 s below, one with a timeout fails first.
+    #[tokio::test(start_paused = true)]
+    async fn a_node_that_never_answers_times_out() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .set_delay(std::time::Duration::from_secs(3600)),
+            )
+            .mount(&server)
+            .await;
+        let client = ConsensusClient::new(&server.uri());
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(600),
+            client.get_next_nonce("did:willow:a"),
+        )
+        .await;
+        assert!(
+            matches!(outcome, Ok(Err(WillowError::Network(_)))),
+            "{outcome:?}"
+        );
     }
 
     /// A write whose outcome is unknown carries its DID, nonce, and the exact bytes it sent;

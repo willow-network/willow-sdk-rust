@@ -141,7 +141,7 @@ impl FileOperations {
         }
 
         // Upload chunks to storage node
-        let http = reqwest::Client::new();
+        let http = crate::client::http_client_with_timeout(self.client.timeout);
         for (i, chunk) in chunks.iter().enumerate() {
             let url = format!(
                 "{}/upload/{}/{}?chunk_index={}&chunk_count={}&content_hash={}",
@@ -199,7 +199,7 @@ impl FileOperations {
         let chunk_count = manifest.chunk_count;
 
         // Download chunks from storage node
-        let http = reqwest::Client::new();
+        let http = crate::client::http_client_with_timeout(self.client.timeout);
         let mut file_data = Vec::new();
         let mut chunk_hashes = Vec::new();
 

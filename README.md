@@ -493,6 +493,8 @@ let client = WillowClient::builder()
     .await?;
 ```
 
+Every request the SDK sends times out: after the builder's `timeout` (default 30 s, `client::DEFAULT_TIMEOUT`) for the API, the consensus RPC, and storage nodes, and after the light client's `rpc_timeout` for its validator endpoints. A `ConsensusClient` made with `ConsensusClient::new` uses the default; `with_http_client` gives it your own `reqwest::Client`.
+
 ## Validators
 
 ```rust

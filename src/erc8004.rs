@@ -188,10 +188,12 @@ pub struct Erc8004Client {
 }
 
 impl Erc8004Client {
+    /// A client of the API at `api_url`, whose requests time out after
+    /// [`crate::client::DEFAULT_TIMEOUT`].
     pub fn new(api_url: &str) -> Self {
         Self {
             api_url: api_url.trim_end_matches('/').to_string(),
-            http: Client::new(),
+            http: crate::client::http_client_with_timeout(crate::client::DEFAULT_TIMEOUT),
         }
     }
 
