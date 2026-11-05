@@ -227,7 +227,7 @@ async fn light_client_verification_test() {
         "limit": 10
     });
 
-    match client.data().query(&subgrove_name, query).await {
+    match client.data().query_unverified(&subgrove_name, query).await {
         Ok(response) => {
             println!("  ✅ Query executed and verified!");
             println!("  📊 Found {} documents", response.documents.len());

@@ -229,7 +229,7 @@ async fn basic_indexing_test() {
         "limit": 10
     });
 
-    match client.data().query(&subgrove_name, query).await {
+    match client.data().query_unverified(&subgrove_name, query).await {
         Ok(results) => {
             if results.documents.is_empty() {
                 println!(
@@ -330,25 +330,20 @@ async fn store_data_direct(
 ) -> Result<String, Box<dyn std::error::Error>> {
     use ed25519_dalek::Signer;
 
-    let data_json = serde_json::to_string(&data)?;
-    let message = format!("{}:{}:{}", subgrove_id, key, data_json);
+    let mut tx = willow_sdk::signed_messages::StoreDataTx {
+        subgrove_id: subgrove_id.to_string(),
+        key: key.to_string(),
+        data: serde_json::to_vec(&data)?,
+        owner_did: owner_did.to_string(),
+        signature: vec![],
+        public_key_id: format!("{}#key-1", owner_did),
+        nonce,
+    };
+    let message = willow_sdk::signed_messages::store_data(&tx)?;
+    tx.signature = signing_key.sign(message.as_bytes()).to_bytes().to_vec();
 
-    let signature = signing_key.sign(message.as_bytes());
-
-    let transaction = json!({
-        "StoreData": {
-
-            "subgrove_id": subgrove_id,
-            "key": key,
-            "data": data,
-            "owner_did": owner_did,
-            "signature": signature.to_bytes().to_vec(),
-            "public_key_id": format!("{}#key-1", owner_did),
-            "nonce": nonce
-        }
-    });
-
-    submit_transaction(consensus, &transaction).await
+    let tx_json = ConsensusClient::serialize_tx("StoreData", &tx)?;
+    Ok(consensus.submit_transaction_json(&tx_json).await?)
 }
 
 // Helper function to submit transaction

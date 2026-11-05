@@ -215,7 +215,7 @@ async fn query_operations_test() {
         "filters": { "category": "electronics" }
     });
 
-    match client.data().query(&subgrove_name, query).await {
+    match client.data().query_unverified(&subgrove_name, query).await {
         Ok(results) => {
             println!("  ✅ Query returned {} documents", results.documents.len());
             for doc in &results.documents {
@@ -230,52 +230,20 @@ async fn query_operations_test() {
         Err(e) => println!("  ❌ Query failed: {}", e),
     }
 
-    // Test 1b: Query with proof
-    println!("\n🧪 Test 1b: Query with cryptographic proof");
+    // Test 1b: a query's documents can't be verified, so the verified query refuses
+    println!("\n🧪 Test 1b: Verified query refuses");
 
     let query_with_proof = json!({
         "filters": { "category": "electronics" },
         "include_proof": true
     });
 
-    match client.data().query(&subgrove_name, query_with_proof).await {
-        Ok(results) => {
-            println!("  ✅ Query returned {} documents", results.documents.len());
-
-            // Check if proof was included
-            if let Some(proof) = &results.proof {
-                println!("  📄 Proof included: {} bytes", proof.len() / 2);
-
-                // Verify the proof and compute root hash
-                use willow_sdk::QueryResponseExt;
-                match results.verify_proof() {
-                    Ok(computed_root_hash) => {
-                        println!("  🔐 Computed root hash: {}", &computed_root_hash[..16]);
-
-                        // Get the on-chain root hash
-                        match client.get_root_hash().await {
-                            Ok(node_root_hash) => {
-                                println!("  🌐 Node root hash: {}", &node_root_hash[..16]);
-
-                                // In production, you would get this from the blockchain
-                                // For now, we just compare with what the node reports
-                                if computed_root_hash == node_root_hash {
-                                    println!("  ✅ Root hash matches!");
-                                } else {
-                                    println!("  ❌ Root hash mismatch!");
-                                }
-                            }
-                            Err(e) => println!("  ⚠️  Failed to get node root hash: {}", e),
-                        }
-                    }
-                    Err(e) => println!("  ⚠️  Proof verification error: {}", e),
-                }
-            } else {
-                println!("  ⚠️  No proof included in response");
-            }
-        }
-        Err(e) => println!("  ❌ Query failed: {}", e),
-    }
+    let refused = client.data().query(&subgrove_name, query_with_proof).await;
+    assert!(
+        matches!(refused, Err(willow_sdk::WillowError::Unsupported(_))),
+        "{refused:?}"
+    );
+    println!("  ✅ data().query refuses: use query_unverified, or get for a verified value");
 
     // Test 2: Query with sorting
     println!("\n🧪 Test 2: Query with sorting by price");
@@ -285,7 +253,7 @@ async fn query_operations_test() {
         "sort": { "field": "price", "order": "asc" }
     });
 
-    match client.data().query(&subgrove_name, query).await {
+    match client.data().query_unverified(&subgrove_name, query).await {
         Ok(results) => {
             println!(
                 "  ✅ Query returned {} documents sorted by price",
@@ -311,7 +279,7 @@ async fn query_operations_test() {
         "offset": 0
     });
 
-    match client.data().query(&subgrove_name, query).await {
+    match client.data().query_unverified(&subgrove_name, query).await {
         Ok(results) => {
             println!(
                 "  ✅ Query returned {} documents (page 1)",
@@ -329,7 +297,11 @@ async fn query_operations_test() {
                 "offset": 2
             });
 
-            if let Ok(results2) = client.data().query(&subgrove_name, query_page2).await {
+            if let Ok(results2) = client
+                .data()
+                .query_unverified(&subgrove_name, query_page2)
+                .await
+            {
                 println!(
                     "  ✅ Page 2 returned {} documents",
                     results2.documents.len()
@@ -351,7 +323,7 @@ async fn query_operations_test() {
         "limit": 3
     });
 
-    match client.data().query(&subgrove_name, query).await {
+    match client.data().query_unverified(&subgrove_name, query).await {
         Ok(results) => {
             println!(
                 "  ✅ Query returned {} in-stock products sorted by rating",
@@ -378,7 +350,7 @@ async fn query_operations_test() {
         "filters": { "category": "nonexistent" }
     });
 
-    match client.data().query(&subgrove_name, query).await {
+    match client.data().query_unverified(&subgrove_name, query).await {
         Ok(results) => println!(
             "    ✅ Empty query returned {} documents",
             results.documents.len()
@@ -393,7 +365,7 @@ async fn query_operations_test() {
         "limit": 1000
     });
 
-    match client.data().query(&subgrove_name, query).await {
+    match client.data().query_unverified(&subgrove_name, query).await {
         Ok(results) => println!(
             "    ✅ Large limit query returned {} documents",
             results.documents.len()
@@ -408,7 +380,7 @@ async fn query_operations_test() {
         "offset": 100
     });
 
-    match client.data().query(&subgrove_name, query).await {
+    match client.data().query_unverified(&subgrove_name, query).await {
         Ok(results) => println!(
             "    ✅ High offset query returned {} documents",
             results.documents.len()
@@ -491,24 +463,20 @@ async fn store_data(
 ) -> Result<String, Box<dyn std::error::Error>> {
     use ed25519_dalek::Signer;
 
-    let data_json = serde_json::to_string(&data)?;
-    let message = format!("{}:{}:{}", subgrove_id, key, data_json);
-    let signature = signing_key.sign(message.as_bytes());
+    let mut tx = willow_sdk::signed_messages::StoreDataTx {
+        subgrove_id: subgrove_id.to_string(),
+        key: key.to_string(),
+        data: serde_json::to_vec(&data)?,
+        owner_did: owner_did.to_string(),
+        signature: vec![],
+        public_key_id: format!("{}#key-1", owner_did),
+        nonce,
+    };
+    let message = willow_sdk::signed_messages::store_data(&tx)?;
+    tx.signature = signing_key.sign(message.as_bytes()).to_bytes().to_vec();
 
-    let transaction = json!({
-        "StoreData": {
-
-            "subgrove_id": subgrove_id,
-            "key": key,
-            "data": data,
-            "owner_did": owner_did,
-            "signature": signature.to_bytes().to_vec(),
-            "public_key_id": format!("{}#key-1", owner_did),
-            "nonce": nonce
-        }
-    });
-
-    submit_transaction(consensus, &transaction).await
+    let tx_json = ConsensusClient::serialize_tx("StoreData", &tx)?;
+    Ok(consensus.submit_transaction_json(&tx_json).await?)
 }
 
 async fn submit_transaction(

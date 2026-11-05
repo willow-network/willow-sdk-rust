@@ -62,7 +62,7 @@ async fn multi_subgrove_test() {
         // Try to access the app by attempting to list subgroves or perform a simple operation
         match client
             .data()
-            .query("dummy_subgrove", json!({"filters": {}}))
+            .query_unverified("dummy_subgrove", json!({"filters": {}}))
             .await
         {
             Ok(_) => {
@@ -419,7 +419,7 @@ async fn multi_subgrove_test() {
 
     match client
         .data()
-        .query(&posts_subgrove, alice_posts_query)
+        .query_unverified(&posts_subgrove, alice_posts_query)
         .await
     {
         Ok(results) => {
@@ -445,7 +445,7 @@ async fn multi_subgrove_test() {
 
                     match client
                         .data()
-                        .query(&comments_subgrove, comments_query)
+                        .query_unverified(&comments_subgrove, comments_query)
                         .await
                     {
                         Ok(comment_results) => {

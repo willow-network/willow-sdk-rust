@@ -57,7 +57,7 @@ async fn data_integrity_test() {
         // Try to access the app by attempting to list subgroves or perform a simple operation
         match client
             .data()
-            .query("dummy_subgrove", json!({"filters": {}}))
+            .query_unverified("dummy_subgrove", json!({"filters": {}}))
             .await
         {
             Ok(_) => {
