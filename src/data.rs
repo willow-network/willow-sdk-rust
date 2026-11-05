@@ -679,9 +679,15 @@ mod tests {
             .await;
             refused(client.data().get(SG, KEY).await);
 
-            // Another root in the header after the proof's block (the header at the proof's own
-            // height doesn't count).
-            let (_s, client) = chain(value(), proof_body(&proof, json!(HEIGHT)), &[0x11; 32]).await;
+            // The proof's root in the header at the proof's own height and another in the header
+            // after it: the state after block H is in H + 1's header, so H's doesn't count.
+            let (_s, client) = chain_with(
+                value(),
+                proof_body(&proof, json!(HEIGHT)),
+                &[(HEIGHT, root.to_vec()), (HEIGHT + 1, vec![0x11; 32])],
+                HEIGHT + 1,
+            )
+            .await;
             refused(client.data().get(SG, KEY).await);
 
             // No height, or no proof.
