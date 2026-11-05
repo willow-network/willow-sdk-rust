@@ -622,7 +622,11 @@ impl WillowClient {
             {
                 Ok(result) => return Ok(result),
                 // Asking again would read as much again.
-                Err(e @ WillowError::ResponseTooLarge { .. }) => return Err(e),
+                Err(
+                    e @ (WillowError::ResponseTooLarge { .. }
+                    | WillowError::ResponseTooComplex { .. }
+                    | WillowError::Serialization(_)),
+                ) => return Err(e),
                 Err(e) => {
                     last_error = Some(e);
                     if attempt < self.retry_config.max_attempts - 1 {
@@ -695,7 +699,7 @@ impl WillowClient {
         let response_text = crate::http_body::text(response, answer_limit(path)).await?;
 
         if status.is_success() {
-            serde_json::from_str(&response_text).map_err(|e| WillowError::Serialization(e))
+            crate::http_body::decode_checked(&response_text, crate::http_body::JsonBudget::Full)
         } else {
             // Try to parse error response
             if let Ok(api_response) =
@@ -731,9 +735,17 @@ impl WillowClient {
 /// query's (whose size the request sets), or the small answers of every other route.
 fn answer_limit(path: &str) -> usize {
     let path = path.split('?').next().unwrap_or(path);
-    match path.trim_start_matches('/').split('/').next() {
-        Some("proof") => crate::http_body::PROOF,
-        Some("query" | "historical" | "sql" | "graphql" | "a2a") => crate::http_body::LARGE,
+    let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+    match segments.as_slice() {
+        ["proof", ..] => crate::http_body::PROOF,
+        ["query" | "historical" | "sql" | "graphql" | "a2a", ..] => crate::http_body::LARGE,
+        // The lists the API doesn't page, which grow with the chain.
+        ["subgroves"]
+        | ["subgroves", "indexed"]
+        | ["indexers"]
+        | ["validators"]
+        | ["key-grants", _]
+        | ["did", _, "permissions"] => crate::http_body::LARGE,
         _ => crate::http_body::SMALL,
     }
 }

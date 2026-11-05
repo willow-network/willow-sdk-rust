@@ -410,11 +410,12 @@ impl FileOperations {
 /// Refuse a manifest the chain refuses ([`willow_types::storage`]'s limits, as the node checks a
 /// `StoreFileManifest`): no data (a zero total size, chunk count, or chunk size), more than
 /// `MAX_FILE_SIZE` (1 GiB) or `MAX_CHUNK_COUNT` (262,144 chunks), a total size that the chunk
-/// count and chunk size don't fit (`(count - 1) * size < total <= count * size`), or chunks
-/// under `MIN_CHUNK_SIZE` (4 KiB) in a file of more than one. Such a manifest names no file the
-/// chain holds, and its counts would set what a download reads.
+/// count and chunk size don't fit (`(count - 1) * size < total <= count * size`). Such a
+/// manifest names no file the chain holds, and its counts would set what a download reads. (The
+/// chain's minimum chunk size applies only to manifests from its activation height, so an older
+/// one below it can exist.)
 fn check_manifest(manifest: &FileManifest) -> Result<()> {
-    use willow_types::storage::{MAX_CHUNK_COUNT, MAX_FILE_SIZE, MIN_CHUNK_SIZE};
+    use willow_types::storage::{MAX_CHUNK_COUNT, MAX_FILE_SIZE};
     let (total, count, size) = (
         manifest.total_size,
         manifest.chunk_count as u64,
@@ -428,11 +429,6 @@ fn check_manifest(manifest: &FileManifest) -> Result<()> {
         format!("{count} chunks, over the chain's maximum of {MAX_CHUNK_COUNT}")
     } else if total > count * size || total <= (count - 1) * size {
         format!("{count} chunks of {size} bytes don't hold {total} bytes")
-    } else if count > 1 && size < MIN_CHUNK_SIZE as u64 {
-        format!(
-            "chunks of {size} bytes, under the chain's minimum of {MIN_CHUNK_SIZE} for a file \
-             of more than one"
-        )
     } else {
         return Ok(());
     };
@@ -657,7 +653,7 @@ mod tests {
             (262_145, 4096, 262_144 * 4096 + 1),
             (u32::MAX, 1, u32::MAX as u64),
             (3, 4096, 10),
-            (2, 8, 16),
+            (2, 8, 17),
         ] {
             let (result, fetched) =
                 download(manifest(&chunks, count, chunk_size, total), &chunks).await;

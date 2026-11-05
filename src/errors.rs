@@ -107,6 +107,20 @@ pub enum WillowError {
         limit: usize,
     },
 
+    /// An answer holding more JSON than the SDK decodes into `serde_json::Value`s
+    /// ([`crate::http_body::MAX_VALUES`] units), refused before decoding any of it: decoded, a
+    /// list of empty objects or of numbers takes many times its length. Not retried.
+    #[error("the answer holds more JSON values than the SDK decodes ({limit})")]
+    ResponseTooComplex {
+        /// The limit, in units.
+        limit: usize,
+    },
+
+    /// A write CometBFT's mempool didn't admit (it is full, or the transaction is over its size
+    /// limit): nothing was admitted, so this submission won't land, and its nonce is given back.
+    #[error("Transaction not admitted: {0}")]
+    NotAdmitted(String),
+
     /// Generic error with custom message
     #[error("{0}")]
     Custom(String),

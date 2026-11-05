@@ -665,10 +665,16 @@ impl ConsensusClient {
         let answer = match self.send_bytes(&submission.tx_bytes).await {
             Ok(answer) => answer,
             Err(e) => {
-                // Nothing was sent, or the mempool took none of it.
-                if release_unsent {
-                    self.nonces.release(did, nonce);
+                // Nothing was sent, or the mempool took none of it. A rebroadcast's earlier
+                // attempt may still be pending (CometBFT checks a full mempool before its cache
+                // of what it holds), so its outcome stays unknown, with the nonce held.
+                if !release_unsent {
+                    return Err(WillowError::SubmissionUnknown {
+                        message: e.to_string(),
+                        submission: Box::new(submission),
+                    });
                 }
+                self.nonces.release(did, nonce);
                 return Err(e);
             }
         };
@@ -777,8 +783,8 @@ impl ConsensusClient {
                 let text = text.to_ascii_lowercase();
                 text.contains("mempool is full") || text.contains("tx too large")
             }) {
-                return Err(WillowError::Custom(format!(
-                    "Transaction not admitted: CometBFT's mempool refused it ({}): {}",
+                return Err(WillowError::NotAdmitted(format!(
+                    "CometBFT's mempool refused it ({}): {}",
                     error.code,
                     if detail.is_empty() {
                         &error.message
@@ -1667,7 +1673,7 @@ mod tests {
                 .await
                 .unwrap_err();
             assert!(
-                !matches!(err, WillowError::SubmissionUnknown { .. }),
+                matches!(err, WillowError::NotAdmitted(_)),
                 "{error}: {err:?}"
             );
             assert!(!client.nonce_tracker().is_held(did, 6), "{error}");
@@ -1679,7 +1685,13 @@ mod tests {
                 tx_bytes: vec![1, 2, 3],
                 tx_hash: hex::encode_upper(Sha256::digest([1, 2, 3])),
             };
-            assert!(client.rebroadcast(&earlier).await.is_err(), "{error}");
+            // A full mempool is checked before CometBFT's cache of what it holds, so the
+            // earlier attempt may be pending: the rebroadcast's outcome stays unknown.
+            let again = client.rebroadcast(&earlier).await.unwrap_err();
+            assert!(
+                matches!(&again, WillowError::SubmissionUnknown { submission, .. } if submission.nonce == 9),
+                "{error}: {again:?}"
+            );
             assert!(client.nonce_tracker().is_held(did, 9), "{error}");
         }
     }

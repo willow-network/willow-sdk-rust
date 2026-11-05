@@ -110,6 +110,10 @@ impl IndexingOperations {
         let text = crate::http_body::text(http_resp, crate::http_body::LARGE).await?;
 
         if status.is_success() {
+            crate::http_body::check_json(
+                text.as_bytes(),
+                crate::http_body::JsonBudget::UnderProof,
+            )?;
             if let Ok(direct) = serde_json::from_str::<GraphQLResponse>(&text) {
                 return Ok(direct);
             }
@@ -283,6 +287,7 @@ impl IndexingOperations {
                 message: text,
             });
         }
+        crate::http_body::check_json(text.as_bytes(), crate::http_body::JsonBudget::UnderProof)?;
         // Try raw T first (indexer-shaped), fall back to ApiResponse<T> wrapper.
         if let Ok(direct) = serde_json::from_str::<T>(&text) {
             return Ok(direct);
@@ -319,6 +324,7 @@ impl IndexingOperations {
                 message: text,
             });
         }
+        crate::http_body::check_json(text.as_bytes(), crate::http_body::JsonBudget::UnderProof)?;
         if let Ok(direct) = serde_json::from_str::<T>(&text) {
             return Ok(direct);
         }

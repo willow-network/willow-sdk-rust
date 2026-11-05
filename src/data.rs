@@ -308,7 +308,7 @@ impl DataOperations {
         let text = crate::http_body::text(http_resp, crate::http_body::LARGE).await?;
 
         if status.is_success() {
-            serde_json::from_str(&text).map_err(WillowError::Serialization)
+            crate::http_body::decode_checked(&text, crate::http_body::JsonBudget::Full)
         } else {
             Err(WillowError::Http {
                 status: status.as_u16(),
