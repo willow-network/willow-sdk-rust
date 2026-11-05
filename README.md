@@ -490,7 +490,7 @@ let client = WillowClient::builder()
     .await?;
 ```
 
-Every request the SDK sends times out: after the builder's `timeout` (default 30 s, `client::DEFAULT_TIMEOUT`) for the API, the consensus RPC, and storage nodes, and after the light client's `rpc_timeout` for its validator endpoints. A `ConsensusClient` made with `ConsensusClient::new` uses the default; `with_http_client` gives it your own `reqwest::Client`.
+Every request the SDK sends times out: after the builder's `timeout` (default 30 s, `client::DEFAULT_TIMEOUT`) for the API, the consensus RPC, and storage nodes, and after the light client's `rpc_timeout` for its validator endpoints. A `ConsensusClient` made with `ConsensusClient::new` uses the default; `with_http_client` gives it your own `reqwest::Client`. A subscription's WebSocket must be open (connected, `connection_ack` received, `subscribe` sent) within the client's `timeout` (`WillowSubscriptions::with_timeout` for one made directly); an open subscription waits for events without one.
 
 ### Answer size limits
 

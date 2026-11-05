@@ -442,6 +442,7 @@ impl WillowClient {
     /// the `source` in [`crate::subscriptions::SubscribeOptions`].
     pub fn subscriptions(&self) -> crate::subscriptions::WillowSubscriptions {
         crate::subscriptions::WillowSubscriptions::new(self.base_url.clone(), self.indexers.clone())
+            .with_timeout(self.timeout)
     }
 
     /// Get indexing operations (GraphQL, subgroves)

@@ -187,11 +187,27 @@ impl Drop for SubscriptionHandle {
 pub struct WillowSubscriptions {
     api_url: Url,
     indexers: WillowIndexers,
+    timeout: Duration,
 }
 
 impl WillowSubscriptions {
+    /// A subscription client whose connections time out after
+    /// [`crate::client::DEFAULT_TIMEOUT`] ([`Self::with_timeout`]).
     pub fn new(api_url: Url, indexers: WillowIndexers) -> Self {
-        Self { api_url, indexers }
+        Self {
+            api_url,
+            indexers,
+            timeout: crate::client::DEFAULT_TIMEOUT,
+        }
+    }
+
+    /// How long opening a connection may take, from dialing the WebSocket through the server's
+    /// `connection_ack` to sending `subscribe`; a connection not open by then fails (or, on a
+    /// reconnect, counts as a failed attempt). [`crate::WillowClient::subscriptions`] uses the
+    /// client's timeout. An open subscription waits for events with no timeout.
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
     }
 
     /// Open a subscription. Blocks until the handshake completes
@@ -226,7 +242,8 @@ impl WillowSubscriptions {
         );
 
         // First connect — surface errors to the caller.
-        let initial_stream = connect_and_handshake(&ws_url, &sub_id, query, &options).await?;
+        let initial_stream =
+            connect_and_handshake(&ws_url, &sub_id, query, &options, self.timeout).await?;
 
         let (payload_tx, payload_rx) = mpsc::channel::<SubscriptionPayload>(64);
         let (cancel_tx, cancel_rx) = mpsc::channel::<()>(1);
@@ -234,6 +251,7 @@ impl WillowSubscriptions {
         let task_state = TaskState {
             api_url: self.api_url.clone(),
             indexers: self.indexers.clone(),
+            timeout: self.timeout,
             subgrove_id: subgrove_id.to_string(),
             query: query.to_string(),
             options,
@@ -258,6 +276,7 @@ impl WillowSubscriptions {
 struct TaskState {
     api_url: Url,
     indexers: WillowIndexers,
+    timeout: Duration,
     subgrove_id: String,
     query: String,
     options: SubscribeOptions,
@@ -358,7 +377,15 @@ async fn subscription_loop(initial_stream: WsStream, mut state: TaskState) {
             }
         };
 
-        match connect_and_handshake(&ws_url, &state.sub_id, &state.query, &state.options).await {
+        match connect_and_handshake(
+            &ws_url,
+            &state.sub_id,
+            &state.query,
+            &state.options,
+            state.timeout,
+        )
+        .await
+        {
             Ok(stream) => {
                 state.current_indexer_did = new_did;
                 current_stream = Some(stream);
@@ -410,8 +437,24 @@ async fn resolve_ws_url(
 }
 
 /// Dial the WebSocket, send `connection_init`, wait for `connection_ack`,
-/// send `subscribe`. Returns the ready-to-pump stream on success.
+/// send `subscribe`, all within `timeout`. Returns the ready-to-pump stream on success.
 async fn connect_and_handshake(
+    ws_url: &str,
+    sub_id: &str,
+    query: &str,
+    options: &SubscribeOptions,
+    timeout: Duration,
+) -> Result<WsStream> {
+    tokio::time::timeout(timeout, handshake(ws_url, sub_id, query, options))
+        .await
+        .map_err(|_| {
+            WillowError::Network(format!(
+                "WebSocket connection to {ws_url} not open after {timeout:?}"
+            ))
+        })?
+}
+
+async fn handshake(
     ws_url: &str,
     sub_id: &str,
     query: &str,
@@ -650,5 +693,60 @@ mod tests {
         let out = serde_json::to_value(&p).unwrap();
         assert_eq!(out.get("data"), json.get("data"));
         assert!(out.get("errors").is_none());
+    }
+
+    /// A server that takes the connection and never answers, or that completes the WebSocket
+    /// upgrade and never acknowledges `connection_init`, fails the subscription after the
+    /// client's timeout instead of holding it open.
+    #[tokio::test]
+    async fn a_handshake_the_server_never_finishes_times_out() {
+        use tokio::net::TcpListener;
+        use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
+        for upgrade in [false, true] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                let (socket, _) = listener.accept().await.unwrap();
+                if upgrade {
+                    let _ws = tokio_tungstenite::accept_hdr_async(
+                        socket,
+                        |_: &Request, mut response: Response| {
+                            response.headers_mut().insert(
+                                "Sec-WebSocket-Protocol",
+                                "graphql-transport-ws".parse().unwrap(),
+                            );
+                            Ok(response)
+                        },
+                    )
+                    .await
+                    .unwrap();
+                    std::future::pending::<()>().await;
+                } else {
+                    let _socket = socket;
+                    std::future::pending::<()>().await;
+                }
+            });
+            let client = crate::WillowClient::builder()
+                .api_url(&format!("http://{addr}"))
+                .timeout(Duration::from_millis(300))
+                .build()
+                .await
+                .unwrap();
+            let outcome = tokio::time::timeout(
+                Duration::from_secs(10),
+                client.subscriptions().subscribe(
+                    "sg",
+                    "subscription { blockFinalized { height } }",
+                    SubscribeOptions::default(),
+                ),
+            )
+            .await;
+            server.abort();
+            assert!(
+                matches!(outcome, Ok(Err(_))),
+                "upgrade {upgrade}: {:?}",
+                outcome.map(|r| r.map(|_| ()))
+            );
+        }
     }
 }
