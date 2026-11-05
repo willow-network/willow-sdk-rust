@@ -109,7 +109,7 @@ A read is presented as verified only when a proof binds that exact data at the G
 - **Proof checks** refuse what grovedb 3.1.0's verifier alone accepts: a proof that doesn't descend the asked path, children attached under an opaque `Hash` node (a forged subtree that still hashes to the real root), an item whose value its root doesn't bind (a `KVValueHash` node carries only the value's hash into the root), and a lone root hash (`Push(Hash(root))`). They also refuse an element of exactly 63 bytes (an Item with a 60-byte value and no flags) outside a subgrove's data tree, since a proof can't tell its `KV` node from a subtree's or a reference's; a subgrove's data tree (`[subgroves, <id>, data]`), which holds only Items, accepts it. Before grovedb (whose 3.1.0 decoder trusts the lengths it reads) sees a proof, the SDK bounds-checks its encoding without recursion (every length within the bytes left, at most 64 levels of nesting and 1024 layers, at most 32 MiB) and decodes every node value as an element within its 64 KiB bound, so a hostile proof is refused rather than crashing the process. `ProofVerifier::verify_item_at_path` and `verify_item_against_root`, and the light client's `verify_item`, check a proof for an Item at a path and key with a given value. The path-less `verify_query_proof`, `verify_item_proof`, `verify_against_root`, and the light client's `verify_proof` are deprecated and refuse.
 - **Trust model**: verified reads check the proof against the app hash that a consensus node the caller configures reports, and the SDK trusts that node: it does not verify validator signatures over CometBFT's canonical vote bytes. The light client takes headers as its endpoints serve them, trusting the first, so it does not check 2/3+ of the validators' signatures. Configure endpoints you trust.
 - **Unverified**: `data().query` and `query_historical_verified` refuse (`WillowError::Unsupported`), since the API serves a query's documents without their keys and a historical answer without the indexer's proof, and the checkpoint root comes from the same API. `query_unverified`, `query_historical`, `sql`, and GraphQL return their answers unverified, as do `get_root_hash` and `get_root_hash_local` (the API's word).
-- **Verifiable RPC** (`verifiable_rpc().query`) binds the indexer's answer to its GroveDB proof at the key in one entity tree, and in strict mode checks the GKR proofs, but against the `state_root` the indexer names in the same response: the answer is unverified against the chain (`state_root_anchored` is `false`). An absent answer is refused in the checking modes.
+- **Verifiable RPC** (`verifiable_rpc().query`) binds the indexer's answer to its GroveDB proof at the key in one entity tree (the one the proof descends, which the indexer chooses), and in strict mode checks that the GKR proofs verify and chain to the response's `state_root`, for the circuit (`verification_key_hash`) and configuration hash the response names: neither is checked against the subgrove's registration, so this doesn't prove the subgrove's own transformation. And `state_root` is the indexer's own, from the same response: the answer is unverified against the chain (`state_root_anchored` is `false`). An absent answer is refused in the checking modes.
 - **Ethereum state reads** (`eth()`) require the proof to be of the account, slots, and block asked, and walk it against the `state_root` in the same response. The SDK has no Ethereum light client, so check `state_root` against a header you trust; `eth_call`'s return data is not proven.
 - **Block completeness** (`verify_block_completeness`) checks the indexer's served logs against the `events_commitment` the consensus RPC answers without a proof: it trusts that RPC node, not the indexer.
 - **File downloads** check each chunk against the manifest's chunk Merkle root and content hash; the manifest itself is the API's, unproven.
@@ -454,7 +454,7 @@ if verified_root != local_root {
 ```rust
 use willow_sdk::{WillowError, Result};
 
-match client.data().get("subgrove", "dataset", "key").await {
+match client.data().get("subgrove", "key").await {
     Ok(data) => println!("Data: {}", data),
     Err(WillowError::NotFound(msg)) => println!("Not found: {}", msg),
     Err(WillowError::ProofVerificationFailed(msg)) => {
@@ -466,9 +466,7 @@ match client.data().get("subgrove", "dataset", "key").await {
         println!("Stale answer: {}", msg);
     }
     Err(WillowError::Unsupported(msg)) => println!("Can't verify this read: {}", msg),
-    Err(WillowError::NonceWindowFull(msg)) => println!("Wait for writes to land: {}", msg),
     Err(WillowError::NotAuthenticated) => println!("Please authenticate"),
-    Err(WillowError::SessionExpired) => println!("Session expired"),
     Err(WillowError::LightClient(msg)) => println!("Light client error: {}", msg),
     Err(e) => println!("Error: {}", e),
 }

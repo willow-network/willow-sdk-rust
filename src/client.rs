@@ -99,7 +99,8 @@ pub struct WillowClient {
 pub enum VerifyMode {
     /// Require both a valid GKR proof and a valid GroveDB proof. Default.
     /// `GKR_PROOF_FULL` proofs are verified end-to-end against
-    /// compiled-circuit bytes embedded at build time.
+    /// compiled-circuit bytes embedded at build time, for the circuit and
+    /// configuration hash the response names (see [`crate::verifiable_rpc`]).
     Strict,
     /// Require a GroveDB proof; accept responses without a full GKR
     /// check. Caller anchors `state_root` out-of-band (e.g. via the

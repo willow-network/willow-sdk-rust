@@ -6,13 +6,21 @@
 //!  1. **GroveDB Merkle proof** — that `answer` is the Item at `key` in one
 //!     entity tree of the subgrove (`[subgroves, subgrove, indexed, <entity>]`),
 //!     in the tree rooted at the response's `state_root`
-//!     ([`crate::grovedb_envelope::verify_item_at_path`]). An absent answer
-//!     can't be checked (the indexer proves absence under one entity only), so
-//!     it is refused in the verifying modes.
-//!  2. **GKR proof** (strict mode) — that `state_root` is the output of the
-//!     subgrove's transformation over the events the proof commits to.
-//!     `GKR_PROOF_FULL` is verified locally via `willow-gkr-verify`; circuit
-//!     bytes are embedded at build time via the `registry` feature.
+//!     ([`crate::grovedb_envelope::verify_item_at_path`]). The entity tree is
+//!     the one the proof descends, so the indexer chooses it: nothing checks
+//!     that it is the entity the caller means. An absent answer can't be
+//!     checked (the indexer proves absence under one entity only), so it is
+//!     refused in the verifying modes.
+//!  2. **GKR proofs** (strict mode) — that each `GKR_PROOF_FULL` proof
+//!     verifies, locally via `willow-gkr-verify`, for the circuit its
+//!     `verification_key_hash` names among the circuits embedded at build time
+//!     (the `registry` feature), and that they chain to `state_root`: the last
+//!     one's output root is `state_root`, and each earlier one's is the next
+//!     one's starting root. The circuit and the configuration hash
+//!     (`config_hash`) are the response's own and are not checked against the
+//!     subgrove's registration, so this shows that an embedded circuit produced
+//!     `state_root` from the events its proof commits to, not that the
+//!     subgrove's own transformation did.
 //!
 //! **The answer is not verified against the chain.** `state_root` is the
 //! indexer's own claim, carried in the same response: nothing here anchors it
@@ -74,7 +82,8 @@ pub struct VerifiedAnswer {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerificationResult {
     /// The GroveDB proof binds `answer` at the key under `state_root`, and the
-    /// GKR proofs verify and chain to `state_root`.
+    /// GKR proofs verify, for the circuit and configuration the response names,
+    /// and chain to `state_root` (see the module notes).
     GkrAndGroveDb,
     /// The GroveDB proof binds `answer` at the key under `state_root`
     /// ([`VerifyMode::GroveDbOnly`]).
