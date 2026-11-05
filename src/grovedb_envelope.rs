@@ -24,48 +24,84 @@
 //!   the root, so its bytes are bound to nothing. An item is bound only when
 //!   proven as a `KV` node, whose value enters the root (the form grovedb's
 //!   prover gives every item).
+//!
+//! grovedb 3.1.0 decodes a proof, and the elements in it, with bincode and no
+//! size limit: a byte string is allocated at its claimed length before it is
+//! read, and each level of layer nesting takes another stack frame, so a
+//! hostile proof can abort the process. Before grovedb sees a proof, the
+//! envelope is bounds-checked without recursion (every length within the bytes
+//! left, at most [`MAX_LAYER_DEPTH`] levels and [`MAX_LAYERS`] layers) and every
+//! node value is decoded as an element within its own size; a proof that fails
+//! is refused.
 
 use crate::errors::{Result, WillowError};
-use grovedb::operations::proof::{GroveDBProof, LayerProof, ProveOptions};
+use grovedb::operations::proof::{GroveDBProof, GroveDBProofV0, LayerProof, ProveOptions};
 use grovedb::{Element, GroveDb, PathQuery, Query};
 use grovedb_merk::proofs::{Decoder, Node, Op};
+
+/// The deepest a proof's layers may nest below its root layer. A GroveDB path is a handful of
+/// segments; bincode decodes each level of nesting with one more stack frame.
+pub const MAX_LAYER_DEPTH: usize = 64;
+
+/// The most layers a proof may carry in all.
+pub const MAX_LAYERS: usize = 1024;
+
+/// The largest proof envelope accepted, in bytes.
+pub const MAX_PROOF_BYTES: usize = 32 << 20;
+
+/// What bincode may claim while decoding an envelope that passed [`scan_envelope`]: the lengths
+/// of its byte strings (at most the envelope's size), and, for each map of lower layers still
+/// being read, its remaining entries' size.
+const ENVELOPE_DECODE_LIMIT: usize =
+    MAX_PROOF_BYTES + MAX_LAYERS * std::mem::size_of::<(Vec<u8>, LayerProof)>();
+
+/// The largest merk node value: its length is a u16.
+const MAX_ELEMENT_BYTES: usize = u16::MAX as usize;
+
+fn envelope_error(m: impl std::fmt::Display) -> WillowError {
+    WillowError::ProofVerificationFailed(format!("GroveDB envelope: {m}"))
+}
 
 /// Reject a proof envelope that does not descend `path`, carries layers below
 /// it, or sets non-default prove options.
 pub fn check_envelope(proof: &[u8], path: &[Vec<u8>]) -> Result<()> {
-    let fail = |m: String| WillowError::ProofVerificationFailed(format!("GroveDB envelope: {m}"));
-    let GroveDBProof::V0(v0) = decode_envelope(proof)?;
+    layer_at_path(&decode_envelope(proof)?, path).map(|_| ())
+}
+
+/// The layer of `v0` at `path`, which the envelope must descend with no layer below it, under
+/// the default prove options.
+fn layer_at_path<'a>(v0: &'a GroveDBProofV0, path: &[Vec<u8>]) -> Result<&'a LayerProof> {
     if v0.prove_options.decrease_limit_on_empty_sub_query_result
         != ProveOptions::default().decrease_limit_on_empty_sub_query_result
     {
-        return Err(fail("non-default prove_options".into()));
+        return Err(envelope_error("non-default prove_options"));
     }
     let mut layer: &LayerProof = &v0.root_layer;
     for (depth, seg) in path.iter().enumerate() {
         layer = layer.lower_layers.get(seg).ok_or_else(|| {
-            fail(format!(
+            envelope_error(format!(
                 "no lower layer for path segment {depth} ({}); the proof does not descend to the query path",
                 String::from_utf8_lossy(seg)
             ))
         })?;
     }
     if !layer.lower_layers.is_empty() {
-        return Err(fail("unexpected lower layers below the query path".into()));
+        return Err(envelope_error(
+            "unexpected lower layers below the query path",
+        ));
     }
-    Ok(())
+    Ok(layer)
 }
 
 /// The path a proof descends: from the root layer, the key of each layer's one lower layer,
 /// until a layer has none. A layer with more than one lower layer is refused.
 pub fn descended_path(proof: &[u8]) -> Result<Vec<Vec<u8>>> {
-    let GroveDBProof::V0(v0) = decode_envelope(proof)?;
+    let v0 = decode_envelope(proof)?;
     let mut path = vec![];
     let mut layer = &v0.root_layer;
     while let Some((key, lower)) = layer.lower_layers.iter().next() {
         if layer.lower_layers.len() > 1 {
-            return Err(WillowError::ProofVerificationFailed(
-                "GroveDB envelope: a layer with more than one lower layer".into(),
-            ));
+            return Err(envelope_error("a layer with more than one lower layer"));
         }
         path.push(key.clone());
         layer = lower;
@@ -73,18 +109,163 @@ pub fn descended_path(proof: &[u8]) -> Result<Vec<Vec<u8>>> {
     Ok(path)
 }
 
-/// The proof envelope, refusing trailing bytes.
-fn decode_envelope(proof: &[u8]) -> Result<GroveDBProof> {
-    let fail = |m: String| WillowError::ProofVerificationFailed(format!("GroveDB envelope: {m}"));
+/// Bounds-check an envelope's encoding before anything decodes it, without recursion: a V0
+/// envelope (bincode 2, big-endian varints) whose every length fits in the bytes left, whose
+/// layers nest at most [`MAX_LAYER_DEPTH`] deep and number at most [`MAX_LAYERS`], then a
+/// boolean, then nothing. bincode (grovedb's decoder included) resizes a byte string to its
+/// claimed length before reading it, and decodes each level of nesting one stack frame deeper,
+/// so an unchecked envelope can make it allocate without bound or overflow the stack, which
+/// aborts the process.
+fn scan_envelope(proof: &[u8]) -> Result<()> {
+    if proof.len() > MAX_PROOF_BYTES {
+        return Err(envelope_error(format!(
+            "{} bytes; at most {MAX_PROOF_BYTES} are accepted",
+            proof.len()
+        )));
+    }
+    let mut scan = Scan { bytes: proof };
+    if scan.varint()? != 0 {
+        return Err(envelope_error("not a V0 proof"));
+    }
+    // For each layer being read, from the root down: how many of its lower layers are left.
+    let mut open: Vec<u64> = Vec::new();
+    let mut layers = 0usize;
+    'layer: loop {
+        layers += 1;
+        if layers > MAX_LAYERS {
+            return Err(envelope_error(format!("more than {MAX_LAYERS} layers")));
+        }
+        if open.len() > MAX_LAYER_DEPTH {
+            return Err(envelope_error(format!(
+                "layers nest deeper than {MAX_LAYER_DEPTH}"
+            )));
+        }
+        let merk_proof = scan.len()?;
+        scan.skip(merk_proof)?;
+        let lower = scan.varint()?;
+        // A lower layer takes at least 3 bytes: its key's length, its ops' length, and its count.
+        if lower > (scan.bytes.len() / 3) as u64 {
+            return Err(envelope_error(format!(
+                "{lower} lower layers in {} bytes",
+                scan.bytes.len()
+            )));
+        }
+        open.push(lower);
+        while let Some(left) = open.last().copied() {
+            if left == 0 {
+                open.pop();
+                continue;
+            }
+            *open.last_mut().expect("an open layer") = left - 1;
+            let key = scan.len()?;
+            scan.skip(key)?;
+            continue 'layer;
+        }
+        break;
+    }
+    match scan.take(1)? {
+        [0] | [1] => {}
+        _ => return Err(envelope_error("prove_options is not a boolean")),
+    }
+    if !scan.bytes.is_empty() {
+        return Err(envelope_error(format!(
+            "{} trailing bytes",
+            scan.bytes.len()
+        )));
+    }
+    Ok(())
+}
+
+/// The bytes of an envelope not yet scanned.
+struct Scan<'a> {
+    bytes: &'a [u8],
+}
+
+impl<'a> Scan<'a> {
+    fn take(&mut self, n: usize) -> Result<&'a [u8]> {
+        if n > self.bytes.len() {
+            return Err(envelope_error(format!(
+                "a length of {n} with {} bytes left",
+                self.bytes.len()
+            )));
+        }
+        let (taken, rest) = self.bytes.split_at(n);
+        self.bytes = rest;
+        Ok(taken)
+    }
+
+    fn skip(&mut self, n: usize) -> Result<()> {
+        self.take(n).map(|_| ())
+    }
+
+    /// bincode 2's varint: one byte below 251, else 251, 252, or 253 then a big-endian u16, u32,
+    /// or u64.
+    fn varint(&mut self) -> Result<u64> {
+        let width = match self.take(1)?[0] {
+            b @ 0..=250 => return Ok(b as u64),
+            251 => 2,
+            252 => 4,
+            253 => 8,
+            b => return Err(envelope_error(format!("varint tag {b}"))),
+        };
+        Ok(self
+            .take(width)?
+            .iter()
+            .fold(0u64, |v, b| (v << 8) | *b as u64))
+    }
+
+    /// A byte string's length, which must fit in the bytes left.
+    fn len(&mut self) -> Result<usize> {
+        let n = self.varint()?;
+        if n > self.bytes.len() as u64 {
+            return Err(envelope_error(format!(
+                "a length of {n} with {} bytes left",
+                self.bytes.len()
+            )));
+        }
+        Ok(n as usize)
+    }
+}
+
+/// The proof envelope, refusing trailing bytes. Only an envelope [`scan_envelope`] passes is
+/// decoded, so grovedb's own decoding of the same bytes is bounded too.
+fn decode_envelope(proof: &[u8]) -> Result<GroveDBProofV0> {
+    scan_envelope(proof)?;
     let config = bincode2::config::standard()
         .with_big_endian()
-        .with_no_limit();
+        .with_limit::<ENVELOPE_DECODE_LIMIT>();
     let (envelope, used): (GroveDBProof, usize) =
-        bincode2::decode_from_slice(proof, config).map_err(|e| fail(e.to_string()))?;
+        bincode2::decode_from_slice(proof, config).map_err(envelope_error)?;
     if used != proof.len() {
-        return Err(fail(format!("{} trailing bytes", proof.len() - used)));
+        return Err(envelope_error(format!(
+            "{} trailing bytes",
+            proof.len() - used
+        )));
     }
-    Ok(envelope)
+    let GroveDBProof::V0(v0) = envelope;
+    Ok(v0)
+}
+
+/// A merk node's value as the GroveDB element it encodes, decoded within the value's own size
+/// bound. grovedb decodes the values it reads with no limit, so a value that claims more than
+/// it holds is refused here before grovedb sees it.
+fn decode_element(value: &[u8]) -> Result<Element> {
+    if value.len() > MAX_ELEMENT_BYTES {
+        return Err(WillowError::ProofVerificationFailed(format!(
+            "GroveDB layer: a node value of {} bytes",
+            value.len()
+        )));
+    }
+    let config = bincode2::config::standard()
+        .with_big_endian()
+        .with_limit::<MAX_ELEMENT_BYTES>();
+    bincode2::decode_from_slice::<Element, _>(value, config)
+        .map(|(element, _)| element)
+        .map_err(|e| {
+            WillowError::ProofVerificationFailed(format!(
+                "GroveDB layer: a node value that is not an element: {e}"
+            ))
+        })
 }
 
 /// One layer's merk ops, refusing bytes that don't decode.
@@ -94,7 +275,8 @@ fn layer_ops(layer: &LayerProof) -> Result<Vec<Op>> {
         .map_err(|e| WillowError::ProofVerificationFailed(format!("GroveDB layer: {e}")))
 }
 
-/// Refuse a layer whose ops attach a child to an opaque `Hash` node, or don't build one tree.
+/// Refuse a layer whose ops attach a child to an opaque `Hash` node, or don't build one tree,
+/// or carry a value that doesn't decode as an element within its size.
 fn check_ops(ops: &[Op]) -> Result<()> {
     let fail = |m: &str| {
         Err(WillowError::ProofVerificationFailed(format!(
@@ -105,7 +287,18 @@ fn check_ops(ops: &[Op]) -> Result<()> {
     let mut stack: Vec<bool> = Vec::new();
     for op in ops {
         match op {
-            Op::Push(node) | Op::PushInverted(node) => stack.push(matches!(node, Node::Hash(_))),
+            Op::Push(node) | Op::PushInverted(node) => {
+                match node {
+                    Node::KV(_, value)
+                    | Node::KVValueHash(_, value, _)
+                    | Node::KVValueHashFeatureType(_, value, ..)
+                    | Node::KVRefValueHash(_, value, _) => {
+                        decode_element(value)?;
+                    }
+                    Node::Hash(_) | Node::KVHash(_) | Node::KVDigest(..) => {}
+                }
+                stack.push(matches!(node, Node::Hash(_)))
+            }
             // Parent ops pop the parent first; Child ops pop the child first.
             Op::Parent | Op::ParentInverted => {
                 let (Some(parent), Some(_child)) = (stack.pop(), stack.pop()) else {
@@ -135,22 +328,30 @@ fn check_ops(ops: &[Op]) -> Result<()> {
 
 /// Refuse a proof any of whose layers attaches a child to an opaque `Hash` node (which
 /// grovedb-merk 3.1.0 accepts: the forged subtree still hashes to the real root), or whose ops
-/// don't decode or don't build exactly one tree.
+/// don't decode or don't build exactly one tree, or carry a value that isn't an element within
+/// its size (which grovedb would decode with no limit).
 pub fn check_layers(proof: &[u8]) -> Result<()> {
-    fn walk(layer: &LayerProof) -> Result<()> {
+    check_all_layers(&decode_envelope(proof)?)
+}
+
+fn check_all_layers(v0: &GroveDBProofV0) -> Result<()> {
+    let mut layers = vec![&v0.root_layer];
+    while let Some(layer) = layers.pop() {
         check_ops(&layer_ops(layer)?)?;
-        layer.lower_layers.values().try_for_each(walk)
+        layers.extend(layer.lower_layers.values());
     }
-    let GroveDBProof::V0(v0) = decode_envelope(proof)?;
-    walk(&v0.root_layer)
+    Ok(())
 }
 
 /// Verify that `proof` proves an Item at `key` in the subtree at `path`, and return the root it
 /// computes and the item's bytes. Nothing else passes: the proof must descend exactly `path`
-/// ([`check_envelope`]), keep its opaque nodes childless ([`check_layers`]), carry the key's
-/// element as one `KV` node (whose value its root binds), and verify under grovedb to exactly
-/// that one Item at `path` and `key`. A proof that proves the key absent, a tree at the key, or
-/// only a root hash (a lone `Push(Hash(root))`) is refused.
+/// ([`check_envelope`]), keep its opaque nodes childless and its values elements within their
+/// size ([`check_layers`]), carry the key's element as one `KV` node (whose value its root
+/// binds), and verify under grovedb to exactly that one Item at `path` and `key`. A proof that
+/// proves the key absent, a tree at the key, or only a root hash (a lone `Push(Hash(root))`) is
+/// refused. So is an element of exactly 63 bytes (an Item with a 60-byte value and no flags),
+/// whose `KV` node a proof can't tell from a subtree's or a reference's, except in a subgrove's
+/// data tree (`[subgroves, <subgrove id>, data]`), which holds only Items.
 ///
 /// The root is the proof's own: the caller compares it with a root it trusts.
 pub fn verify_item_at_path(
@@ -162,15 +363,11 @@ pub fn verify_item_at_path(
     if proof.is_empty() {
         return Err(fail("empty proof".into()));
     }
-    check_envelope(proof, path)?;
-    check_layers(proof)?;
+    let v0 = decode_envelope(proof)?;
+    let layer = layer_at_path(&v0, path)?;
+    check_all_layers(&v0)?;
 
     // The layer at `path` carries the key's element in a form the root binds.
-    let GroveDBProof::V0(v0) = decode_envelope(proof)?;
-    let mut layer = &v0.root_layer;
-    for segment in path {
-        layer = &layer.lower_layers[segment];
-    }
     let mut carried = None;
     for op in layer_ops(layer)? {
         let (Op::Push(node) | Op::PushInverted(node)) = op else {
@@ -216,7 +413,7 @@ pub fn verify_item_at_path(
             "the proof proves an item at another path or key".into(),
         ));
     }
-    match Element::deserialize(&value, version) {
+    match decode_element(&value) {
         Ok(Element::Item(carried_bytes, _)) if &carried_bytes == bytes => Ok((root, bytes.clone())),
         _ => Err(fail(
             "the item grovedb returns is not the one the proof's root binds".into(),
@@ -475,7 +672,7 @@ mod tests {
         let mut lone = vec![0x00, 0x21, 0x01];
         lone.extend_from_slice(&f.root);
         lone.extend_from_slice(&[0x00, 0x01]);
-        let GroveDBProof::V0(v0) = decode_envelope(&lone).unwrap();
+        let v0 = decode_envelope(&lone).unwrap();
         assert_eq!(
             layer_ops(&v0.root_layer).unwrap(),
             vec![Op::Push(Node::Hash(f.root))]
@@ -565,5 +762,273 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("below the query path"), "{err}");
+    }
+}
+
+/// Proofs built to crash a decoder that trusts their lengths or nesting, through every public
+/// verifier that takes a proof.
+#[cfg(all(test, feature = "verifiable-rpc", not(feature = "no-light-client")))]
+mod hostile_proofs {
+    use super::test_proofs::{encode_ops, item_proof};
+    use super::*;
+    use crate::light_client::{LightClient, LightClientConfig};
+    use crate::proof::ProofVerifier;
+    use crate::types::SignatureAlgorithm;
+    use crate::WillowClient;
+    use serde_json::json;
+    use std::time::Duration;
+    use willow_types::verifiable_rpc::VerifiableRpcResponse;
+    use wiremock::matchers::{method, path as url_path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    const CASE: &str = "WILLOW_HOSTILE_PROOF_CASE";
+    const SG: &str = "sg-1";
+    const KEY: &[u8] = b"doc1";
+
+    /// A V0 envelope whose root layer's ops claim `len` bytes and hold none.
+    fn allocation(len: u64) -> Vec<u8> {
+        [&[0x00, 0xFD][..], &len.to_be_bytes()].concat()
+    }
+
+    /// A well-formed V0 envelope whose layers nest `depth` deep, each the one lower layer of the
+    /// one above it, under an empty key.
+    fn nesting(depth: usize) -> Vec<u8> {
+        let mut proof = vec![0x00];
+        for _ in 0..depth {
+            proof.extend_from_slice(&[0x00, 0x01, 0x00]);
+        }
+        proof.extend_from_slice(&[0x00, 0x00, 0x01]);
+        proof
+    }
+
+    /// A well-formed proof of KEY at `path` whose leaf `KV` node's value is an Item claiming
+    /// `len` bytes and holding none.
+    fn element(path: &[Vec<u8>], len: u64) -> Vec<u8> {
+        let (honest, _) = item_proof(path, KEY, b"{}");
+        let config = bincode2::config::standard()
+            .with_big_endian()
+            .with_no_limit();
+        let (GroveDBProof::V0(mut v0), _): (GroveDBProof, usize) =
+            bincode2::decode_from_slice(&honest, config).unwrap();
+        let mut layer = &mut v0.root_layer;
+        for segment in path {
+            layer = layer.lower_layers.get_mut(segment).unwrap();
+        }
+        let value = [&[0x00, 0xFD][..], &len.to_be_bytes()].concat();
+        layer.merk_proof = encode_ops(&[Op::Push(Node::KV(KEY.to_vec(), value))]);
+        bincode2::encode_to_vec(GroveDBProof::V0(v0), config).unwrap()
+    }
+
+    fn entity_path() -> Vec<Vec<u8>> {
+        vec![
+            b"subgroves".to_vec(),
+            SG.as_bytes().to_vec(),
+            b"indexed".to_vec(),
+            b"Supply".to_vec(),
+        ]
+    }
+
+    fn payload(name: &str, path: &[Vec<u8>]) -> Vec<u8> {
+        match name {
+            // Claims that fail to allocate at once, so the unfixed decoder aborts without
+            // touching memory.
+            "alloc" => allocation(1 << 62),
+            "element" => element(path, 1 << 62),
+            // The reviewed payloads: a 2^40-byte claim.
+            "alloc-2^40" => allocation(1 << 40),
+            "element-2^40" => element(path, 1 << 40),
+            "nest" => nesting(200_000),
+            other => panic!("no payload {other}"),
+        }
+    }
+
+    /// Serve `proof` through `call`, one of the public verifiers.
+    async fn run(name: &str, call: &str) -> Result<()> {
+        match call {
+            "proof_verifier" => {
+                let path = entity_path();
+                let proof = payload(name, &path);
+                ProofVerifier::verify_item_at_path(&hex::encode(proof), &path, KEY, b"{}")
+                    .map(|_| ())
+            }
+            "light_client" => {
+                let path = entity_path();
+                let proof = payload(name, &path);
+                let light_client = LightClient::new(
+                    LightClientConfig::builder("willow")
+                        .validator_endpoints(vec!["http://127.0.0.1:1".into()])
+                        .rpc_timeout(Duration::from_millis(200))
+                        .build(),
+                )?;
+                light_client
+                    .verify_item(&proof, &path, KEY, b"{}", 41)
+                    .await
+                    .map(|_| ())
+            }
+            "data_get" => {
+                let proof = payload(name, &crate::proof::subgrove_data_path(SG));
+                let server = MockServer::start().await;
+                Mock::given(method("GET"))
+                    .and(url_path("/data/sg-1/doc1"))
+                    .respond_with(
+                        ResponseTemplate::new(200)
+                            .set_body_json(json!({"success": true, "data": {}})),
+                    )
+                    .mount(&server)
+                    .await;
+                Mock::given(method("GET"))
+                    .and(url_path("/proof/sg-1/doc1"))
+                    .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                        "success": true,
+                        "data": {"proof": hex::encode(proof), "height": 41}
+                    })))
+                    .mount(&server)
+                    .await;
+                let client = WillowClient::builder()
+                    .api_url(&server.uri())
+                    .light_client_config(
+                        LightClientConfig::builder("willow")
+                            .validator_endpoints(vec![server.uri()])
+                            .rpc_timeout(Duration::from_millis(200))
+                            .build(),
+                    )
+                    .build()
+                    .await?;
+                client.set_identity_with_algorithm(
+                    "did:willow:a",
+                    &"03".repeat(32),
+                    "did:willow:a#key-1",
+                    SignatureAlgorithm::Ed25519,
+                );
+                client.data().get(SG, "doc1").await.map(|_| ())
+            }
+            "verifiable_rpc" => {
+                let proof = payload(name, &entity_path());
+                let response = VerifiableRpcResponse {
+                    subgrove_id: SG.into(),
+                    key: KEY.to_vec(),
+                    answer: b"{}".to_vec(),
+                    answer_exists: true,
+                    checkpoint_id: [0; 32],
+                    state_root: [0; 32],
+                    block_range: (1, 2),
+                    grovedb_proof: proof,
+                    gkr_proofs: vec![],
+                    completeness_proof: None,
+                    state_proofs: vec![],
+                    served_at_unix_secs: 1,
+                };
+                let server = MockServer::start().await;
+                Mock::given(method("GET"))
+                    .and(url_path(format!(
+                        "/verifiable-rpc/{SG}/{}",
+                        hex::encode(KEY)
+                    )))
+                    .respond_with(ResponseTemplate::new(200).set_body_json(&response))
+                    .mount(&server)
+                    .await;
+                let client = WillowClient::builder()
+                    .api_url(&server.uri())
+                    .indexer_url(&server.uri())
+                    .build()
+                    .await?;
+                client.verifiable_rpc().query(SG, KEY).await.map(|_| ())
+            }
+            other => panic!("no call {other}"),
+        }
+    }
+
+    const CALLS: [&str; 4] = [
+        "proof_verifier",
+        "light_client",
+        "data_get",
+        "verifiable_rpc",
+    ];
+
+    /// Run each case in a child process (this test binary, running [`one_case`]), so a case that
+    /// aborts the process (an allocation that fails, a stack overflow) fails this test with the
+    /// child's exit status rather than ending the test run.
+    fn run_cases(payloads: &[&str]) {
+        let exe = std::env::current_exe().unwrap();
+        let mut failures = vec![];
+        for payload in payloads {
+            for call in CALLS {
+                let case = format!("{payload}/{call}");
+                let out = std::process::Command::new(&exe)
+                    .args([
+                        "--exact",
+                        "grovedb_envelope::hostile_proofs::one_case",
+                        "--ignored",
+                        "--nocapture",
+                        "--test-threads=1",
+                    ])
+                    .env(CASE, &case)
+                    .output()
+                    .unwrap();
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                let ran = String::from_utf8_lossy(&out.stdout).contains("1 passed");
+                if !out.status.success() || !ran {
+                    let tail: Vec<&str> = stderr.lines().rev().take(2).collect();
+                    failures.push(format!(
+                        "{case}: {} ({})",
+                        out.status,
+                        tail.into_iter().rev().collect::<Vec<_>>().join(" | ")
+                    ));
+                }
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "hostile proofs not refused:\n{}",
+            failures.join("\n")
+        );
+    }
+
+    #[test]
+    fn hostile_proofs_are_refused_by_every_verifier_without_crashing() {
+        run_cases(&["alloc", "nest", "element"]);
+    }
+
+    #[test]
+    fn the_reviewed_two_to_the_forty_payloads_are_refused() {
+        run_cases(&["alloc-2^40", "element-2^40"]);
+    }
+
+    /// One case of the tests above, named by the environment; does nothing without it.
+    #[tokio::test]
+    #[ignore = "a case of the hostile-proof tests, which run it in a child process"]
+    async fn one_case() {
+        let Ok(case) = std::env::var(CASE) else {
+            return;
+        };
+        let (name, call) = case.split_once('/').unwrap();
+        let result = run(name, call).await;
+        assert!(
+            matches!(result, Err(WillowError::ProofVerificationFailed(_))),
+            "{case}: {result:?}"
+        );
+    }
+
+    #[test]
+    fn the_envelope_scan_bounds_nesting_layers_and_values() {
+        assert!(decode_envelope(&nesting(64)).is_ok());
+        let err = decode_envelope(&nesting(65)).err().unwrap().to_string();
+        assert!(err.contains("nest deeper"), "{err}");
+        // A root layer with 1024 lower layers is 1025 layers, one too many.
+        let mut wide = vec![0x00, 0x00, 0xFB];
+        wide.extend_from_slice(&1024u16.to_be_bytes());
+        for i in 0..1024u16 {
+            wide.push(0x02);
+            wide.extend_from_slice(&i.to_be_bytes());
+            wide.extend_from_slice(&[0x00, 0x00]);
+        }
+        wide.push(0x01);
+        let err = decode_envelope(&wide).err().unwrap().to_string();
+        assert!(err.contains("more than 1024 layers"), "{err}");
+        // A value that isn't an element within its size, anywhere in the proof.
+        let err = check_layers(&element(&entity_path(), 1 << 62))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("not an element"), "{err}");
     }
 }
