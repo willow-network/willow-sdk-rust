@@ -180,7 +180,7 @@ impl WillowIndexers {
 
         let resp = self.http_client.get(url).send().await?;
         let status = resp.status();
-        let text = resp.text().await?;
+        let text = crate::http_body::text(resp, crate::http_body::SMALL).await?;
         if !status.is_success() {
             return Err(WillowError::Http {
                 status: status.as_u16(),

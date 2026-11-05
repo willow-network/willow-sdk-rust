@@ -63,6 +63,9 @@ pub const MAX_LAYERS: usize = 1024;
 /// 1 MiB, about 90,000 nodes and some tens of MiB.
 pub const MAX_PROOF_BYTES: usize = 1 << 20;
 
+// The API's `/proof` answer carries a proof in hex, twice its length; its body cap holds that.
+const _: () = assert!(crate::http_body::PROOF >= 2 * MAX_PROOF_BYTES + (16 << 10));
+
 /// What bincode may claim while decoding an envelope that passed [`scan_envelope`]: the lengths
 /// of its byte strings (at most the envelope's size), and, for each map of lower layers still
 /// being read, its remaining entries' size.

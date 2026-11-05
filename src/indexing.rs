@@ -107,7 +107,7 @@ impl IndexingOperations {
 
         let http_resp = req_builder.send().await?;
         let status = http_resp.status();
-        let text = http_resp.text().await?;
+        let text = crate::http_body::text(http_resp, crate::http_body::LARGE).await?;
 
         if status.is_success() {
             if let Ok(direct) = serde_json::from_str::<GraphQLResponse>(&text) {
@@ -276,7 +276,7 @@ impl IndexingOperations {
 
         let resp = req.send().await?;
         let status = resp.status();
-        let text = resp.text().await?;
+        let text = crate::http_body::text(resp, crate::http_body::LARGE).await?;
         if !status.is_success() {
             return Err(WillowError::Http {
                 status: status.as_u16(),
@@ -312,7 +312,7 @@ impl IndexingOperations {
 
         let resp = req.send().await?;
         let status = resp.status();
-        let text = resp.text().await?;
+        let text = crate::http_body::text(resp, crate::http_body::LARGE).await?;
         if !status.is_success() {
             return Err(WillowError::Http {
                 status: status.as_u16(),

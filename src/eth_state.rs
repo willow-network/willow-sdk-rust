@@ -344,7 +344,7 @@ impl EthOperations {
 
         let resp = self.client.http_client.post(url).json(&body).send().await?;
         let status = resp.status();
-        let text = resp.text().await?;
+        let text = crate::http_body::text(resp, crate::http_body::LARGE).await?;
         if !status.is_success() {
             return Err(WillowError::Http {
                 status: status.as_u16(),
@@ -372,7 +372,7 @@ impl EthOperations {
 
         let resp = self.client.http_client.post(url).json(&body).send().await?;
         let status = resp.status();
-        let text = resp.text().await?;
+        let text = crate::http_body::text(resp, crate::http_body::LARGE).await?;
         if !status.is_success() {
             return Err(WillowError::Http {
                 status: status.as_u16(),

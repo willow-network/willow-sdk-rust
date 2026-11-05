@@ -762,15 +762,16 @@ impl LightClient {
             format!("{}/commit?height={}", endpoint, height)
         };
 
-        let commit_resp: serde_json::Value = self
+        let commit_resp = self
             .http_client
             .get(&commit_url)
             .send()
             .await
-            .map_err(|e| WillowError::Network(e.to_string()))?
-            .json()
-            .await
             .map_err(|e| WillowError::Network(e.to_string()))?;
+        let commit_resp: serde_json::Value =
+            crate::http_body::json(commit_resp, crate::http_body::SMALL)
+                .await
+                .map_err(|e| WillowError::Network(e.to_string()))?;
 
         // Fetch validators
         let actual_height = commit_resp["result"]["signed_header"]["header"]["height"]
@@ -779,15 +780,16 @@ impl LightClient {
             .unwrap_or(height);
 
         let validators_url = format!("{}/validators?height={}", endpoint, actual_height);
-        let validators_resp: serde_json::Value = self
+        let validators_resp = self
             .http_client
             .get(&validators_url)
             .send()
             .await
-            .map_err(|e| WillowError::Network(e.to_string()))?
-            .json()
-            .await
             .map_err(|e| WillowError::Network(e.to_string()))?;
+        let validators_resp: serde_json::Value =
+            crate::http_body::json(validators_resp, crate::http_body::SMALL)
+                .await
+                .map_err(|e| WillowError::Network(e.to_string()))?;
 
         // Parse into LightBlock
         self.parse_light_block(&commit_resp, &validators_resp)
@@ -862,7 +864,10 @@ impl LightClient {
             let url = format!("{}/block_results", endpoint.trim_end_matches('/'));
             match self.http_client.get(&url).send().await {
                 Ok(resp) => {
-                    if let Ok(json) = resp.json::<serde_json::Value>().await {
+                    if let Ok(json) =
+                        crate::http_body::json::<serde_json::Value>(resp, crate::http_body::LARGE)
+                            .await
+                    {
                         if let Some(hash_b64) = json
                             .get("result")
                             .and_then(|r| r.get("app_hash"))
@@ -972,13 +977,8 @@ impl LightClient {
     /// The latest height `endpoint`'s `/status` reports.
     async fn fetch_status_height(&self, endpoint: &str) -> Option<u64> {
         let url = format!("{}/status", endpoint.trim_end_matches('/'));
-        let body: serde_json::Value = self
-            .http_client
-            .get(&url)
-            .send()
-            .await
-            .ok()?
-            .json()
+        let resp = self.http_client.get(&url).send().await.ok()?;
+        let body: serde_json::Value = crate::http_body::json(resp, crate::http_body::SMALL)
             .await
             .ok()?;
         body["result"]["sync_info"]["latest_block_height"]
@@ -1057,13 +1057,8 @@ impl LightClient {
             endpoint.trim_end_matches('/'),
             height
         );
-        let body: serde_json::Value = self
-            .http_client
-            .get(&url)
-            .send()
-            .await
-            .ok()?
-            .json()
+        let resp = self.http_client.get(&url).send().await.ok()?;
+        let body: serde_json::Value = crate::http_body::json(resp, crate::http_body::SMALL)
             .await
             .ok()?;
         let header = &body["result"]["signed_header"]["header"];

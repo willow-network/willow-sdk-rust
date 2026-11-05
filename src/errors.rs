@@ -99,6 +99,14 @@ pub enum WillowError {
         message: String,
     },
 
+    /// An answer longer than the cap of its route ([`crate::http_body`]), refused once the SDK
+    /// had read `limit` bytes of it, before decoding any.
+    #[error("the answer is over the SDK's limit of {limit} bytes for its route")]
+    ResponseTooLarge {
+        /// The route's cap, in bytes.
+        limit: usize,
+    },
+
     /// Generic error with custom message
     #[error("{0}")]
     Custom(String),

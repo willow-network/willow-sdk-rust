@@ -188,6 +188,14 @@ impl DataOperations {
                          can't be checked against the chain's"
                     ))
                 })?;
+            let max_hex = 2 * crate::grovedb_envelope::MAX_PROOF_BYTES;
+            if proof_hex.len() > max_hex {
+                return Err(fail(format!(
+                    "the proof served for key {key:?} is {} hex characters; at most {max_hex} \
+                     are accepted",
+                    proof_hex.len()
+                )));
+            }
             let proof =
                 hex::decode(proof_hex).map_err(|e| fail(format!("Invalid proof hex: {e}")))?;
 
@@ -297,7 +305,7 @@ impl DataOperations {
         let http_resp = req.send().await?;
 
         let status = http_resp.status();
-        let text = http_resp.text().await?;
+        let text = crate::http_body::text(http_resp, crate::http_body::LARGE).await?;
 
         if status.is_success() {
             serde_json::from_str(&text).map_err(WillowError::Serialization)

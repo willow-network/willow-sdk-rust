@@ -155,7 +155,9 @@ impl FileOperations {
                 .map_err(|e| WillowError::Network(format!("Chunk upload failed: {}", e)))?;
 
             if !resp.status().is_success() {
-                let body = resp.text().await.unwrap_or_default();
+                let body = crate::http_body::text(resp, crate::http_body::SMALL)
+                    .await
+                    .unwrap_or_default();
                 return Err(WillowError::Network(format!(
                     "Chunk {} upload failed: {}",
                     i, body

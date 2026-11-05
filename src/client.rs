@@ -620,6 +620,8 @@ impl WillowClient {
                 .await
             {
                 Ok(result) => return Ok(result),
+                // Asking again would read as much again.
+                Err(e @ WillowError::ResponseTooLarge { .. }) => return Err(e),
                 Err(e) => {
                     last_error = Some(e);
                     if attempt < self.retry_config.max_attempts - 1 {
@@ -689,7 +691,7 @@ impl WillowClient {
         let status = response.status();
 
         // Parse response
-        let response_text = response.text().await?;
+        let response_text = crate::http_body::text(response, answer_limit(path)).await?;
 
         if status.is_success() {
             serde_json::from_str(&response_text).map_err(|e| WillowError::Serialization(e))
@@ -721,6 +723,17 @@ impl WillowClient {
                 })
             }
         }
+    }
+}
+
+/// The cap on the answer to an API request for `path` ([`crate::http_body`]): a proof's, a
+/// query's (whose size the request sets), or the small answers of every other route.
+fn answer_limit(path: &str) -> usize {
+    let path = path.split('?').next().unwrap_or(path);
+    match path.trim_start_matches('/').split('/').next() {
+        Some("proof") => crate::http_body::PROOF,
+        Some("query" | "historical" | "sql" | "graphql" | "a2a") => crate::http_body::LARGE,
+        _ => crate::http_body::SMALL,
     }
 }
 
@@ -1518,5 +1531,129 @@ mod tests {
         let builder = WillowClientBuilder::default();
         assert!(builder.api_url.is_none());
         assert_eq!(builder.timeout, Duration::from_secs(30));
+    }
+
+    /// A JSON answer of exactly `len` bytes.
+    fn answer_of(len: usize) -> String {
+        let pad = len - r#"{"data":""}"#.len();
+        format!(r#"{{"data":"{}"}}"#, "x".repeat(pad))
+    }
+
+    fn quick_retries() -> RetryConfig {
+        RetryConfig {
+            max_attempts: 3,
+            initial_delay: Duration::from_millis(1),
+            max_delay: Duration::from_millis(1),
+            exponential_base: 1.0,
+        }
+    }
+
+    /// An answer over its route's cap is refused, and not retried; one at the cap is read. A
+    /// route whose honest answers can be larger (a query) takes more.
+    #[tokio::test]
+    async fn an_answer_over_its_routes_cap_is_refused_without_a_retry() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let small = 4 << 20;
+        let proof = (2 << 20) + (64 << 10);
+        let cases = [
+            ("GET", "/health", small, true),
+            ("GET", "/state/root-hash", small + 1, false),
+            ("GET", "/proof/sg/k", proof, true),
+            ("GET", "/proof/sg/other", proof + 1, false),
+            ("POST", "/query/sg", small + 1, true),
+        ];
+        let server = MockServer::start().await;
+        for (verb, route, len, _) in cases {
+            Mock::given(method(verb))
+                .and(path(route))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_raw(answer_of(len).into_bytes(), "application/json"),
+                )
+                .mount(&server)
+                .await;
+        }
+        let client = WillowClient::builder()
+            .api_url(&server.uri())
+            .retry_config(quick_retries())
+            .build()
+            .await
+            .unwrap();
+        for (verb, route, len, read) in cases {
+            let body = (verb == "POST").then(|| serde_json::json!({}));
+            let result = client
+                .request::<serde_json::Value, _>(verb, route, body.as_ref(), false)
+                .await;
+            if read {
+                assert!(result.is_ok(), "{route} ({len} bytes): {result:?}");
+                continue;
+            }
+            let err = result.err().map(|e| e.to_string());
+            assert!(
+                err.as_deref()
+                    .is_some_and(|e| e.contains("over the SDK's limit")),
+                "{route} ({len} bytes): {err:?}"
+            );
+            let sent = server.received_requests().await.unwrap();
+            assert_eq!(
+                sent.iter().filter(|r| r.url.path() == route).count(),
+                1,
+                "{route} was retried"
+            );
+        }
+    }
+
+    /// A server on a local port that answers every request with `body` in 1 MiB chunks, with no
+    /// length (chunked transfer encoding).
+    async fn chunked_server(body: Vec<u8>) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                let body = body.clone();
+                tokio::spawn(async move {
+                    let mut request = [0u8; 8192];
+                    let _ = socket.read(&mut request).await;
+                    let head = "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\
+                                transfer-encoding: chunked\r\nconnection: close\r\n\r\n";
+                    if socket.write_all(head.as_bytes()).await.is_err() {
+                        return;
+                    }
+                    for chunk in body.chunks(1 << 20) {
+                        let framed =
+                            [format!("{:x}\r\n", chunk.len()).as_bytes(), chunk, b"\r\n"].concat();
+                        if socket.write_all(&framed).await.is_err() {
+                            return;
+                        }
+                    }
+                    let _ = socket.write_all(b"0\r\n\r\n").await;
+                });
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    /// A server that sends no length is cut off once its answer passes the cap.
+    #[tokio::test]
+    async fn an_answer_with_no_length_is_cut_off_at_the_cap() {
+        let url = chunked_server(answer_of((4 << 20) + 1).into_bytes()).await;
+        let client = WillowClient::builder()
+            .api_url(&url)
+            .retry_config(quick_retries())
+            .build()
+            .await
+            .unwrap();
+        let result = client
+            .request::<serde_json::Value, ()>("GET", "/health", None, false)
+            .await;
+        let err = result.err().map(|e| e.to_string());
+        assert!(
+            err.as_deref()
+                .is_some_and(|e| e.contains("over the SDK's limit")),
+            "{err:?}"
+        );
     }
 }

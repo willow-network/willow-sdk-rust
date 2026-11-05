@@ -197,9 +197,11 @@ impl ConsensusClient {
                 .send()
                 .await
                 .map_err(|e| WillowError::Network(format!("Failed to fetch nonce: {}", e)))?;
-            let body: serde_json::Value = resp.json().await.map_err(|e| {
-                WillowError::Network(format!("Failed to parse nonce response: {}", e))
-            })?;
+            let body: serde_json::Value = crate::http_body::json(resp, crate::http_body::SMALL)
+                .await
+                .map_err(|e| {
+                    WillowError::Network(format!("Failed to parse nonce response: {}", e))
+                })?;
             // Response format: {"success": true, "data": {"did": "...", "nonce": N}}
             return Ok(body
                 .get("data")
@@ -223,14 +225,14 @@ impl ConsensusClient {
             "method": "abci_query",
             "params": { "path": path, "data": "", "height": "0", "prove": false }
         });
-        let resp: serde_json::Value = self
+        let resp = self
             .http_client
             .post(&self.consensus_rpc_url)
             .json(&body)
             .send()
             .await
-            .map_err(|e| WillowError::Network(format!("abci_query {path}: {e}")))?
-            .json()
+            .map_err(|e| WillowError::Network(format!("abci_query {path}: {e}")))?;
+        let resp: serde_json::Value = crate::http_body::json(resp, crate::http_body::SMALL)
             .await
             .map_err(|e| WillowError::Network(format!("abci_query {path}: {e}")))?;
         let response = resp
@@ -413,7 +415,9 @@ impl ConsensusClient {
         if let Some(api_url) = self.api_url.as_ref() {
             let url = format!("{}/did/{}", api_url.trim_end_matches('/'), did);
             if let Ok(resp) = self.http_client.get(&url).send().await {
-                if let Ok(body) = resp.json::<serde_json::Value>().await {
+                if let Ok(body) =
+                    crate::http_body::json::<serde_json::Value>(resp, crate::http_body::SMALL).await
+                {
                     // Response format: {"success": true, "data": {<DidDocument>}}
                     if let Some(data) = body.get("data") {
                         if let Ok(doc) = serde_json::from_value::<DidDocument>(data.clone()) {
@@ -441,14 +445,14 @@ impl ConsensusClient {
                 "prove": false,
             }
         });
-        let resp: serde_json::Value = self
+        let resp = self
             .http_client
             .post(&self.consensus_rpc_url)
             .json(&body)
             .send()
             .await
-            .map_err(|e| WillowError::Network(format!("Failed to fetch DID document: {}", e)))?
-            .json()
+            .map_err(|e| WillowError::Network(format!("Failed to fetch DID document: {}", e)))?;
+        let resp: serde_json::Value = crate::http_body::json(resp, crate::http_body::SMALL)
             .await
             .map_err(|e| {
                 WillowError::Network(format!("Failed to parse DID document response: {}", e))
@@ -739,9 +743,9 @@ impl ConsensusClient {
             Err(e) if e.is_connect() || e.is_builder() => return Err(e.into()),
             Err(e) => return Ok(Submission::Unknown(e.into())),
         };
-        let response_text = match response.text().await {
+        let response_text = match crate::http_body::text(response, crate::http_body::SMALL).await {
             Ok(text) => text,
-            Err(e) => return Ok(Submission::Unknown(e.into())),
+            Err(e) => return Ok(Submission::Unknown(e)),
         };
         let rpc_response: CometBftResponse = match serde_json::from_str(&response_text) {
             Ok(r) => r,
@@ -826,7 +830,10 @@ impl ConsensusClient {
                 .send()
                 .await
             {
-                if let Ok(body) = response.json::<serde_json::Value>().await {
+                if let Ok(body) =
+                    crate::http_body::json::<serde_json::Value>(response, crate::http_body::TX)
+                        .await
+                {
                     if let Some(outcome) = Self::parse_tx_outcome(&body) {
                         return Ok(Some(outcome));
                     }
@@ -883,7 +890,9 @@ impl ConsensusClient {
                 .send()
                 .await
             {
-                if let Ok(response_text) = response.text().await {
+                if let Ok(response_text) =
+                    crate::http_body::text(response, crate::http_body::TX).await
+                {
                     if let Ok(rpc_response) =
                         serde_json::from_str::<serde_json::Value>(&response_text)
                     {
@@ -1185,7 +1194,7 @@ impl ConsensusClient {
             .send()
             .await?;
 
-        let response_text = response.text().await?;
+        let response_text = crate::http_body::text(response, crate::http_body::TX).await?;
         let rpc_response: serde_json::Value =
             serde_json::from_str(&response_text).map_err(|e| WillowError::Serialization(e))?;
 

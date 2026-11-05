@@ -224,10 +224,7 @@ impl Erc8004Client {
             .await
             .map_err(|e| WillowError::Network(format!("Request failed: {}", e)))?;
 
-        let body: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| WillowError::Network(format!("Failed to parse response: {}", e)))?;
+        let body = read_json(resp).await?;
 
         if let Some(data) = body.get("data") {
             serde_json::from_value(data.clone())
@@ -252,10 +249,7 @@ impl Erc8004Client {
             .await
             .map_err(|e| WillowError::Network(format!("Request failed: {}", e)))?;
 
-        let body: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| WillowError::Network(format!("Failed to parse response: {}", e)))?;
+        let body = read_json(resp).await?;
 
         if let Some(data) = body.get("data") {
             serde_json::from_value(data.clone())
@@ -284,10 +278,7 @@ impl Erc8004Client {
             return Ok(None);
         }
 
-        let body: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| WillowError::Network(format!("Failed to parse response: {}", e)))?;
+        let body = read_json(resp).await?;
 
         Ok(body
             .get("data")
@@ -310,10 +301,7 @@ impl Erc8004Client {
             return Ok(None);
         }
 
-        let body: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| WillowError::Network(format!("Failed to parse response: {}", e)))?;
+        let body = read_json(resp).await?;
 
         Ok(body
             .get("data")
@@ -336,10 +324,7 @@ impl Erc8004Client {
             return Ok(None);
         }
 
-        let body: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| WillowError::Network(format!("Failed to parse response: {}", e)))?;
+        let body = read_json(resp).await?;
 
         if let Some(data) = body.get("data") {
             let reg = serde_json::from_value(data.clone()).map_err(|e| {
@@ -361,10 +346,7 @@ impl Erc8004Client {
             .await
             .map_err(|e| WillowError::Network(format!("Request failed: {}", e)))?;
 
-        let body: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| WillowError::Network(format!("Failed to parse response: {}", e)))?;
+        let body = read_json(resp).await?;
 
         if let Some(data) = body.get("data") {
             serde_json::from_value(data.clone())
@@ -396,10 +378,7 @@ impl Erc8004Client {
             .await
             .map_err(|e| WillowError::Network(format!("Request failed: {}", e)))?;
 
-        let body: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| WillowError::Network(format!("Failed to parse response: {}", e)))?;
+        let body = read_json(resp).await?;
 
         if let Some(data) = body.get("data") {
             serde_json::from_value(data.clone())
@@ -440,10 +419,7 @@ impl Erc8004Client {
             .await
             .map_err(|e| WillowError::Network(format!("Request failed: {}", e)))?;
 
-        let body: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| WillowError::Network(format!("Failed to parse response: {}", e)))?;
+        let body = read_json(resp).await?;
 
         if let Some(data) = body.get("data") {
             serde_json::from_value(data.clone()).map_err(|e| {
@@ -477,10 +453,7 @@ impl Erc8004Client {
             .await
             .map_err(|e| WillowError::Network(format!("Request failed: {}", e)))?;
 
-        let body: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| WillowError::Network(format!("Failed to parse response: {}", e)))?;
+        let body = read_json(resp).await?;
 
         if let Some(data) = body.get("data") {
             serde_json::from_value(data.clone()).map_err(|e| {
@@ -495,4 +468,17 @@ impl Erc8004Client {
             ))
         }
     }
+}
+
+/// `resp`'s JSON body, read under the small-answer cap ([`crate::http_body::SMALL`]); a body
+/// that doesn't parse is a network error.
+async fn read_json(resp: reqwest::Response) -> Result<serde_json::Value> {
+    crate::http_body::json(resp, crate::http_body::SMALL)
+        .await
+        .map_err(|e| match e {
+            WillowError::Serialization(e) => {
+                WillowError::Network(format!("Failed to parse response: {}", e))
+            }
+            e => e,
+        })
 }

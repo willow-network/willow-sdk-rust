@@ -75,6 +75,13 @@ impl ProofVerifier {
         key: &[u8],
         value: &[u8],
     ) -> Result<[u8; 32]> {
+        let max_hex = 2 * crate::grovedb_envelope::MAX_PROOF_BYTES;
+        if proof_hex.len() > max_hex {
+            return Err(WillowError::ProofVerificationFailed(format!(
+                "a proof of {} hex characters; at most {max_hex} are accepted",
+                proof_hex.len()
+            )));
+        }
         let proof = Self::parse_proof_hex(proof_hex)?;
         let (root, item) = crate::grovedb_envelope::verify_item_at_path(&proof, path, key)?;
         if item != value {

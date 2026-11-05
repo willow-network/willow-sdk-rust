@@ -182,7 +182,7 @@ impl VerifiableRpcOperations {
 
         let resp = self.client.http_client.get(url).send().await?;
         let status = resp.status();
-        let body = resp.text().await?;
+        let body = crate::http_body::text(resp, crate::http_body::VERIFIABLE_RPC).await?;
 
         if !status.is_success() {
             return Err(WillowError::Http {

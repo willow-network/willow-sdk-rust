@@ -214,7 +214,7 @@ impl WillowClient {
         ))?;
         let response = self.http_client.get(url).send().await?;
         let status = response.status();
-        let bytes = response.bytes().await?;
+        let bytes = crate::http_body::read(response, crate::http_body::LARGE).await?;
         if !status.is_success() {
             return Err(WillowError::NotFound(format!(
                 "indexer returned {status} for {subgrove_id} block {block_number} matched-logs"

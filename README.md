@@ -493,6 +493,10 @@ let client = WillowClient::builder()
 
 Every request the SDK sends times out: after the builder's `timeout` (default 30 s, `client::DEFAULT_TIMEOUT`) for the API, the consensus RPC, and storage nodes, and after the light client's `rpc_timeout` for its validator endpoints. A `ConsensusClient` made with `ConsensusClient::new` uses the default; `with_http_client` gives it your own `reqwest::Client`.
 
+### Answer size limits
+
+The SDK reads each answer a piece at a time and refuses it once it passes the cap of its route (`WillowError::ResponseTooLarge`), before decoding any of it, so a server can't make it hold an answer of any size; such an answer is not retried. The caps are in `willow_sdk::http_body`: 4 MiB for answers of fixed shape or short lists (`SMALL`; the chain's `max_tx_bytes`), a little over 2 MiB for a `/proof` (`PROOF`: a proof of at most 1 MiB, in hex), 2 MiB for a file chunk (`CHUNK`, what a storage node stores; a download also refuses a chunk longer than the manifest's chunk size), 12 MiB for CometBFT's `tx` (`TX`), 20 MiB for a verifiable-RPC answer (`VERIFIABLE_RPC`), and 64 MiB for answers whose size the request sets (`LARGE`: queries, GraphQL, SQL, historical queries, matched logs, Ethereum state reads). A cap bounds the bytes read, not the memory decoding them takes, which can be a multiple of it.
+
 ## Validators
 
 ```rust
