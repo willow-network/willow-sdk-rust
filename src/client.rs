@@ -36,6 +36,25 @@ pub(crate) fn http_client_with_timeout(timeout: Duration) -> Client {
         .expect("an HTTP client with a timeout and default settings")
 }
 
+/// The CometBFT RPC of a local node, beside an API on a loopback host at port 3031: the same
+/// URL at port 26657. `None` for any other API URL.
+#[cfg(not(feature = "no-light-client"))]
+fn local_consensus_rpc(api: &Url) -> Option<String> {
+    let loopback = match api.host()? {
+        url::Host::Domain(domain) => domain.eq_ignore_ascii_case("localhost"),
+        url::Host::Ipv4(ip) => ip == std::net::Ipv4Addr::LOCALHOST,
+        url::Host::Ipv6(ip) => ip == std::net::Ipv6Addr::LOCALHOST,
+    };
+    if !loopback || api.port() != Some(3031) {
+        return None;
+    }
+    let mut rpc = api.clone();
+    rpc.set_port(Some(26657)).ok()?;
+    rpc.set_path("");
+    rpc.set_query(None);
+    Some(rpc.as_str().trim_end_matches('/').to_string())
+}
+
 /// Identity for per-request signing
 #[derive(Clone, Debug)]
 struct ClientIdentity {
@@ -321,12 +340,17 @@ impl WillowClient {
     /// creates and initializes one using trust-on-first-use. The initialization
     /// is thread-safe and happens only once.
     ///
-    /// The light client created here reads headers from the consensus URL when one is set,
-    /// else from the API URL with port 3031 replaced by 26657. An API URL without that port and
-    /// no consensus URL is a configuration error: the roots reads are checked against must come
-    /// from the chain's CometBFT RPC, not from the API that serves the data. Headers are taken as
-    /// the endpoint serves them, trusting the first (see [`crate::light_client`]); configure
-    /// `light_client_config` with the endpoints you trust.
+    /// The light client created here reads headers from the consensus node the caller
+    /// configures: the consensus URL. Only for an API on a loopback host (`localhost`,
+    /// `127.0.0.1`, `::1`) at port 3031, as a local node runs, does it read them from the same
+    /// host at port 26657 without one. Any other API URL with no consensus URL is a
+    /// configuration error: the root a read is checked against comes from a node the caller
+    /// chose, not from the API that served the data.
+    ///
+    /// Verified reads check the proof against the app hash that consensus node reports, and the
+    /// SDK trusts that node: it does not verify validator signatures over CometBFT's canonical
+    /// vote bytes (see [`crate::light_client`]). Configure `light_client_config` with the
+    /// endpoints you trust.
     ///
     /// Returns `None` if `no-light-client` feature is enabled.
     #[cfg(not(feature = "no-light-client"))]
@@ -342,20 +366,15 @@ impl WillowClient {
             .get_or_try_init(|| async {
                 let rpc_endpoint = match self.consensus_opt() {
                     Some(consensus) => consensus.rpc_url().trim_end_matches('/').to_string(),
-                    None => {
-                        let api = self.base_url.as_str().trim_end_matches('/').to_string();
-                        // Typically :3031 -> :26657.
-                        let derived = api.replace(":3031", ":26657");
-                        if derived == api {
-                            return Err(WillowError::Config(
-                                "a verified read checks its proof against a CometBFT header, which \
-                                 must come from the chain's RPC rather than the API: set \
-                                 consensus_url or light_client_config on the builder"
-                                    .to_string(),
-                            ));
-                        }
-                        derived
-                    }
+                    None => local_consensus_rpc(&self.base_url).ok_or_else(|| {
+                        WillowError::Config(
+                            "a verified read checks its proof against the app hash a consensus \
+                             node reports, and the SDK trusts that node: set consensus_url or \
+                             light_client_config on the builder (only an API on a loopback host \
+                             at port 3031 implies its local node at port 26657)"
+                                .to_string(),
+                        )
+                    })?,
                 };
 
                 let config = LightClientConfig::builder("willow-chain")
@@ -917,6 +936,35 @@ impl WillowClientBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Without a consensus URL, only an API on a loopback host at port 3031 implies the node
+    /// whose app hash verified reads trust (the same host at port 26657).
+    #[cfg(not(feature = "no-light-client"))]
+    #[tokio::test]
+    async fn only_a_loopback_api_implies_its_consensus_node() {
+        for api in [
+            "http://api.example.invalid:3031",
+            "https://api.example.invalid",
+        ] {
+            let client = WillowClient::new(api).await.unwrap();
+            let err = client.get_or_create_light_client().await.err().unwrap();
+            assert!(matches!(err, WillowError::Config(_)), "{api}: {err}");
+        }
+        for (api, rpc) in [
+            ("http://localhost:3031", Some("http://localhost:26657")),
+            ("http://127.0.0.1:3031/", Some("http://127.0.0.1:26657")),
+            ("http://[::1]:3031", Some("http://[::1]:26657")),
+            ("http://localhost:8080", None),
+            ("http://10.0.0.5:3031", None),
+            ("https://api.willow.tech", None),
+        ] {
+            assert_eq!(
+                local_consensus_rpc(&Url::parse(api).unwrap()).as_deref(),
+                rpc,
+                "{api}"
+            );
+        }
+    }
 
     // ========================================================================
     // Client Creation Tests

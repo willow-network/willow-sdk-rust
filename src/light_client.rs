@@ -19,12 +19,15 @@
 //! The light client gives the roots reads are checked against, and checks proofs against them:
 //!
 //! 1. **Headers** (CometBFT RPC)
-//!    - Fetches block headers from its validator endpoints, never from the API that serves data
+//!    - Fetches block headers from its validator endpoints: the consensus nodes the caller
+//!      configures, not the API that serves data
+//!      ([`crate::WillowClient::get_or_create_light_client`])
 //!    - `app_hash` in the header of block `H + 1` is the GroveDB root of the state after block
 //!      `H` ([`LightClient::app_hash_after`])
-//!    - Its commit-signature check does not yet follow CometBFT's canonical vote encoding, so a
-//!      header is trusted as its endpoints serve it (trust on first use), not by 2/3+ of the
-//!      validators' signatures
+//!    - Verified reads check the proof against the app hash that a consensus node the caller
+//!      configures reports, and the SDK trusts that node: it does not verify validator
+//!      signatures over CometBFT's canonical vote bytes, so a header is trusted as its
+//!      endpoints serve it (trust on first use), not by 2/3+ of the validators' signatures
 //!
 //! 2. **Proofs** (GroveDB)
 //!    - Verifies that a proof proves an Item at a path and key with a given value, and that its
