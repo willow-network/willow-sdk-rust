@@ -107,7 +107,7 @@ A read is presented as verified only when a proof binds that exact data at the G
 - **`data().get(subgrove, key)`** reads the value and its proof, and returns the value only when the proof proves an Item at `key` in the subgrove's data tree (`[subgroves, subgrove, data]`) whose bytes are the value served, and the root it computes is the `app_hash` of the CometBFT header at the proof's height + 1 (the state after block `H` is committed in block `H + 1`'s header). The header comes from the light client's validator endpoints, over the CometBFT RPC: those of `light_client_config` when set, else the consensus URL. Only an API on a loopback host (`localhost`, `127.0.0.1`, `::1`) at port 3031, as a local node runs, implies its node at port 26657 without one; any other API URL with no consensus URL is a configuration error (`WillowError::Config`). A missing proof or height, another value, another root, or no header is an error; nothing is returned unverified. A key the API reports missing is `NotFound`, unproven.
 - **Recency**: the API chooses the height it proves at, so `data().get` refuses a state more than `max_proof_lag_blocks` (default 20, on `LightClientConfig`) behind the chain's latest height (the endpoints' CometBFT `/status`), unless a header within that lag still carries the same root (a block without transactions leaves the app hash unchanged, so an idle chain's old state is still its state); it refuses a height that far ahead too. Both are `WillowError::ProofHeightOutOfRange`, distinct from a forged proof's `ProofVerificationFailed`. `data().get_verified` returns the value with the height of the header found to carry its root (`VerifiedValue { value, height }`): the value is the chain's state as of that header, not necessarily as of now. The light client's `verify_item` checks a proof at the height you pass, however old; `LightClient::verify_root_after` applies the recency rule.
 - **Proof checks** refuse what grovedb 3.1.0's verifier alone accepts: a proof that doesn't descend the asked path, children attached under an opaque `Hash` node (a forged subtree that still hashes to the real root), an item whose value its root doesn't bind (a `KVValueHash` node carries only the value's hash into the root), and a lone root hash (`Push(Hash(root))`). They also refuse an element of exactly 63 bytes (an Item with a 60-byte value and no flags) outside a subgrove's data tree, since a proof can't tell its `KV` node from a subtree's or a reference's; a subgrove's data tree (`[subgroves, <id>, data]`), which holds only Items, accepts it. Before grovedb (whose 3.1.0 decoder trusts the lengths it reads) sees a proof, the SDK bounds-checks its encoding without recursion (every length within the bytes left, at most 64 levels of nesting and 1024 layers, at most 1 MiB, ample for a proof of one key) and decodes every node value as an element within its 64 KiB bound, so a hostile proof is refused rather than crashing the process. It checks a layer's ops one at a time as it decodes them, never holding them all. `ProofVerifier::verify_item_at_path` and `verify_item_against_root`, and the light client's `verify_item`, check a proof for an Item at a path and key with a given value. The path-less `verify_query_proof`, `verify_item_proof`, `verify_against_root`, and the light client's `verify_proof` are deprecated and refuse.
-- **Trust model**: verified reads check the proof against the app hash that a consensus node the caller configures reports, and the SDK trusts that node: it does not verify validator signatures over CometBFT's canonical vote bytes. The light client takes headers as its endpoints serve them, trusting the first, so it does not check 2/3+ of the validators' signatures. Configure endpoints you trust.
+- **Trust model**: verified reads check the proof against the app hash that a consensus node the caller configures reports, and the SDK trusts that node: it does not verify validator signatures over CometBFT's canonical vote bytes. The light client takes headers as its endpoints serve them, trusting the first, so it does not check 2/3+ of the validators' signatures, and `LightClientConfig::trust_threshold` is not applied to verified reads. Configure endpoints you trust.
 - **Unverified**: `data().query` and `query_historical_verified` refuse (`WillowError::Unsupported`), since the API serves a query's documents without their keys and a historical answer without the indexer's proof, and the checkpoint root comes from the same API. `query_unverified`, `query_historical`, `sql`, and GraphQL return their answers unverified, as do `get_root_hash` and `get_root_hash_local` (the API's word).
 - **Verifiable RPC** (`verifiable_rpc().query`) binds the indexer's answer to its GroveDB proof at the key in one entity tree (the one the proof descends, which the indexer chooses), and in strict mode checks that the GKR proofs verify and chain to the response's `state_root`, for the circuit (`verification_key_hash`) and configuration hash the response names: neither is checked against the subgrove's registration, so this doesn't prove the subgrove's own transformation. And `state_root` is the indexer's own, from the same response: the answer is unverified against the chain (`state_root_anchored` is `false`). An absent answer is refused in the checking modes.
 - **Ethereum state reads** (`eth()`) require the proof to be of the account, slots, and block asked, and walk it against the `state_root` in the same response. The SDK has no Ethereum light client, so check `state_root` against a header you trust; `eth_call`'s return data is not proven.
@@ -116,23 +116,18 @@ A read is presented as verified only when a proof binds that exact data at the G
 
 ## Light Client Configuration
 
-The validator endpoints verified reads take headers from:
+The consensus nodes verified reads take headers from:
 
 ```rust
 use willow_sdk::{WillowClient, LightClientConfig};
-use std::time::Duration;
 
 let light_client_config = LightClientConfig::builder("willow-mainnet")
     .validator_endpoints(vec![
         "http://validator1:26657".to_string(),
         "http://validator2:26657".to_string(),
-        "http://validator3:26657".to_string(),
     ])
-    .trust_threshold(2, 3)  // 2/3+ validator signatures required
-    .trusting_period(Duration::from_secs(86400))  // 24 hours
-    .max_clock_drift(Duration::from_secs(10))
+    .min_validators_for_consensus(1)  // Endpoints that must report the latest height
     .max_proof_lag_blocks(20)  // Refuse a verified read's state older than this
-    .auto_sync(true)  // Sync to latest on creation
     .build();
 
 let client = WillowClient::builder()
@@ -145,9 +140,13 @@ let client = WillowClient::builder()
 let data = client.data().get("dataset_id", "key").await?;
 ```
 
+The SDK trusts these endpoints. A verified read takes each header it needs from the first endpoint that serves it, and doesn't verify validator signatures, so list only consensus nodes you trust. Each `data().get` also asks every endpoint for the chain's latest height (CometBFT `/status`), to check the proof's recency, and needs at least `min_validators_for_consensus` of them (default 1) to answer: with that set to 2 and only one node running, every verified read fails.
+
+`trust_threshold`, `trusting_period`, and `max_clock_drift` are read only by the header check of `LightClient::sync_to_latest`, which verified reads don't use: `trust_threshold` is not applied to verified reads. `auto_sync` applies only to `LightClient::new_async`; the client builder never syncs.
+
 ### Persisting Light Client State
 
-Save and restore verified headers across sessions:
+Save and restore the headers the light client holds across sessions. They are as their endpoints served them, not verified against validator signatures, and a verified read uses a header it holds before asking an endpoint, so import only state you saved yourself:
 
 ```rust
 // Export state before shutdown

@@ -26,9 +26,6 @@ async fn light_client_architecture_demo() {
     println!("            \"http://validator2:26657\".to_string(),");
     println!("            \"http://validator3:26657\".to_string(),");
     println!("        ],");
-    println!("        trust_threshold: (2, 3),  // Require 2/3 validator agreement");
-    println!("        trusting_period_secs: 86400,  // 1 day");
-    println!("        auto_sync: true,");
     println!("        ..Default::default()");
     println!("    }})");
     println!("    .build()");
@@ -36,21 +33,19 @@ async fn light_client_architecture_demo() {
     println!("```\n");
 
     println!("🔐 How It Works:");
-    println!("  1. Connects to multiple validator CometBFT endpoints");
-    println!("  2. Tracks block headers using the light client protocol");
-    println!("  3. Verifies all data proofs against independently verified headers");
-    println!("  4. Requires zero setup or syncing from developers\n");
+    println!("  1. Reads CometBFT headers from the consensus nodes you configure");
+    println!("  2. Checks a value's proof against the app hash in the header after its block");
+    println!("  3. Trusts those nodes: validator signatures are not verified\n");
 
     println!("✅ Benefits:");
-    println!("  • Trustless verification - no circular trust problem");
+    println!("  • The root comes from a consensus node you chose, not the API");
     println!("  • Zero infrastructure - embedded in SDK");
-    println!("  • Automatic by default - all operations verified");
+    println!("  • data().get is verified by default; queries are not");
     println!("  • Performance options - unverified methods available\n");
 
     println!("📊 Trust Model:");
     println!("  • Standard Client: Trusts the API server's root hash");
-    println!("  • Light Client: Verifies against multiple validators");
-    println!("  • Threshold: Configurable (e.g., 2/3 validators must agree)\n");
+    println!("  • Light Client: Trusts the consensus nodes you configure\n");
 
     // Create a standard client to show it works
     match WillowClient::new("http://localhost:3031").await {
@@ -71,9 +66,8 @@ async fn light_client_architecture_demo() {
 
     println!("\n🎯 Usage in Production:");
     println!("  1. Configure with trusted validator endpoints");
-    println!("  2. Set appropriate trust threshold (e.g., 2/3)");
-    println!("  3. All data operations automatically verified");
-    println!("  4. Use unverified methods only when performance critical\n");
+    println!("  2. Read values by key with data().get, which is verified");
+    println!("  3. Use unverified methods only when you trust the node\n");
 
     println!("✅ Test completed - Light client architecture demonstrated!");
 }

@@ -859,7 +859,8 @@ impl WillowClientBuilder {
         self
     }
 
-    /// Set the light client configuration for trustless verification.
+    /// Set the light client configuration: the consensus nodes verified reads take headers from,
+    /// which the SDK trusts (it doesn't verify validator signatures).
     ///
     /// Not available with `no-light-client` feature.
     #[cfg(not(feature = "no-light-client"))]

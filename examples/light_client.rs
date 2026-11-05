@@ -3,12 +3,11 @@
 //! This example demonstrates:
 //! - Configuring the light client's validator endpoints
 //! - Verifying a value against a header from those endpoints
-//! - Exporting and importing trusted state
+//! - Exporting the headers the light client holds
 //!
 //! Run with: cargo run --example light_client
 
 use serde_json::json;
-use std::time::Duration;
 use willow_sdk::{LightClientConfigBuilder, WillowClient, DEVNET_VALIDATOR_1};
 
 #[tokio::main]
@@ -16,25 +15,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Willow SDK - Light Client Example");
     println!("==================================\n");
 
-    // 1. Configure light client with multiple validators
+    // 1. Configure the consensus nodes verified reads take headers from. The SDK trusts them:
+    // it takes each header from the first that serves it and doesn't verify validator
+    // signatures, so list only nodes you trust. Every verified read needs
+    // `min_validators_for_consensus` of them to report the chain's latest height.
     println!("1. Configuring light client...");
     let light_client_config = LightClientConfigBuilder::new("willow-testnet")
-        .validator_endpoints(vec![
-            "http://localhost:26657".to_string(), // Node 1
-            "http://localhost:26757".to_string(), // Node 2
-            "http://localhost:26857".to_string(), // Node 3
-        ])
-        .trust_threshold(2, 3) // Require 2/3+ validator agreement
-        .trusting_period(Duration::from_secs(86400)) // 24 hours
-        .max_clock_drift(Duration::from_secs(10))
-        .min_validators_for_consensus(2)
-        .auto_sync(true)
+        .validator_endpoints(vec!["http://localhost:26657".to_string()])
+        .min_validators_for_consensus(1)
+        .max_proof_lag_blocks(20)
         .build();
 
     println!("   Chain ID: willow-testnet");
-    println!("   Validators: 3 endpoints configured");
-    println!("   Trust threshold: 2/3");
-    println!("   Trusting period: 24 hours\n");
+    println!("   Endpoints: 1, trusted as it serves headers (no signature check)\n");
 
     // 2. Create client with light client
     println!("2. Creating client with light client...");
@@ -91,11 +84,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => println!("   Note: {}", e),
     }
 
-    // 6. Export trusted state for persistence
-    println!("\n6. Exporting trusted state...");
+    // 6. Export the headers the light client holds, for persistence
+    println!("\n6. Exporting the light client's headers...");
     if let Some(lc) = client.light_client() {
         let state = lc.export_trusted_state().await;
-        println!("   Exported {} trusted headers", state.headers.len());
+        println!("   Exported {} headers", state.headers.len());
 
         // In production, you would serialize and save this:
         // let json = serde_json::to_string(&state)?;

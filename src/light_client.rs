@@ -1,8 +1,9 @@
-//! Light client for trustless verification of Willow state.
+//! Light client: the CometBFT headers whose app hashes verified reads check GroveDB proofs
+//! against.
 //!
-//! This module implements a standalone light client that can verify Willow
-//! query results without trusting any single node. It uses the CometBFT light
-//! client protocol to verify block headers and GroveDB proofs.
+//! Verified reads take headers from the consensus nodes the caller configures and trust them:
+//! the SDK doesn't verify validator signatures (see the trust notes below), so a read is as
+//! sound as the consensus node it asks.
 //!
 //! # Feature Flag
 //!
@@ -79,19 +80,25 @@ pub struct LightClientConfig {
     /// Validator RPC endpoints to fetch headers from.
     pub validator_endpoints: Vec<String>,
 
-    /// Minimum validators that must agree for consensus.
+    /// How many endpoints must report the chain's latest height
+    /// ([`LightClient::latest_chain_height`]) for a verified read to check its recency: every
+    /// `data().get` needs that many to answer. Default: 1.
     #[serde(default = "default_min_validators")]
     pub min_validators_for_consensus: usize,
 
-    /// Trust threshold as (numerator, denominator), default: (2, 3).
+    /// Trust threshold as (numerator, denominator), default: (2, 3). Read only by the header
+    /// check of [`LightClient::sync_to_latest`]; not applied to verified reads, which take
+    /// headers as their endpoints serve them.
     #[serde(default = "default_trust_threshold")]
     pub trust_threshold: (u64, u64),
 
-    /// How long headers remain valid, default: 24 hours.
+    /// How long headers remain valid, default: 24 hours. Read by the header check of
+    /// [`LightClient::sync_to_latest`] and by [`LightClient::prune_old_headers`].
     #[serde(default = "default_trusting_period")]
     pub trusting_period: Duration,
 
-    /// Maximum allowed clock drift, default: 10 seconds.
+    /// Maximum allowed clock drift, default: 10 seconds. Read only by the header check of
+    /// [`LightClient::sync_to_latest`].
     #[serde(default = "default_clock_drift")]
     pub max_clock_drift: Duration,
 
@@ -99,8 +106,8 @@ pub struct LightClientConfig {
     #[serde(default = "default_rpc_timeout")]
     pub rpc_timeout: Duration,
 
-    /// Whether to automatically sync to the latest height on creation.
-    /// Default: true.
+    /// Whether [`LightClient::new_async`] syncs to the latest height before returning.
+    /// [`LightClient::new`] and the client builder never sync. Default: true.
     #[serde(default = "default_auto_sync")]
     pub auto_sync: bool,
 
@@ -174,13 +181,15 @@ impl LightClientConfigBuilder {
         self
     }
 
-    /// Sets the minimum validators required for consensus.
+    /// Sets how many endpoints must report the chain's latest height for a verified read
+    /// ([`LightClientConfig::min_validators_for_consensus`]).
     pub fn min_validators_for_consensus(mut self, min: usize) -> Self {
         self.config.min_validators_for_consensus = min;
         self
     }
 
-    /// Sets the trust threshold (numerator/denominator).
+    /// Sets the trust threshold (numerator/denominator) of [`LightClient::sync_to_latest`]'s
+    /// header check. Not applied to verified reads.
     pub fn trust_threshold(mut self, numerator: u64, denominator: u64) -> Self {
         self.config.trust_threshold = (numerator, denominator);
         self
@@ -204,8 +213,8 @@ impl LightClientConfigBuilder {
         self
     }
 
-    /// Sets whether to automatically sync to the latest height on creation.
-    /// Default: true.
+    /// Sets whether [`LightClient::new_async`] syncs to the latest height before returning; the
+    /// client builder never syncs. Default: true.
     pub fn auto_sync(mut self, auto_sync: bool) -> Self {
         self.config.auto_sync = auto_sync;
         self
@@ -359,10 +368,11 @@ pub struct TrustedState {
 // Light Client
 // ============================================================================
 
-/// CometBFT light client for trustless Willow verification.
+/// CometBFT light client: the headers verified reads check GroveDB proofs against.
 ///
-/// Maintains verified headers and can verify GroveDB proofs against
-/// the `app_hash` in those headers.
+/// Holds headers and verifies GroveDB proofs against the `app_hash` in them. Verified reads
+/// take headers as the configured endpoints serve them, trusting those endpoints (see the
+/// module notes).
 pub struct LightClient {
     config: LightClientConfig,
     /// Verified headers indexed by height.
@@ -1172,8 +1182,9 @@ impl LightClient {
 
     /// Exports the current trusted state for persistence.
     ///
-    /// Returns a serializable state containing verified headers that can be
-    /// saved to disk and restored later using `import_trusted_state`.
+    /// Returns a serializable state containing the headers this client holds, as their
+    /// endpoints served them, that can be saved to disk and restored later using
+    /// `import_trusted_state`.
     ///
     /// # Example
     ///
@@ -1192,8 +1203,9 @@ impl LightClient {
 
     /// Imports previously exported trusted state.
     ///
-    /// This restores headers that were previously verified, allowing the
-    /// light client to resume from where it left off without re-syncing.
+    /// This restores headers that were exported earlier, allowing the light client to resume
+    /// from where it left off without re-syncing. A verified read uses a header this client
+    /// holds before asking an endpoint, so import only state you exported yourself.
     ///
     /// # Arguments
     ///

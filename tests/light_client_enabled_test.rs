@@ -16,7 +16,7 @@ const PRIVATE_KEY_HEX: &str = "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624d
 #[ignore]
 async fn light_client_enabled_verification_test() {
     println!("🔐 Starting ENABLED light client verification test...");
-    println!("This test demonstrates ACTUAL trustless verification");
+    println!("This test checks a value's proof against a header from the configured node");
 
     // Read the funded DID
     let funded_did =
@@ -169,8 +169,8 @@ async fn light_client_enabled_verification_test() {
             println!("  ✅ Data retrieved and verified with LIGHT CLIENT!");
             println!("  📄 Message: {}", data["message"].as_str().unwrap_or(""));
             println!("  🔐 Verification: Proof verified against CONSENSUS STATE");
-            println!("  🌟 This is TRUSTLESS verification!");
-            println!("  📊 The proof was checked against headers signed by 2/3+ validators");
+            println!("  📊 The proof was checked against the app hash of a header from the");
+            println!("     configured consensus node, as it served it (signatures unchecked)");
         }
         Err(e) => {
             println!("  ❌ Failed to retrieve data: {}", e);
@@ -184,7 +184,7 @@ async fn light_client_enabled_verification_test() {
         match light_client.get_verified_height_range().await {
             Some((min, max)) => {
                 println!("  ✅ Verified headers from height {} to {}", min, max);
-                println!("  🔐 Each header is signed by 2/3+ validators");
+                println!("  🔐 Each header is as its endpoint served it (signatures unchecked)");
                 println!("  📋 Each contains the GroveDB root hash (app_hash)");
                 println!("  🌟 Proofs are verified against these consensus roots");
             }
@@ -193,5 +193,5 @@ async fn light_client_enabled_verification_test() {
     }
 
     println!("\n✅ Light client test complete!");
-    println!("🌟 This demonstrated ACTUAL trustless verification");
+    println!("🌟 This checked a value against the configured consensus node's header");
 }
