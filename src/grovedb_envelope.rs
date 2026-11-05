@@ -29,10 +29,15 @@
 //! size limit: a byte string is allocated at its claimed length before it is
 //! read, and each level of layer nesting takes another stack frame, so a
 //! hostile proof can abort the process. Before grovedb sees a proof, the
-//! envelope is bounds-checked without recursion (every length within the bytes
-//! left, at most [`MAX_LAYER_DEPTH`] levels and [`MAX_LAYERS`] layers) and every
-//! node value is decoded as an element within its own size; a proof that fails
-//! is refused.
+//! envelope is bounds-checked without recursion (at most [`MAX_PROOF_BYTES`],
+//! every length within the bytes left, at most [`MAX_LAYER_DEPTH`] levels and
+//! [`MAX_LAYERS`] layers) and every node value is decoded as an element within
+//! its own size; a proof that fails is refused.
+//!
+//! A merk op takes one byte on the wire and over a hundred in memory, so the
+//! SDK checks a layer's ops one at a time as it decodes them and never collects
+//! them. grovedb-merk 3.1.0 holds every node a layer pushes until its `Parent`
+//! and `Child` ops fold them; [`MAX_PROOF_BYTES`] bounds how many it can hold.
 
 use crate::errors::{Result, WillowError};
 use grovedb::operations::proof::{GroveDBProof, GroveDBProofV0, LayerProof, ProveOptions};
@@ -46,8 +51,17 @@ pub const MAX_LAYER_DEPTH: usize = 64;
 /// The most layers a proof may carry in all.
 pub const MAX_LAYERS: usize = 1024;
 
-/// The largest proof envelope accepted, in bytes.
-pub const MAX_PROOF_BYTES: usize = 32 << 20;
+/// The largest proof envelope accepted, in bytes: 1 MiB.
+///
+/// The proofs the SDK verifies prove one key: the API's `/proof` and the verifiable RPC's entity
+/// proofs are single-key queries. Each layer of one carries the queried node, whose value
+/// grovedb-merk 3.1.0 encodes with a u16 length (so under 64 KiB), and the hashes on the path
+/// to it, about 70 bytes a level (a few KiB for a tree of billions of keys), over a path of
+/// four or five layers: an honest proof is under 400 KiB even with a 64 KiB node in every
+/// layer, and a few KiB with small values. The cap bounds what a hostile proof costs to check,
+/// here and in grovedb, which holds every node a layer pushes until its ops fold them: at
+/// 1 MiB, about 90,000 nodes and some tens of MiB.
+pub const MAX_PROOF_BYTES: usize = 1 << 20;
 
 /// What bincode may claim while decoding an envelope that passed [`scan_envelope`]: the lengths
 /// of its byte strings (at most the envelope's size), and, for each map of lower layers still
@@ -275,16 +289,19 @@ fn decode_element(value: &[u8]) -> Result<Element> {
         })
 }
 
-/// One layer's merk ops, refusing bytes that don't decode.
-fn layer_ops(layer: &LayerProof) -> Result<Vec<Op>> {
-    Decoder::new(&layer.merk_proof)
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(|e| WillowError::ProofVerificationFailed(format!("GroveDB layer: {e}")))
+/// One layer's merk ops, decoded one at a time as they are read and never collected (an op
+/// is as little as one byte on the wire and over a hundred in memory); bytes that don't decode
+/// are an error.
+fn layer_ops(layer: &LayerProof) -> impl Iterator<Item = Result<Op>> + '_ {
+    Decoder::new(&layer.merk_proof).map(|op| {
+        op.map_err(|e| WillowError::ProofVerificationFailed(format!("GroveDB layer: {e}")))
+    })
 }
 
 /// Refuse a layer whose ops attach a child to an opaque `Hash` node, or don't build one tree,
-/// or carry a value that doesn't decode as an element within its size.
-fn check_ops(ops: &[Op]) -> Result<()> {
+/// or carry a value that doesn't decode as an element within its size. The ops are checked as
+/// they are decoded, and the first that fails ends the check.
+fn check_ops(ops: impl Iterator<Item = Result<Op>>) -> Result<()> {
     let fail = |m: &str| {
         Err(WillowError::ProofVerificationFailed(format!(
             "GroveDB layer: {m}"
@@ -293,9 +310,9 @@ fn check_ops(ops: &[Op]) -> Result<()> {
     // Each stack entry: whether the node at the top of that subtree is an opaque Hash.
     let mut stack: Vec<bool> = Vec::new();
     for op in ops {
-        match op {
+        match op? {
             Op::Push(node) | Op::PushInverted(node) => {
-                match node {
+                match &node {
                     Node::KV(_, value)
                     | Node::KVValueHash(_, value, _)
                     | Node::KVValueHashFeatureType(_, value, ..)
@@ -344,7 +361,7 @@ pub fn check_layers(proof: &[u8]) -> Result<()> {
 fn check_all_layers(v0: &GroveDBProofV0) -> Result<()> {
     let mut layers = vec![&v0.root_layer];
     while let Some(layer) = layers.pop() {
-        check_ops(&layer_ops(layer)?)?;
+        check_ops(layer_ops(layer))?;
         layers.extend(layer.lower_layers.values());
     }
     Ok(())
@@ -382,8 +399,8 @@ pub fn verify_item_at_path(
 
     // The layer at `path` carries the key's element in a form the root binds.
     let mut carried = None;
-    for op in layer_ops(layer)? {
-        let (Op::Push(node) | Op::PushInverted(node)) = op else {
+    for op in layer_ops(layer) {
+        let (Op::Push(node) | Op::PushInverted(node)) = op? else {
             continue;
         };
         let node_key = match &node {
@@ -652,7 +669,7 @@ mod tests {
         for seg in &f.path {
             layer = layer.lower_layers.get_mut(seg).unwrap();
         }
-        let mut ops = layer_ops(layer).unwrap();
+        let mut ops: Vec<Op> = layer_ops(layer).collect::<Result<_>>().unwrap();
         edit(&mut ops);
         layer.merk_proof = encode_ops(&ops);
         bincode2::encode_to_vec(GroveDBProof::V0(v0), config()).unwrap()
@@ -693,7 +710,9 @@ mod tests {
         lone.extend_from_slice(&[0x00, 0x01]);
         let v0 = decode_envelope(&lone).unwrap();
         assert_eq!(
-            layer_ops(&v0.root_layer).unwrap(),
+            layer_ops(&v0.root_layer)
+                .collect::<Result<Vec<_>>>()
+                .unwrap(),
             vec![Op::Push(Node::Hash(f.root))]
         );
         for path in [vec![], f.path.clone()] {
@@ -1090,5 +1109,193 @@ mod hostile_proofs {
             .unwrap_err()
             .to_string();
         assert!(err.contains("not an element"), "{err}");
+    }
+
+    fn encode(v0: GroveDBProofV0) -> Vec<u8> {
+        let config = bincode2::config::standard()
+            .with_big_endian()
+            .with_no_limit();
+        bincode2::encode_to_vec(GroveDBProof::V0(v0), config).unwrap()
+    }
+
+    /// A V0 envelope of about `bytes` bytes whose root layer is that many one-byte `Parent` ops,
+    /// with a one-op layer below it for each segment of `path`.
+    fn parent_ops(path: &[Vec<u8>], bytes: usize) -> Vec<u8> {
+        let mut layer = LayerProof {
+            merk_proof: vec![0x10],
+            lower_layers: Default::default(),
+        };
+        for (i, segment) in path.iter().enumerate().rev() {
+            let ops = if i == 0 {
+                vec![0x10; bytes]
+            } else {
+                vec![0x10]
+            };
+            layer = LayerProof {
+                merk_proof: ops,
+                lower_layers: [(segment.clone(), layer)].into(),
+            };
+        }
+        encode(GroveDBProofV0 {
+            root_layer: layer,
+            prove_options: ProveOptions::default(),
+        })
+    }
+
+    /// The honest proof of KEY at `path`, its leaf layer's ops replaced by about `bytes` bytes
+    /// of `Push(KV(k, item))` ops, the 3-byte keys `k` ascending, then a `Child` op for each
+    /// push after the first: one tree, every value an element, which grovedb-merk holds node by
+    /// node until the `Child` ops fold them. Returns the proof and the last key.
+    fn pushed_nodes(path: &[Vec<u8>], bytes: usize) -> (Vec<u8>, Vec<u8>) {
+        let (honest, _) = item_proof(path, KEY, b"{}");
+        let config = bincode2::config::standard()
+            .with_big_endian()
+            .with_no_limit();
+        let (GroveDBProof::V0(mut v0), _): (GroveDBProof, usize) =
+            bincode2::decode_from_slice(&honest, config).unwrap();
+        let mut layer = &mut v0.root_layer;
+        for segment in path {
+            layer = layer.lower_layers.get_mut(segment).unwrap();
+        }
+        let item = bincode2::encode_to_vec(Element::Item(vec![], None), config).unwrap();
+        // 0x03, key length, key, value length (2 bytes), value; and the node's Child op.
+        let nodes = bytes / (1 + 1 + 3 + 2 + item.len() + 1);
+        let key = |i: usize| (i as u32).to_be_bytes()[1..].to_vec();
+        let mut ops = Vec::with_capacity(bytes);
+        for i in 0..nodes {
+            ed::Encode::encode_into(&Op::Push(Node::KV(key(i), item.clone())), &mut ops).unwrap();
+        }
+        ops.resize(ops.len() + nodes - 1, 0x11);
+        layer.merk_proof = ops;
+        (encode(v0), key(nodes - 1))
+    }
+
+    /// Inside the 32 MiB the scan used to accept, a proof of one-byte ops decodes to an `Op`
+    /// of at least 104 bytes each: about 33.5M `Parent` ops in its root layer, or about 3M
+    /// pushed nodes, which grovedb-merk holds (about 208 bytes and two heap allocations each)
+    /// before any root check. Both are refused by their size before anything decodes them.
+    #[test]
+    fn proofs_of_millions_of_ops_are_refused_before_they_decode() {
+        let data = crate::proof::subgrove_data_path(SG);
+        let old_cap = 32 << 20;
+        let parents = parent_ops(&data, old_cap - 64);
+        let (pushes, _) = pushed_nodes(&data, old_cap - 1024);
+        for (name, proof) in [("parent ops", parents), ("pushed nodes", pushes)] {
+            assert!(proof.len() <= old_cap, "{name}: {}", proof.len());
+            let err = decode_envelope(&proof).err().map(|e| e.to_string());
+            assert!(
+                err.as_deref().is_some_and(|e| e.contains("are accepted")),
+                "{name} of {} bytes: {err:?}",
+                proof.len()
+            );
+        }
+    }
+
+    /// Under the cap, a proof's ops are checked one at a time, never collected: a root layer
+    /// of a million `Parent` ops is refused at the first, with no memory to speak of. A layer
+    /// of pushed nodes that passes every check reaches grovedb, which holds them; the cap
+    /// bounds that.
+    #[test]
+    fn a_proof_of_many_ops_under_the_cap_is_refused_in_bounded_memory() {
+        use super::alloc_meter::peak;
+        let data = crate::proof::subgrove_data_path(SG);
+        let parents = parent_ops(&data, 1_000_000);
+        let (result, held) = peak(|| verify_item_at_path(&parents, &data, KEY));
+        eprintln!("parent ops: {} bytes, peak {held} bytes", parents.len());
+        assert!(
+            matches!(result, Err(WillowError::ProofVerificationFailed(_))),
+            "{result:?}"
+        );
+        assert!(
+            held < 4 << 20,
+            "{held} bytes held for {} bytes of ops",
+            parents.len()
+        );
+
+        let (pushes, last) = pushed_nodes(&data, 1_000_000);
+        let (result, held) = peak(|| verify_item_at_path(&pushes, &data, &last));
+        eprintln!("pushed nodes: {} bytes, peak {held} bytes", pushes.len());
+        assert!(
+            matches!(result, Err(WillowError::ProofVerificationFailed(_))),
+            "{result:?}"
+        );
+        assert!(
+            held < 64 << 20,
+            "{held} bytes held for {} bytes of ops",
+            pushes.len()
+        );
+    }
+}
+
+/// The bytes a closure allocates on its own thread, for tests that bound a verifier's memory.
+#[cfg(test)]
+pub(crate) mod alloc_meter {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::cell::Cell;
+
+    thread_local! {
+        static METERED: Cell<bool> = const { Cell::new(false) };
+        static HELD: Cell<isize> = const { Cell::new(0) };
+        static PEAK: Cell<isize> = const { Cell::new(0) };
+    }
+
+    fn count(bytes: isize) {
+        let _ = METERED.try_with(|metered| {
+            if metered.get() {
+                let held = HELD.with(|h| {
+                    h.set(h.get() + bytes);
+                    h.get()
+                });
+                PEAK.with(|p| p.set(p.get().max(held)));
+            }
+        });
+    }
+
+    /// The system allocator, counting what the metered thread allocates and frees.
+    struct Meter;
+
+    unsafe impl GlobalAlloc for Meter {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            let p = System.alloc(layout);
+            if !p.is_null() {
+                count(layout.size() as isize);
+            }
+            p
+        }
+
+        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+            let p = System.alloc_zeroed(layout);
+            if !p.is_null() {
+                count(layout.size() as isize);
+            }
+            p
+        }
+
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            System.dealloc(ptr, layout);
+            count(-(layout.size() as isize));
+        }
+
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+            let p = System.realloc(ptr, layout, new_size);
+            if !p.is_null() {
+                count(new_size as isize - layout.size() as isize);
+            }
+            p
+        }
+    }
+
+    #[global_allocator]
+    static METER: Meter = Meter;
+
+    /// `f`'s result, and the most bytes it held allocated at once on this thread beyond what
+    /// was allocated when it started.
+    pub(crate) fn peak<T>(f: impl FnOnce() -> T) -> (T, usize) {
+        HELD.with(|h| h.set(0));
+        PEAK.with(|p| p.set(0));
+        METERED.with(|m| m.set(true));
+        let result = f();
+        METERED.with(|m| m.set(false));
+        (result, PEAK.with(|p| p.get()).max(0) as usize)
     }
 }
