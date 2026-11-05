@@ -59,7 +59,18 @@ The node accepts a nonce in `base + 1 ..= base + 24` that it hasn't used, and `b
 - it hands out the lowest nonce in the window that the chain doesn't show used and that no write from this client took within the last 120 s (the node holds a pending transaction's nonce for 3 blocks or 120 s), under a lock, so concurrent writes take distinct nonces. When all 24 are taken it fails with `WillowError::NonceWindowFull`, never a nonce past the window;
 - a submission CheckTx refuses gives its nonce back, unless the node's refusal of that nonce says it is held by a pending transaction (`Nonce N of … is held by a pending transaction`), used (`Invalid nonce: N already used`, `Invalid nonce: N <= base nonce`), or spent (`… (nonce N spent)`). A submission whose fate is unknown (a network or RPC error) keeps its nonce for 120 s, and CometBFT already holding the exact bytes (`tx already exists in cache`) counts as accepted.
 
-A write refused as "already used" may be one whose earlier attempt landed: read what it wrote before signing it again under a fresh nonce, or it can run twice. The key-grant operations and `update_did_with_nonce` take the nonce you pass, and hold and settle it the same way. `ConsensusClient::with_nonce_tracker` shares one tracker between clients that sign for the same identity.
+**Retry a write under its own nonce.** A write that was sent and whose outcome is unknown (the node's answer was lost or unreadable, or its RPC answered an error) may yet land. It fails with `WillowError::SubmissionUnknown`, which carries a `SignedSubmission`: the DID, the nonce its signature covers, the exact bytes broadcast, and their hash. To retry it, send those bytes again with `ConsensusClient::rebroadcast(&submission)`: whichever attempt lands first spends the nonce and the other is refused, so the write runs at most once, and CometBFT answers bytes its mempool already holds as `tx already exists in cache`, which counts as accepted. Calling `transfer`, `fund_subgrove`, `store_data`, or any other write again instead signs it under a new nonce, and then both can land.
+
+```rust
+match consensus.transfer(from, to, amount, None, key_hex, key_id, algorithm).await {
+    Err(WillowError::SubmissionUnknown { submission, .. }) => {
+        let tx_hash = consensus.rebroadcast(&submission).await?;
+    }
+    other => { other?; }
+}
+```
+
+A write refused as "already used" may be one whose earlier attempt landed: read what it wrote before signing it again under a fresh nonce, or it can run twice. A write refused in its block after its signature and nonce verify has spent its nonce; sign any retry under a fresh one. The key-grant operations and `update_did_with_nonce` take the nonce you pass, and hold and settle it the same way. `ConsensusClient::with_nonce_tracker` shares one tracker between clients that sign for the same identity.
 
 ## Quick Start
 

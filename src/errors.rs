@@ -86,9 +86,36 @@ pub enum WillowError {
     #[error("Proof height out of range: {0}")]
     ProofHeightOutOfRange(String),
 
+    /// A signed transaction was sent and its outcome is unknown: the node's answer was lost or
+    /// unreadable, or its RPC answered an error. It may yet land. Retry it only by sending the
+    /// same bytes under the same nonce
+    /// ([`crate::consensus::ConsensusClient::rebroadcast`]): signing it again takes a new
+    /// nonce, and then both can land.
+    #[error("Transaction outcome unknown (nonce {} of {}): {message}", submission.nonce, submission.did)]
+    SubmissionUnknown {
+        /// The transaction as it was sent.
+        submission: Box<SignedSubmission>,
+        /// Why the outcome is unknown.
+        message: String,
+    },
+
     /// Generic error with custom message
     #[error("{0}")]
     Custom(String),
+}
+
+/// A signed transaction as it was sent: the signer's DID, the nonce its signature covers, and
+/// the exact bytes broadcast.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignedSubmission {
+    /// The DID whose nonce the transaction carries.
+    pub did: String,
+    /// The nonce the signature covers.
+    pub nonce: u64,
+    /// The bincode of the transaction, as broadcast to CometBFT.
+    pub tx_bytes: Vec<u8>,
+    /// Its CometBFT hash: SHA-256 of `tx_bytes`, upper-case hex.
+    pub tx_hash: String,
 }
 
 impl From<reqwest::Error> for WillowError {

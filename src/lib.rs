@@ -121,7 +121,7 @@ pub use erc8004::{
     Erc8004ValidationSummary, ReputationAttestation, ReputationHistoryEvent,
     ReputationHistoryResponse, ValidationStatusBreakdown,
 };
-pub use errors::{Result, WillowError};
+pub use errors::{Result, SignedSubmission, WillowError};
 #[cfg(feature = "verifiable-rpc")]
 pub use eth_state::{
     verify_call_result, verify_state_proof, EthOperations, StateVerifyMode, VerifiedCall,

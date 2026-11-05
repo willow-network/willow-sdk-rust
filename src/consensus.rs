@@ -1,7 +1,7 @@
 //! Consensus transaction handling for Willow SDK
 
 use crate::auth::sign_challenge;
-use crate::errors::{Result, WillowError};
+use crate::errors::{Result, SignedSubmission, WillowError};
 use crate::nonces::{refusal_outcome, AccountNonceState, NonceOutcome, NonceTracker};
 use crate::signed_messages::{self, StoreDataTx};
 use crate::types::{DidDocument, RegisterSubgroveRequest, SignatureAlgorithm, StoreDataRequest};
@@ -601,15 +601,57 @@ impl ConsensusClient {
     }
 
     async fn submit_under(&self, did: &str, nonce: u64, tx: &ChainTransaction) -> Result<String> {
-        let submission = match self.submit_bytes(tx).await {
-            Ok(submission) => submission,
+        let tx_bytes = match Self::encode(tx) {
+            Ok(bytes) => bytes,
             Err(e) => {
-                // Nothing was sent.
                 self.nonces.release(did, nonce);
                 return Err(e);
             }
         };
-        match submission {
+        let submission = SignedSubmission {
+            did: did.to_string(),
+            nonce,
+            tx_hash: hex::encode_upper(Sha256::digest(&tx_bytes)),
+            tx_bytes,
+        };
+        self.send_signed(submission, true).await
+    }
+
+    /// Send a signed transaction again, the same bytes under the same nonce: the retry of a write
+    /// whose outcome is unknown ([`WillowError::SubmissionUnknown`] carries the submission) or
+    /// that never landed. Whichever attempt lands first spends the nonce and the other is
+    /// refused, so the write runs at most once. CometBFT answers bytes its mempool already holds
+    /// with "tx already exists in cache", which counts as accepted: the transaction's hash is
+    /// returned. Signing the write again instead takes a new nonce, and both can land.
+    ///
+    /// The nonce is held while the transaction is in flight and settled by the answer, as for a
+    /// new write; an unknown outcome is [`WillowError::SubmissionUnknown`] again, and a
+    /// rebroadcast that can't reach the node keeps the nonce held, since the earlier attempt may
+    /// still land.
+    pub async fn rebroadcast(&self, submission: &SignedSubmission) -> Result<String> {
+        self.nonces.hold(&submission.did, submission.nonce);
+        self.send_signed(submission.clone(), false).await
+    }
+
+    /// Broadcast `submission` and settle its nonce by the answer. When nothing was sent, a new
+    /// write (`release_unsent`) gives its nonce back; a rebroadcast doesn't.
+    async fn send_signed(
+        &self,
+        submission: SignedSubmission,
+        release_unsent: bool,
+    ) -> Result<String> {
+        let (did, nonce) = (submission.did.as_str(), submission.nonce);
+        let answer = match self.send_bytes(&submission.tx_bytes).await {
+            Ok(answer) => answer,
+            Err(e) => {
+                // Nothing was sent.
+                if release_unsent {
+                    self.nonces.release(did, nonce);
+                }
+                return Err(e);
+            }
+        };
+        match answer {
             Submission::Accepted(hash) => {
                 self.nonces.settle(did, nonce, NonceOutcome::Accepted);
                 Ok(hash)
@@ -621,7 +663,10 @@ impl ConsensusClient {
             }
             Submission::Unknown(e) => {
                 self.nonces.settle(did, nonce, NonceOutcome::Unknown);
-                Err(e)
+                Err(WillowError::SubmissionUnknown {
+                    message: e.to_string(),
+                    submission: Box::new(submission),
+                })
             }
         }
     }
@@ -644,11 +689,20 @@ impl ConsensusClient {
         ))
     }
 
+    /// The bincode the validator decodes `tx` from.
+    fn encode(tx: &ChainTransaction) -> Result<Vec<u8>> {
+        bincode::serialize(tx)
+            .map_err(|e| WillowError::Custom(format!("bincode serialize transaction: {}", e)))
+    }
+
     /// Send `tx` to CometBFT's `broadcast_tx_sync`. `Err` only when nothing was sent.
     async fn submit_bytes(&self, tx: &ChainTransaction) -> Result<Submission> {
-        let tx_bytes = bincode::serialize(tx)
-            .map_err(|e| WillowError::Custom(format!("bincode serialize transaction: {}", e)))?;
-        let tx_base64 = base64::engine::general_purpose::STANDARD.encode(&tx_bytes);
+        self.send_bytes(&Self::encode(tx)?).await
+    }
+
+    /// Send `tx_bytes` to CometBFT's `broadcast_tx_sync`. `Err` only when nothing was sent.
+    async fn send_bytes(&self, tx_bytes: &[u8]) -> Result<Submission> {
+        let tx_base64 = base64::engine::general_purpose::STANDARD.encode(tx_bytes);
 
         let rpc_request = json!({
             "jsonrpc": "2.0",
@@ -690,7 +744,7 @@ impl ConsensusClient {
                     .ends_with("tx already exists in cache")
             {
                 return Ok(Submission::Accepted(hex::encode_upper(Sha256::digest(
-                    &tx_bytes,
+                    tx_bytes,
                 ))));
             }
             return Ok(Submission::Unknown(WillowError::Custom(format!(
@@ -1371,5 +1425,92 @@ mod tests {
 
         assert_eq!(result.code, 1);
         assert!(result.log.contains("Insufficient"));
+    }
+
+    /// A write whose outcome is unknown carries its DID, nonce, and the exact bytes it sent;
+    /// `rebroadcast` sends those bytes again, which CometBFT answers as already held.
+    #[tokio::test]
+    async fn an_unknown_outcome_carries_the_signed_bytes_and_rebroadcast_resends_them() {
+        use wiremock::matchers::{body_partial_json, method};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        let state = [&5u64.to_be_bytes()[..], &[0, 0, 0]].concat();
+        Mock::given(method("POST"))
+            .and(body_partial_json(json!({"method": "abci_query"})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "jsonrpc": "2.0", "id": 1,
+                "result": {"response": {
+                    "code": 0,
+                    "value": base64::engine::general_purpose::STANDARD.encode(state)
+                }}
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(body_partial_json(json!({"method": "broadcast_tx_sync"})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "jsonrpc": "2.0", "id": 1,
+                "error": {"code": -32603, "message": "Internal error", "data": "timed out waiting for tx"}
+            })))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(body_partial_json(json!({"method": "broadcast_tx_sync"})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "jsonrpc": "2.0", "id": 1,
+                "error": {"code": -32603, "message": "Internal error", "data": "tx already exists in cache"}
+            })))
+            .mount(&server)
+            .await;
+        let client = ConsensusClient::new(&server.uri());
+        let did = "did:willow:a";
+        let sent = |requests: Vec<wiremock::Request>| -> Vec<Vec<u8>> {
+            requests
+                .iter()
+                .filter_map(|r| {
+                    let body: serde_json::Value = serde_json::from_slice(&r.body).ok()?;
+                    (body["method"] == "broadcast_tx_sync").then(|| {
+                        base64::engine::general_purpose::STANDARD
+                            .decode(body["params"]["tx"].as_str().unwrap())
+                            .unwrap()
+                    })
+                })
+                .collect()
+        };
+
+        let err = client
+            .transfer(
+                did,
+                "did:willow:b",
+                7,
+                None,
+                &"03".repeat(32),
+                "did:willow:a#key-1",
+                SignatureAlgorithm::Ed25519,
+            )
+            .await
+            .unwrap_err();
+        let WillowError::SubmissionUnknown { submission, .. } = err else {
+            panic!("expected an unknown outcome, got {err:?}");
+        };
+        assert_eq!((submission.did.as_str(), submission.nonce), (did, 6));
+        assert_eq!(
+            submission.tx_hash,
+            hex::encode_upper(Sha256::digest(&submission.tx_bytes))
+        );
+        assert_eq!(
+            sent(server.received_requests().await.unwrap()),
+            vec![submission.tx_bytes.clone()]
+        );
+        assert!(client.nonce_tracker().is_held(did, 6));
+
+        let hash = client.rebroadcast(&submission).await.unwrap();
+        assert_eq!(hash, submission.tx_hash);
+        assert_eq!(
+            sent(server.received_requests().await.unwrap()),
+            vec![submission.tx_bytes.clone(), submission.tx_bytes.clone()]
+        );
+        assert!(client.nonce_tracker().is_held(did, 6));
     }
 }
