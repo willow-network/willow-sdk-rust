@@ -645,15 +645,17 @@ impl ConsensusClient {
     ///
     /// The nonce is held while the transaction is in flight and settled by the answer, as for a
     /// new write; an unknown outcome is [`WillowError::SubmissionUnknown`] again, and a
-    /// rebroadcast that can't reach the node keeps the nonce held, since the earlier attempt may
-    /// still land.
+    /// rebroadcast that can't reach the node, or that CometBFT's mempool refuses before CheckTx
+    /// (full, or the bytes over its size limit), keeps the nonce held, since the earlier attempt
+    /// may still land.
     pub async fn rebroadcast(&self, submission: &SignedSubmission) -> Result<String> {
         self.nonces.hold(&submission.did, submission.nonce);
         self.send_signed(submission.clone(), false).await
     }
 
-    /// Broadcast `submission` and settle its nonce by the answer. When nothing was sent, a new
-    /// write (`release_unsent`) gives its nonce back; a rebroadcast doesn't.
+    /// Broadcast `submission` and settle its nonce by the answer. When nothing was sent, or the
+    /// mempool refused it before CheckTx, a new write (`release_unsent`) gives its nonce back; a
+    /// rebroadcast doesn't.
     async fn send_signed(
         &self,
         submission: SignedSubmission,
@@ -663,7 +665,7 @@ impl ConsensusClient {
         let answer = match self.send_bytes(&submission.tx_bytes).await {
             Ok(answer) => answer,
             Err(e) => {
-                // Nothing was sent.
+                // Nothing was sent, or the mempool took none of it.
                 if release_unsent {
                     self.nonces.release(did, nonce);
                 }
@@ -719,7 +721,9 @@ impl ConsensusClient {
         self.send_bytes(&Self::encode(tx)?).await
     }
 
-    /// Send `tx_bytes` to CometBFT's `broadcast_tx_sync`. `Err` only when nothing was sent.
+    /// Send `tx_bytes` to CometBFT's `broadcast_tx_sync`. `Err` only when the node took nothing:
+    /// nothing was sent, or CometBFT's mempool refused the bytes before CheckTx, because it is
+    /// full or they are over its size limit.
     async fn send_bytes(&self, tx_bytes: &[u8]) -> Result<Submission> {
         let tx_base64 = base64::engine::general_purpose::STANDARD.encode(tx_bytes);
 
@@ -765,6 +769,23 @@ impl ConsensusClient {
                 return Ok(Submission::Accepted(hex::encode_upper(Sha256::digest(
                     tx_bytes,
                 ))));
+            }
+            // The mempool refused it before CheckTx: it is full, or the transaction is over its
+            // size limit. Nothing was admitted, so this transaction won't land; it is not an
+            // unknown outcome to rebroadcast.
+            if [&error.message, &detail].iter().any(|text| {
+                let text = text.to_ascii_lowercase();
+                text.contains("mempool is full") || text.contains("tx too large")
+            }) {
+                return Err(WillowError::Custom(format!(
+                    "Transaction not admitted: CometBFT's mempool refused it ({}): {}",
+                    error.code,
+                    if detail.is_empty() {
+                        &error.message
+                    } else {
+                        &detail
+                    }
+                )));
             }
             return Ok(Submission::Unknown(WillowError::Custom(format!(
                 "CometBFT error: {} ({}){}",
@@ -1593,5 +1614,73 @@ mod tests {
             vec![submission.tx_bytes.clone(), submission.tx_bytes.clone()]
         );
         assert!(client.nonce_tracker().is_held(did, 6));
+    }
+
+    /// CometBFT's mempool refuses a transaction before CheckTx when it is full or the
+    /// transaction is over its size limit. Nothing was admitted, so a new write is refused and
+    /// gives its nonce back, rather than hold it as an unknown outcome to rebroadcast; a
+    /// rebroadcast keeps its hold, since its earlier attempt may still be pending.
+    #[tokio::test]
+    async fn a_write_the_mempool_does_not_admit_gives_its_nonce_back() {
+        use wiremock::matchers::{body_partial_json, method};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let state = [&5u64.to_be_bytes()[..], &[0, 0, 0]].concat();
+        for error in [
+            json!({"code": -32603, "message": "Internal error", "data":
+                "mempool is full: number of txs 5000 (max: 5000), \
+                 total txs bytes 104857 (max: 1073741824)"}),
+            json!({"code": -32603, "message": "mempool is full"}),
+            json!({"code": -32603, "message": "Internal error", "data":
+                "Tx too large. Max size is 1048576, but got 1048577"}),
+        ] {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(body_partial_json(json!({"method": "abci_query"})))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "jsonrpc": "2.0", "id": 1,
+                    "result": {"response": {
+                        "code": 0,
+                        "value": base64::engine::general_purpose::STANDARD.encode(&state)
+                    }}
+                })))
+                .mount(&server)
+                .await;
+            Mock::given(method("POST"))
+                .and(body_partial_json(json!({"method": "broadcast_tx_sync"})))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "jsonrpc": "2.0", "id": 1, "error": error.clone()
+                })))
+                .mount(&server)
+                .await;
+            let client = ConsensusClient::new(&server.uri());
+            let did = "did:willow:a";
+            let err = client
+                .transfer(
+                    did,
+                    "did:willow:b",
+                    7,
+                    None,
+                    &"03".repeat(32),
+                    "did:willow:a#key-1",
+                    SignatureAlgorithm::Ed25519,
+                )
+                .await
+                .unwrap_err();
+            assert!(
+                !matches!(err, WillowError::SubmissionUnknown { .. }),
+                "{error}: {err:?}"
+            );
+            assert!(!client.nonce_tracker().is_held(did, 6), "{error}");
+            assert_eq!(client.get_next_nonce(did).await.unwrap(), 6, "{error}");
+
+            let earlier = SignedSubmission {
+                did: did.into(),
+                nonce: 9,
+                tx_bytes: vec![1, 2, 3],
+                tx_hash: hex::encode_upper(Sha256::digest([1, 2, 3])),
+            };
+            assert!(client.rebroadcast(&earlier).await.is_err(), "{error}");
+            assert!(client.nonce_tracker().is_held(did, 9), "{error}");
+        }
     }
 }
