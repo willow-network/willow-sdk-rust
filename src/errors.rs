@@ -78,6 +78,14 @@ pub enum WillowError {
     #[error("Nonce window full: {0}")]
     NonceWindowFull(String),
 
+    /// A verified read's proof is of a state more than the light client's
+    /// `max_proof_lag_blocks` behind the chain's latest height (a stale answer the chain has
+    /// since changed), or its height is that far ahead of it. The proof may be genuine, and
+    /// reading again may get a current one; a proof whose root the chain's header doesn't carry
+    /// is [`WillowError::ProofVerificationFailed`] instead.
+    #[error("Proof height out of range: {0}")]
+    ProofHeightOutOfRange(String),
+
     /// Generic error with custom message
     #[error("{0}")]
     Custom(String),

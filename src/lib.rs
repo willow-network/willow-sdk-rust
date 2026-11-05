@@ -113,6 +113,7 @@ pub use completeness::{
 pub use consensus::{ConsensusClient, Transaction};
 pub use data::{
     CheckpointInfo, DataOperations, HistoricalQueryRequest, HistoricalQueryResponse, QueryResponse,
+    VerifiedValue,
 };
 pub use erc8004::{
     AgentReputationSummary, DisputeStats, Erc8004AgentListItem, Erc8004AgentListResponse,

@@ -100,6 +100,20 @@ pub struct LightClientConfig {
     /// Default: true.
     #[serde(default = "default_auto_sync")]
     pub auto_sync: bool,
+
+    /// How many blocks behind the chain's latest height a verified read's state may be, or its
+    /// proof's height ahead of it ([`LightClient::verify_root_after`]). The API chooses the
+    /// state it proves, so an older one is refused unless the chain still holds it. Default:
+    /// [`DEFAULT_MAX_PROOF_LAG_BLOCKS`].
+    #[serde(default = "default_max_proof_lag_blocks")]
+    pub max_proof_lag_blocks: u64,
+}
+
+/// The default [`LightClientConfig::max_proof_lag_blocks`].
+pub const DEFAULT_MAX_PROOF_LAG_BLOCKS: u64 = 20;
+
+fn default_max_proof_lag_blocks() -> u64 {
+    DEFAULT_MAX_PROOF_LAG_BLOCKS
 }
 
 fn default_min_validators() -> usize {
@@ -146,6 +160,7 @@ impl LightClientConfigBuilder {
                 max_clock_drift: default_clock_drift(),
                 rpc_timeout: default_rpc_timeout(),
                 auto_sync: default_auto_sync(),
+                max_proof_lag_blocks: default_max_proof_lag_blocks(),
             },
         }
     }
@@ -190,6 +205,13 @@ impl LightClientConfigBuilder {
     /// Default: true.
     pub fn auto_sync(mut self, auto_sync: bool) -> Self {
         self.config.auto_sync = auto_sync;
+        self
+    }
+
+    /// Sets how many blocks behind the chain's latest height a verified read's state may be.
+    /// Default: [`DEFAULT_MAX_PROOF_LAG_BLOCKS`].
+    pub fn max_proof_lag_blocks(mut self, blocks: u64) -> Self {
+        self.config.max_proof_lag_blocks = blocks;
         self
     }
 
@@ -897,6 +919,134 @@ impl LightClient {
         }
     }
 
+    /// The `app_hash` of the header at exactly `height`: a header this client holds, else the
+    /// first endpoint's that serves it.
+    async fn app_hash_at(&self, height: u64) -> Result<Vec<u8>> {
+        if let Some(block) = self.get_header_by_height(height).await {
+            return Ok(block.header.app_hash);
+        }
+        for endpoint in &self.config.validator_endpoints {
+            if let Some(app_hash) = self.fetch_app_hash_at(endpoint, height).await {
+                return Ok(app_hash);
+            }
+        }
+        Err(WillowError::LightClient(format!(
+            "no header at height {height} from any validator endpoint"
+        )))
+    }
+
+    /// The chain's latest height as the validator endpoints report it (CometBFT `/status`): the
+    /// highest height that a majority of the endpoints that answer, and at least
+    /// `min_validators_for_consensus` of them, have reached, or the latest header this client
+    /// holds if that is higher. An endpoint reporting a height far above or below the others'
+    /// moves it only with a majority. It trusts the endpoints as the headers do.
+    pub async fn latest_chain_height(&self) -> Result<u64> {
+        let answers = futures_util::future::join_all(
+            self.config
+                .validator_endpoints
+                .iter()
+                .map(|endpoint| self.fetch_status_height(endpoint)),
+        )
+        .await;
+        let mut heights: Vec<u64> = answers.into_iter().flatten().collect();
+        let needed = self.config.min_validators_for_consensus.max(1);
+        if heights.len() < needed {
+            return Err(WillowError::LightClient(format!(
+                "{} validator endpoints reported the latest height; {needed} are needed",
+                heights.len()
+            )));
+        }
+        // Highest first: the k-th has been reached by k endpoints.
+        heights.sort_unstable_by(|a, b| b.cmp(a));
+        let reached = heights[needed.max(heights.len() / 2 + 1) - 1];
+        let held = self
+            .get_latest_header()
+            .await
+            .map_or(0, |block| block.header.height);
+        Ok(reached.max(held))
+    }
+
+    /// The latest height `endpoint`'s `/status` reports.
+    async fn fetch_status_height(&self, endpoint: &str) -> Option<u64> {
+        let url = format!("{}/status", endpoint.trim_end_matches('/'));
+        let body: serde_json::Value = self
+            .http_client
+            .get(&url)
+            .send()
+            .await
+            .ok()?
+            .json()
+            .await
+            .ok()?;
+        body["result"]["sync_info"]["latest_block_height"]
+            .as_str()?
+            .parse::<u64>()
+            .ok()
+            .filter(|h| *h > 0)
+    }
+
+    /// Check that `root` is the chain's state after block `height`, and recent; return the
+    /// height of the header found to carry it (the value proven is the chain's state as of that
+    /// header, the state after the block before it).
+    ///
+    /// A header at `H + 1` carries the app hash from after block `H`. The node leaves its state,
+    /// and so its app hash, unchanged in a block without transactions, and the API serves as a
+    /// proof's height the last block with transactions, so the same app hash is in every header
+    /// from `H + 1` up to the next block with transactions. With `L` the chain's latest height
+    /// ([`Self::latest_chain_height`]) and `lag` the config's `max_proof_lag_blocks`:
+    ///
+    /// - the header at `height + 1` ([`Self::app_hash_after`]) must carry `root`, or this is
+    ///   [`WillowError::ProofVerificationFailed`];
+    /// - when `L - height` is at most `lag`, that header's height is returned;
+    /// - otherwise the state is older than the lag, and is accepted only if the chain still
+    ///   holds it: the latest header's height is returned if it carries `root`, else the oldest
+    ///   header within the lag (at `L - lag + 1`) if it does;
+    /// - else, or when `height` is more than `lag` ahead of `L`, this is
+    ///   [`WillowError::ProofHeightOutOfRange`]: a stale state (the proof may be genuine).
+    pub async fn verify_root_after(&self, root: &[u8], height: u64) -> Result<u64> {
+        let lag = self.config.max_proof_lag_blocks;
+        let latest = self.latest_chain_height().await?;
+        if height > latest && height - latest > lag {
+            return Err(WillowError::ProofHeightOutOfRange(format!(
+                "the proof is of the state after block {height}, {} blocks ahead of the chain's \
+                 latest height {latest}; at most {lag} is accepted (max_proof_lag_blocks)",
+                height - latest
+            )));
+        }
+        let next = height
+            .checked_add(1)
+            .ok_or_else(|| WillowError::LightClient(format!("no block after height {height}")))?;
+        let carried = self.app_hash_after(height).await?;
+        if carried.as_slice() != root {
+            return Err(WillowError::ProofVerificationFailed(format!(
+                "Root hash mismatch: the proof computes {} but the header after block {height} \
+                 has app hash {}",
+                hex::encode(root),
+                hex::encode(&carried)
+            )));
+        }
+        if latest.saturating_sub(height) <= lag {
+            return Ok(next);
+        }
+        // Older than the lag. A header G is within it when `L - (G - 1) <= lag`, from
+        // `L - lag + 1` up (none when `lag` is 0). Each app hash is in one run of consecutive
+        // headers starting at `next`, so a header within the lag carries it only if the oldest
+        // one does.
+        if lag > 0 {
+            for header in [latest, latest - lag + 1] {
+                if self.app_hash_at(header).await?.as_slice() == root {
+                    return Ok(header);
+                }
+            }
+        }
+        Err(WillowError::ProofHeightOutOfRange(format!(
+            "the proof is of the state after block {height}, {} blocks behind the chain's latest \
+             height {latest}, and the chain has changed it since: no header within {lag} blocks \
+             carries its root (max_proof_lag_blocks)",
+            latest - height
+        )))
+    }
+
     /// The `app_hash` of the header at exactly `height`, from `endpoint`'s `/commit`.
     async fn fetch_app_hash_at(&self, endpoint: &str, height: u64) -> Option<Vec<u8>> {
         let url = format!(
@@ -923,6 +1073,10 @@ impl LightClient {
     /// in the subtree at `path` whose bytes are `value`, and that the root it computes is
     /// [`Self::app_hash_after`]`(height)`. Returns that root. See
     /// [`crate::grovedb_envelope::verify_item_at_path`] for what passes.
+    ///
+    /// This checks the value as of `height`, however old: it doesn't refuse a state the chain
+    /// has since changed. When whoever served the proof chose `height`, check the root with
+    /// [`Self::verify_root_after`] instead, as `data().get` does.
     #[cfg(not(feature = "no-light-client"))]
     pub async fn verify_item(
         &self,

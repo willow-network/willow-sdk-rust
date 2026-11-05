@@ -82,6 +82,17 @@ pub struct HistoricalQueryResponse {
     pub error: Option<String>,
 }
 
+/// A value [`DataOperations::get_verified`] verified, and the height it is proven at.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VerifiedValue {
+    /// The value its proof binds at the key.
+    pub value: Value,
+    /// The height of the CometBFT header whose app hash the proof's root is: the value is the
+    /// chain's state as of that header (the state after block `height - 1`), not necessarily
+    /// as of now.
+    pub height: u64,
+}
+
 /// Data operations
 pub struct DataOperations {
     client: WillowClient,
@@ -92,7 +103,14 @@ impl DataOperations {
         Self { client }
     }
 
-    /// Get a single item from a subgrove, verified.
+    /// Get a single item from a subgrove, verified: [`Self::get_verified`]'s value.
+    pub async fn get(&self, subgrove_id: &str, key: &str) -> Result<Value> {
+        self.get_verified(subgrove_id, key)
+            .await
+            .map(|verified| verified.value)
+    }
+
+    /// Get a single item from a subgrove, verified, with the height it is proven at.
     ///
     /// Reads the value (`GET /data/{subgrove}/{key}`) and its proof (`GET /proof/{subgrove}/{key}`),
     /// and returns the value only when:
@@ -102,15 +120,22 @@ impl DataOperations {
     ///   ([`crate::grovedb_envelope::verify_item_at_path`]), and that item is the value served;
     /// - the root the proof computes is the app hash of the CometBFT header at the proof's
     ///   height plus one (the state after block `height` is committed in the next block's
-    ///   header), as the light client gives it from the consensus RPC, not from the API that
-    ///   served the proof.
+    ///   header), as the light client gives it from its validator endpoints;
+    /// - the state is recent: the API chooses the height it proves at, so a state more than the
+    ///   light client's `max_proof_lag_blocks` (default 20) behind the chain's latest height is
+    ///   refused as [`WillowError::ProofHeightOutOfRange`] unless a header within that lag still
+    ///   carries the same root (a chain with no transactions since keeps its app hash), as is a
+    ///   height that far ahead ([`crate::light_client::LightClient::verify_root_after`]).
     ///
-    /// A missing proof or height, another value, another root, or a header the light client can't
-    /// get is a [`WillowError::ProofVerificationFailed`] (or a light-client error): nothing is
-    /// returned unverified. A key the API reports missing is [`WillowError::NotFound`], unproven.
-    /// Built with `no-light-client`, this returns [`WillowError::Unsupported`]; use
-    /// [`Self::get_unverified`].
-    pub async fn get(&self, subgrove_id: &str, key: &str) -> Result<Value> {
+    /// The returned height is that of the header found to carry the root: the value is the
+    /// chain's state as of that header, and may have changed since.
+    ///
+    /// A missing proof or height, another value, or another root is a
+    /// [`WillowError::ProofVerificationFailed`], and a header the light client can't get a
+    /// light-client error: nothing is returned unverified. A key the API reports missing is
+    /// [`WillowError::NotFound`], unproven. Built with `no-light-client`, this returns
+    /// [`WillowError::Unsupported`]; use [`Self::get_unverified`].
+    pub async fn get_verified(&self, subgrove_id: &str, key: &str) -> Result<VerifiedValue> {
         self.ensure_authenticated()?;
 
         let data_response: ApiResponse<Value> = self
@@ -177,16 +202,11 @@ impl DataOperations {
             }
 
             let light_client = self.client.get_or_create_light_client().await?;
-            let trusted = light_client.app_hash_after(height).await?;
-            if root.as_slice() != trusted.as_slice() {
-                return Err(fail(format!(
-                    "Root hash mismatch: the proof computes {} but the header after block {height} \
-                     has app hash {}",
-                    hex::encode(root),
-                    hex::encode(&trusted)
-                )));
-            }
-            Ok(proven)
+            let height = light_client.verify_root_after(&root, height).await?;
+            Ok(VerifiedValue {
+                value: proven,
+                height,
+            })
         }
 
         #[cfg(feature = "no-light-client")]
@@ -539,8 +559,26 @@ mod tests {
         }
 
         /// An API serving `served` at the key with `proof`, and a CometBFT RPC whose header at
-        /// HEIGHT + 1 has `app_hash` (and at HEIGHT, another).
+        /// HEIGHT + 1 has `app_hash` (and at HEIGHT, another), and whose latest height is
+        /// HEIGHT + 1.
         async fn chain(served: Value, proof: Value, app_hash: &[u8]) -> (MockServer, WillowClient) {
+            chain_with(
+                served,
+                proof,
+                &[(HEIGHT + 1, app_hash.to_vec()), (HEIGHT, vec![0xee; 32])],
+                HEIGHT + 1,
+            )
+            .await
+        }
+
+        /// An API serving `served` at the key with `proof`, and a CometBFT RPC with `headers`
+        /// (height, app hash) and `latest` as its latest height.
+        async fn chain_with(
+            served: Value,
+            proof: Value,
+            headers: &[(u64, Vec<u8>)],
+            latest: u64,
+        ) -> (MockServer, WillowClient) {
             let server = MockServer::start().await;
             Mock::given(method("GET"))
                 .and(path(format!("/data/{SG}/{KEY}")))
@@ -558,18 +596,22 @@ mod tests {
                 )
                 .mount(&server)
                 .await;
+            for (height, app_hash) in headers {
+                Mock::given(method("GET"))
+                    .and(path("/commit"))
+                    .and(query_param("height", height.to_string()))
+                    .respond_with(
+                        ResponseTemplate::new(200).set_body_json(commit(*height, app_hash)),
+                    )
+                    .mount(&server)
+                    .await;
+            }
             Mock::given(method("GET"))
-                .and(path("/commit"))
-                .and(query_param("height", (HEIGHT + 1).to_string()))
-                .respond_with(
-                    ResponseTemplate::new(200).set_body_json(commit(HEIGHT + 1, app_hash)),
-                )
-                .mount(&server)
-                .await;
-            Mock::given(method("GET"))
-                .and(path("/commit"))
-                .and(query_param("height", HEIGHT.to_string()))
-                .respond_with(ResponseTemplate::new(200).set_body_json(commit(HEIGHT, &[0xee; 32])))
+                .and(path("/status"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "jsonrpc": "2.0", "id": -1,
+                    "result": {"sync_info": {"latest_block_height": latest.to_string()}}
+                })))
                 .mount(&server)
                 .await;
             let client = WillowClient::builder()
@@ -663,6 +705,95 @@ mod tests {
             // No header after the proof's block.
             let (_s, client) = chain(value(), proof_body(&proof, json!(HEIGHT + 5)), &root).await;
             refused(client.data().get(SG, KEY).await);
+        }
+
+        #[tokio::test]
+        async fn get_verified_gives_the_height_of_the_header_that_carries_the_root() {
+            let (proof, root) = honest();
+            let (_s, client) = chain(value(), proof_body(&proof, json!(HEIGHT)), &root).await;
+            assert_eq!(
+                client.data().get_verified(SG, KEY).await.unwrap(),
+                VerifiedValue {
+                    value: value(),
+                    height: HEIGHT + 1
+                }
+            );
+        }
+
+        /// The API chooses the height it proves at: a state more than 20 blocks (the default
+        /// lag) behind the latest is refused as out of range unless a header within the lag
+        /// still carries its root.
+        #[tokio::test]
+        async fn a_stale_proof_is_refused_unless_the_chain_still_holds_its_state() {
+            let (proof, root) = honest();
+            let root = root.to_vec();
+            let other = vec![0x22; 32];
+            let latest = HEIGHT + 30;
+            let oldest_recent = latest - 20 + 1;
+            let get = |headers: Vec<(u64, Vec<u8>)>, latest: u64| {
+                let proof = proof.clone();
+                async move {
+                    let (_s, client) =
+                        chain_with(value(), proof_body(&proof, json!(HEIGHT)), &headers, latest)
+                            .await;
+                    client.data().get_verified(SG, KEY).await
+                }
+            };
+
+            // The chain has changed the state since: stale, though the proof is genuine.
+            let stale = get(
+                vec![
+                    (HEIGHT + 1, root.clone()),
+                    (oldest_recent, other.clone()),
+                    (latest, other.clone()),
+                ],
+                latest,
+            )
+            .await;
+            assert!(
+                matches!(stale, Err(WillowError::ProofHeightOutOfRange(_))),
+                "{stale:?}"
+            );
+
+            // No transactions since: the latest header still carries the root.
+            let held = get(
+                vec![(HEIGHT + 1, root.clone()), (latest, root.clone())],
+                latest,
+            )
+            .await
+            .unwrap();
+            assert_eq!(held.height, latest);
+
+            // Changed within the lag: the oldest header within it still carries the root.
+            let recent = get(
+                vec![
+                    (HEIGHT + 1, root.clone()),
+                    (oldest_recent, root.clone()),
+                    (latest, other.clone()),
+                ],
+                latest,
+            )
+            .await
+            .unwrap();
+            assert_eq!(recent.height, oldest_recent);
+
+            // A root the header after the proof's block doesn't carry is forged, not stale.
+            let forged = get(
+                vec![(HEIGHT + 1, other.clone()), (latest, root.clone())],
+                latest,
+            )
+            .await;
+            assert!(
+                matches!(forged, Err(WillowError::ProofVerificationFailed(_))),
+                "{forged:?}"
+            );
+
+            // A height more than the lag ahead of the latest.
+            let ahead = get(vec![(HEIGHT + 1, root.clone())], HEIGHT - 25).await;
+            assert!(
+                matches!(ahead, Err(WillowError::ProofHeightOutOfRange(_))),
+                "{ahead:?}"
+            );
         }
 
         #[tokio::test]

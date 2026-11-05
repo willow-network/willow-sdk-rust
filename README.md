@@ -94,6 +94,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 A read is presented as verified only when a proof binds that exact data at the GroveDB path and key asked, against a root that doesn't come from the response itself.
 
 - **`data().get(subgrove, key)`** reads the value and its proof, and returns the value only when the proof proves an Item at `key` in the subgrove's data tree (`[subgroves, subgrove, data]`) whose bytes are the value served, and the root it computes is the `app_hash` of the CometBFT header at the proof's height + 1 (the state after block `H` is committed in block `H + 1`'s header). The header comes from the light client's validator endpoints: the consensus URL when one is set, never the API that served the proof. A missing proof or height, another value, another root, or no header is an error; nothing is returned unverified. A key the API reports missing is `NotFound`, unproven.
+- **Recency**: the API chooses the height it proves at, so `data().get` refuses a state more than `max_proof_lag_blocks` (default 20, on `LightClientConfig`) behind the chain's latest height (the endpoints' CometBFT `/status`), unless a header within that lag still carries the same root (a block without transactions leaves the app hash unchanged, so an idle chain's old state is still its state); it refuses a height that far ahead too. Both are `WillowError::ProofHeightOutOfRange`, distinct from a forged proof's `ProofVerificationFailed`. `data().get_verified` returns the value with the height of the header found to carry its root (`VerifiedValue { value, height }`): the value is the chain's state as of that header, not necessarily as of now. The light client's `verify_item` checks a proof at the height you pass, however old; `LightClient::verify_root_after` applies the recency rule.
 - **Proof checks** refuse what grovedb 3.1.0's verifier alone accepts: a proof that doesn't descend the asked path, children attached under an opaque `Hash` node (a forged subtree that still hashes to the real root), an item whose value its root doesn't bind (a `KVValueHash` node carries only the value's hash into the root), and a lone root hash (`Push(Hash(root))`). They also refuse an element of exactly 63 bytes (an Item with a 60-byte value and no flags) outside a subgrove's data tree, since a proof can't tell its `KV` node from a subtree's or a reference's; a subgrove's data tree (`[subgroves, <id>, data]`), which holds only Items, accepts it. Before grovedb (whose 3.1.0 decoder trusts the lengths it reads) sees a proof, the SDK bounds-checks its encoding without recursion (every length within the bytes left, at most 64 levels of nesting and 1024 layers, at most 32 MiB) and decodes every node value as an element within its 64 KiB bound, so a hostile proof is refused rather than crashing the process. `ProofVerifier::verify_item_at_path` and `verify_item_against_root`, and the light client's `verify_item`, check a proof for an Item at a path and key with a given value. The path-less `verify_query_proof`, `verify_item_proof`, `verify_against_root`, and the light client's `verify_proof` are deprecated and refuse.
 - **The light client** takes headers as its endpoints serve them, trusting the first: its commit-signature check does not yet follow CometBFT's canonical vote encoding, so it does not check 2/3+ of the validators' signatures. Configure endpoints you trust.
 - **Unverified**: `data().query` and `query_historical_verified` refuse (`WillowError::Unsupported`), since the API serves a query's documents without their keys and a historical answer without the indexer's proof, and the checkpoint root comes from the same API. `query_unverified`, `query_historical`, `sql`, and GraphQL return their answers unverified, as do `get_root_hash` and `get_root_hash_local` (the API's word).
@@ -119,6 +120,7 @@ let light_client_config = LightClientConfig::builder("willow-mainnet")
     .trust_threshold(2, 3)  // 2/3+ validator signatures required
     .trusting_period(Duration::from_secs(86400))  // 24 hours
     .max_clock_drift(Duration::from_secs(10))
+    .max_proof_lag_blocks(20)  // Refuse a verified read's state older than this
     .auto_sync(true)  // Sync to latest on creation
     .build();
 
@@ -447,6 +449,10 @@ match client.data().get("subgrove", "dataset", "key").await {
     Err(WillowError::ProofVerificationFailed(msg)) => {
         // The proof doesn't bind the value served, or its root isn't the chain's
         eprintln!("Proof verification failed: {}", msg);
+    }
+    Err(WillowError::ProofHeightOutOfRange(msg)) => {
+        // A genuine proof of a state the chain has since changed: read again
+        println!("Stale answer: {}", msg);
     }
     Err(WillowError::Unsupported(msg)) => println!("Can't verify this read: {}", msg),
     Err(WillowError::NonceWindowFull(msg)) => println!("Wait for writes to land: {}", msg),
