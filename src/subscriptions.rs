@@ -54,8 +54,8 @@ use url::Url;
 /// Which backend to open the subscription WebSocket against.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SubscribeSource {
-    /// `{apiUrl}/graphql/ws` — consensus-verified chain-tip events
-    /// (`BlockFinalized`). This is the default.
+    /// `{apiUrl}/graphql/ws` — chain-tip events (`BlockFinalized`), as the API serves them;
+    /// the SDK verifies nothing in a subscription. This is the default.
     Validator,
     /// `{indexer.query_endpoint}/graphql/ws` selected via discovery (or
     /// the explicit `indexer_url` override). Useful for `VerifyOnly`
@@ -469,9 +469,10 @@ async fn handshake(
         "graphql-transport-ws".parse().unwrap(),
     );
 
-    let (mut ws_stream, _) = tokio_tungstenite::connect_async(request)
-        .await
-        .map_err(|e| WillowError::Custom(format!("WebSocket connect failed: {}", e)))?;
+    let (mut ws_stream, _) =
+        tokio_tungstenite::connect_async_with_config(request, Some(websocket_config()), false)
+            .await
+            .map_err(|e| WillowError::Custom(format!("WebSocket connect failed: {}", e)))?;
 
     // connection_init
     let init = serde_json::json!({
@@ -505,6 +506,11 @@ async fn handshake(
             _ => continue,
         };
 
+        if crate::http_body::check_json(text.as_bytes(), crate::http_body::JsonBudget::Full)
+            .is_err()
+        {
+            continue;
+        }
         let Ok(msg) = serde_json::from_str::<serde_json::Value>(&text) else {
             continue;
         };
@@ -581,11 +587,18 @@ async fn pump_socket(stream: WsStream, state: &mut TaskState) -> PumpExit {
                     }
                     _ => continue,
                 };
-                let Ok(msg) = serde_json::from_str::<serde_json::Value>(&text) else {
+                // An event holding more JSON than the SDK decodes is dropped, as an
+                // unparseable one is.
+                if crate::http_body::check_json(text.as_bytes(), crate::http_body::JsonBudget::Full)
+                    .is_err()
+                {
+                    continue;
+                }
+                let Ok(mut msg) = serde_json::from_str::<serde_json::Value>(&text) else {
                     continue;
                 };
-                let msg_type = msg.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                match msg_type {
+                let msg_type = msg.get("type").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                match msg_type.as_str() {
                     "next" => {
                         if msg.get("id").and_then(|v| v.as_str())
                             != Some(state.sub_id.as_str())
@@ -593,8 +606,8 @@ async fn pump_socket(stream: WsStream, state: &mut TaskState) -> PumpExit {
                             continue;
                         }
                         let payload = msg
-                            .get("payload")
-                            .cloned()
+                            .get_mut("payload")
+                            .map(serde_json::Value::take)
                             .unwrap_or(serde_json::Value::Null);
                         let parsed: SubscriptionPayload = serde_json::from_value(payload)
                             .unwrap_or(SubscriptionPayload {
@@ -748,5 +761,74 @@ mod tests {
                 outcome.map(|r| r.map(|_| ()))
             );
         }
+    }
+
+    /// A message past `MAX_SUBSCRIPTION_MESSAGE` ends the connection rather than being read
+    /// and decoded: tungstenite's default would take 64 MiB.
+    #[tokio::test]
+    async fn a_message_past_the_cap_is_not_read() {
+        use futures_util::SinkExt;
+        use tokio::net::TcpListener;
+        use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_hdr_async(
+                socket,
+                |_: &Request, mut response: Response| {
+                    response.headers_mut().insert(
+                        "Sec-WebSocket-Protocol",
+                        "graphql-transport-ws".parse().unwrap(),
+                    );
+                    Ok(response)
+                },
+            )
+            .await
+            .unwrap();
+            let big = format!(
+                r#"{{"type":"ka","pad":"{}"}}"#,
+                "a".repeat(2 * MAX_SUBSCRIPTION_MESSAGE)
+            );
+            let _ = ws.send(Message::Text(big)).await;
+            let _ = ws
+                .send(Message::Text(r#"{"type":"connection_ack"}"#.into()))
+                .await;
+            std::future::pending::<()>().await;
+        });
+        let client = crate::WillowClient::builder()
+            .api_url(&format!("http://{addr}"))
+            .timeout(Duration::from_secs(5))
+            .build()
+            .await
+            .unwrap();
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(10),
+            client.subscriptions().subscribe(
+                "sg",
+                "subscription { blockFinalized { height } }",
+                SubscribeOptions::default(),
+            ),
+        )
+        .await;
+        server.abort();
+        assert!(
+            matches!(outcome, Ok(Err(_))),
+            "{:?}",
+            outcome.map(|r| r.map(|_| ()))
+        );
+    }
+}
+
+/// The most a subscription message or frame may hold (1 MiB): an event is a block's or an
+/// entity's summary, a few KiB; tungstenite's default is 64 MiB, which a hostile server could
+/// fill with JSON that decodes to many times that, for each of the 64 events queued.
+pub const MAX_SUBSCRIPTION_MESSAGE: usize = 1 << 20;
+
+fn websocket_config() -> tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
+    tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
+        max_message_size: Some(MAX_SUBSCRIPTION_MESSAGE),
+        max_frame_size: Some(MAX_SUBSCRIPTION_MESSAGE),
+        ..Default::default()
     }
 }
