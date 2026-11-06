@@ -65,13 +65,13 @@ pub struct HistoricalQueryResponse {
     /// Provider endpoint
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_endpoint: Option<String>,
-    /// Checkpoint state root for proof verification
+    /// The checkpoint's state root as its indexer submitted it (not necessarily a data root)
     pub state_root: String,
     /// Block range covered by the checkpoint
     pub block_range: (u64, u64),
     /// Query results from the indexer
     pub data: Value,
-    /// Optional Merkle proof
+    /// The provider's GroveDB proof (hex) of its own store, not checked against the checkpoint
     #[serde(skip_serializing_if = "Option::is_none")]
     pub proof: Option<String>,
     /// Whether this data can be re-indexed (only set on error)
@@ -414,10 +414,13 @@ impl DataOperations {
     /// Query historical indexed data from a checkpoint, unverified.
     ///
     /// This method queries historical data from indexer nodes that have preserved
-    /// checkpoint data, through the API. The answer is not verified: the API's historical query
-    /// passes on no proof of the indexer's answer, and the checkpoint state root it is compared
-    /// with comes from the same API ([`Self::get_checkpoint_state_root`]). A response whose state
-    /// root differs from that checkpoint's is refused as inconsistent.
+    /// checkpoint data, through the API. The answer is not verified: the API passes the
+    /// provider's proof through (`proof`, hex) without checking it against the checkpoint, and
+    /// nothing requires the checkpoint's state root to commit to the provider's store (the
+    /// reference indexer's is a SHA-256 of the subgrove id, block range, and entity count, not a
+    /// root of the data). The state root it is compared with comes from the same API
+    /// ([`Self::get_checkpoint_state_root`]); a response whose state root differs from that
+    /// checkpoint's is refused as inconsistent.
     ///
     /// # Arguments
     ///
@@ -500,12 +503,14 @@ impl DataOperations {
 
     /// Not supported: always [`WillowError::Unsupported`], with nothing sent.
     ///
-    /// The node's historical query passes on no proof of the indexer's answer, and the
-    /// checkpoint state root it would be checked against comes from the same API, not from a
-    /// root the SDK trusts. Use [`Self::query_historical`] for the answer unverified.
+    /// The API passes the provider's proof through without checking it against the
+    /// checkpoint, and nothing requires the checkpoint's state root to commit to the provider's
+    /// store, so the proof shows nothing about the checkpoint. Use [`Self::query_historical`]
+    /// for the answer unverified.
     #[deprecated(
-        note = "a historical answer can't be verified: no proof binds it, and the checkpoint root \
-                comes from the same API; use query_historical for it unverified"
+        note = "a historical answer can't be verified: the API doesn't check the provider's \
+                proof against the checkpoint, and nothing requires the checkpoint root to commit \
+                to the provider's store; use query_historical for it unverified"
     )]
     pub async fn query_historical_verified(
         &self,
@@ -515,9 +520,9 @@ impl DataOperations {
     ) -> Result<HistoricalQueryResponse> {
         let _ = (subgrove_id, checkpoint_id, query);
         Err(WillowError::Unsupported(
-            "a historical answer can't be verified: the node passes on no proof of it, and the \
-             checkpoint state root comes from the same API; use query_historical for it \
-             unverified"
+            "a historical answer can't be verified: the API passes the provider's proof through \
+             without checking it against the checkpoint, and nothing requires the checkpoint's \
+             state root to commit to the provider's store; use query_historical for it unverified"
                 .to_string(),
         ))
     }
@@ -833,7 +838,12 @@ mod tests {
                     },
                 )
                 .await;
-            assert!(matches!(historical, Err(WillowError::Unsupported(_))));
+            assert!(matches!(
+                historical,
+                Err(WillowError::Unsupported(ref m))
+                    if m.contains("without checking it against the checkpoint")
+                        && m.contains("nothing requires the checkpoint's state root to commit")
+            ));
             assert_eq!(server.received_requests().await.unwrap().len(), before);
         }
 
