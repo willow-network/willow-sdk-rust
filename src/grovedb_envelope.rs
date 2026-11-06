@@ -54,13 +54,12 @@ pub const MAX_LAYERS: usize = 1024;
 /// The largest proof envelope accepted, in bytes: 1 MiB.
 ///
 /// The proofs the SDK verifies prove one key: the API's `/proof` and the verifiable RPC's entity
-/// proofs are single-key queries. Each layer of one carries the queried node, whose value
-/// grovedb-merk 3.1.0 encodes with a u16 length (so under 64 KiB), and the hashes on the path
-/// to it, about 70 bytes a level (a few KiB for a tree of billions of keys), over a path of
-/// four or five layers: an honest proof is under 400 KiB even with a 64 KiB node in every
-/// layer, and a few KiB with small values. The cap bounds what a hostile proof costs to check,
-/// here and in grovedb, which holds every node a layer pushes until its ops fold them: at
-/// 1 MiB, about 90,000 nodes and some tens of MiB.
+/// proofs are single-key queries. Each layer of one carries the queried node and the hashes on
+/// the path to it, about 70 bytes a level (a few KiB for a tree of billions of keys), over a
+/// path of four or five layers. Only the queried item's node is large: the chain stores values
+/// of up to 512 KiB, so an honest proof is under 600 KiB, and a few KiB with small values. The
+/// cap bounds what a hostile proof costs to check, here and in grovedb, which holds every node
+/// a layer pushes until its ops fold them: at 1 MiB, about 90,000 nodes and some tens of MiB.
 pub const MAX_PROOF_BYTES: usize = 1 << 20;
 
 // The API's `/proof` answer carries a proof in hex, twice its length; its body cap holds that.
@@ -72,8 +71,10 @@ const _: () = assert!(crate::http_body::PROOF >= 2 * MAX_PROOF_BYTES + (16 << 10
 const ENVELOPE_DECODE_LIMIT: usize =
     MAX_PROOF_BYTES + MAX_LAYERS * std::mem::size_of::<(Vec<u8>, LayerProof)>();
 
-/// The largest merk node value: its length is a u16.
-const MAX_ELEMENT_BYTES: usize = u16::MAX as usize;
+/// The largest merk node value accepted. A node value's length is a u16 under grovedb 3.1.0's
+/// ops and a u32 under the large-value ops (0x20..=0x23, 0x28..=0x2b) that the Willow GroveDB
+/// fork writes for values of 64 KiB or more; either way a value lies inside the envelope.
+const MAX_ELEMENT_BYTES: usize = MAX_PROOF_BYTES;
 
 /// The length of an element a proof can't tell from a subtree or a reference. A node's value
 /// hash is blake3 over the value's length (a varint) and the value; a subtree's or a
@@ -270,9 +271,12 @@ fn decode_envelope(proof: &[u8]) -> Result<GroveDBProofV0> {
     Ok(v0)
 }
 
-/// A merk node's value as the GroveDB element it encodes, decoded within the value's own size
-/// bound. grovedb decodes the values it reads with no limit, so a value that claims more than
-/// it holds is refused here before grovedb sees it.
+/// A merk node's value as the GroveDB element it encodes, decoded within a bound proportional
+/// to the value's own size. bincode resizes (zeroes) a byte string to its claimed length before
+/// reading it, so a fixed bound would let every few bytes of a hostile value force a large
+/// allocation. The claim limit is the smallest power of two at least 32 times the value's
+/// length (at least 1 KiB): bincode claims `len * size_of::<T>()` for a container, 24 bytes for
+/// each reference path segment, which takes as little as 1 serialized byte.
 fn decode_element(value: &[u8]) -> Result<Element> {
     if value.len() > MAX_ELEMENT_BYTES {
         return Err(WillowError::ProofVerificationFailed(format!(
@@ -280,10 +284,23 @@ fn decode_element(value: &[u8]) -> Result<Element> {
             value.len()
         )));
     }
-    let config = bincode2::config::standard()
-        .with_big_endian()
-        .with_limit::<MAX_ELEMENT_BYTES>();
-    bincode2::decode_from_slice::<Element, _>(value, config)
+    macro_rules! decode_in_class {
+        ($class:expr, $($bits:literal)*) => {
+            match $class {
+                $(
+                    c if c == 1usize << $bits => bincode2::decode_from_slice::<Element, _>(
+                        value,
+                        bincode2::config::standard()
+                            .with_big_endian()
+                            .with_limit::<{ 1usize << $bits }>(),
+                    ),
+                )*
+                _ => Err(bincode2::error::DecodeError::LimitExceeded),
+            }
+        };
+    }
+    let class = (value.len() * 32).max(1 << 10).next_power_of_two();
+    decode_in_class!(class, 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25)
         .map(|(element, _)| element)
         .map_err(|e| {
             WillowError::ProofVerificationFailed(format!(
@@ -617,11 +634,14 @@ mod tests {
         let mut forged = f.proof.clone();
         let i = last_index_of(&forged, &f.path[0]);
         forged[i] ^= 0x01;
-        // grovedb alone accepts it: same root, result gone.
+        // grovedb 3.1.0 alone accepts it (the fork's `_v310` rules): same root, result gone.
         let pq = PathQuery::new_unsized(f.path.clone(), Query::new_single_key(f.key.clone()));
-        let (root, items) = GroveDb::verify_query(&forged, &pq, GroveVersion::latest()).unwrap();
+        let (root, items) =
+            GroveDb::verify_query_v310(&forged, &pq, GroveVersion::latest()).unwrap();
         assert_eq!(root, f.root);
         assert!(items.iter().all(|(_, _, e)| e.is_none()));
+        // The fork's strict verify_query refuses it too.
+        assert!(GroveDb::verify_query(&forged, &pq, GroveVersion::latest()).is_err());
         // With the envelope check it is refused.
         let err = verify(&forged, &f.path, &f.key).unwrap_err().to_string();
         assert!(err.contains("does not descend"), "{err}");
@@ -689,6 +709,16 @@ mod tests {
         (root, items.pop().and_then(|(_, _, e)| e))
     }
 
+    /// The same under grovedb 3.1.0's rules (the fork's `verify_query_v310`), which accept the
+    /// in-layer forgeries below; and whether the fork's strict `verify_query` refuses `proof`.
+    fn grovedb_v310_alone(f: &Fixture, proof: &[u8]) -> ([u8; 32], Option<Element>, bool) {
+        let pq = PathQuery::new_unsized(f.path.clone(), Query::new_single_key(f.key.clone()));
+        let v = GroveVersion::latest();
+        let (root, mut items) = GroveDb::verify_query_v310(proof, &pq, v).unwrap();
+        let strict_refuses = GroveDb::verify_query(proof, &pq, v).is_err();
+        (root, items.pop().and_then(|(_, _, e)| e), strict_refuses)
+    }
+
     #[test]
     fn an_honest_proof_binds_its_item_at_the_path_and_key() {
         let f = fixture();
@@ -754,10 +784,12 @@ mod tests {
                 Op::Child,
             ];
         });
-        // grovedb alone accepts it: the real root, and the forged item as the answer.
-        let (root, element) = grovedb_alone(&f, &forged);
+        // grovedb 3.1.0 alone accepts it: the real root, and the forged item as the answer. The
+        // fork's strict verify_query refuses it.
+        let (root, element, strict_refuses) = grovedb_v310_alone(&f, &forged);
         assert_eq!(root, f.root);
         assert_eq!(element, Some(Element::Item(b"forged".to_vec(), None)));
+        assert!(strict_refuses);
         // Refused before verifying.
         let err = verify_item_at_path(&forged, &f.path, &f.key)
             .unwrap_err()
@@ -782,9 +814,10 @@ mod tests {
                 }
             }
         });
-        let (root, element) = grovedb_alone(&f, &forged);
+        let (root, element, strict_refuses) = grovedb_v310_alone(&f, &forged);
         assert_eq!(root, f.root);
         assert_eq!(element, Some(Element::Item(b"forged".to_vec(), None)));
+        assert!(strict_refuses);
         let err = verify_item_at_path(&forged, &f.path, &f.key)
             .unwrap_err()
             .to_string();
@@ -1227,6 +1260,80 @@ mod hostile_proofs {
             "{held} bytes held for {} bytes of ops",
             pushes.len()
         );
+    }
+
+    /// A value of six bytes claiming a 67,108,863-byte item: decoded under a limit proportional
+    /// to its length, it is refused without the allocation, however many nodes carry it.
+    #[test]
+    fn lying_element_lengths_cost_no_large_allocations() {
+        let bomb = vec![0x00u8, 0xFC, 0x03, 0xF0, 0x00, 0x00];
+        let ops: Vec<Op> = (0..50u32)
+            .map(|i| {
+                Op::Push(Node::KVValueHash(
+                    i.to_be_bytes().to_vec(),
+                    bomb.clone(),
+                    [0; 32],
+                ))
+            })
+            .collect();
+        let v0 = GroveDBProofV0 {
+            root_layer: LayerProof {
+                merk_proof: encode_ops(&ops),
+                lower_layers: Default::default(),
+            },
+            prove_options: ProveOptions::default(),
+        };
+        let config = bincode2::config::standard().with_big_endian();
+        let proof = bincode2::encode_to_vec(GroveDBProof::V0(v0), config).unwrap();
+        let started = std::time::Instant::now();
+        let err = check_layers(&proof).unwrap_err().to_string();
+        assert!(err.contains("not an element"), "{err}");
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    /// Real proofs from the Willow GroveDB fork's prover: a 70,000-byte item, whose merk op is a
+    /// large-value op (0x20, u32 length), and a 65,530-byte item, whose 65,535-byte merk value
+    /// is the largest a grovedb 3.1.0 op (0x03, u16 length) carries.
+    #[test]
+    fn real_large_and_small_value_proofs_verify() {
+        for (fixture, opcode) in [
+            (
+                include_str!("../tests/fixtures/grovedb/large_value_item.json"),
+                0x20u8,
+            ),
+            (
+                include_str!("../tests/fixtures/grovedb/small_value_item.json"),
+                0x03,
+            ),
+        ] {
+            let f: serde_json::Value = serde_json::from_str(fixture).unwrap();
+            assert_eq!(f["item_opcode"].as_u64(), Some(opcode as u64));
+            let proof = hex::decode(f["proof_hex"].as_str().unwrap()).unwrap();
+            let path: Vec<Vec<u8>> = f["path"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|s| s.as_str().unwrap().as_bytes().to_vec())
+                .collect();
+            let key = f["key"].as_str().unwrap().as_bytes();
+            let len = f["value_len"].as_u64().unwrap() as usize;
+
+            let v0 = decode_envelope(&proof).unwrap();
+            let layer = layer_at_path(&v0, &path).unwrap();
+            let mut needle = vec![opcode, key.len() as u8];
+            needle.extend_from_slice(key);
+            assert!(layer
+                .merk_proof
+                .windows(needle.len())
+                .any(|w| w == needle.as_slice()));
+
+            check_envelope(&proof, &path).unwrap();
+            check_layers(&proof).unwrap();
+            let (root, bytes) = verify_item_at_path(&proof, &path, key).unwrap();
+            assert_eq!(hex::encode(root), f["expected_root_hex"].as_str().unwrap());
+            let expected: Vec<u8> = (0..len).map(|i| ((i * 7 + 3) % 256) as u8).collect();
+            assert_eq!(bytes, expected);
+        }
     }
 }
 

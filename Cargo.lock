@@ -2294,8 +2294,7 @@ dependencies = [
 [[package]]
 name = "grovedb"
 version = "3.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f12b2378c5eda5b7cadceb34fc6e0a8fd87fe03fc04841a7d32a74ff73ccef71"
+source = "git+https://github.com/willow-network/grovedb?rev=583d4b8c61be85d49d6215eec87307d74ba046e1#583d4b8c61be85d49d6215eec87307d74ba046e1"
 dependencies = [
  "bincode 2.0.0-rc.3",
  "bincode_derive",
@@ -2316,8 +2315,7 @@ dependencies = [
 [[package]]
 name = "grovedb-costs"
 version = "3.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e74fafe53bf5ae27128799856e557ef5cb2d7109f1f7bc7f4440bbd0f97c7072"
+source = "git+https://github.com/willow-network/grovedb?rev=583d4b8c61be85d49d6215eec87307d74ba046e1#583d4b8c61be85d49d6215eec87307d74ba046e1"
 dependencies = [
  "integer-encoding",
  "intmap",
@@ -2327,8 +2325,7 @@ dependencies = [
 [[package]]
 name = "grovedb-merk"
 version = "3.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6dd6f733e9d5c15c98e05b68a2028e00b7f177baa51e8d8c1541102942a72b7"
+source = "git+https://github.com/willow-network/grovedb?rev=583d4b8c61be85d49d6215eec87307d74ba046e1#583d4b8c61be85d49d6215eec87307d74ba046e1"
 dependencies = [
  "bincode 2.0.0-rc.3",
  "bincode_derive",
@@ -2348,8 +2345,7 @@ dependencies = [
 [[package]]
 name = "grovedb-path"
 version = "3.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01f716520d6c6b0f25dc4a68bc7dded645826ed57d38a06a80716a487c09d23c"
+source = "git+https://github.com/willow-network/grovedb?rev=583d4b8c61be85d49d6215eec87307d74ba046e1#583d4b8c61be85d49d6215eec87307d74ba046e1"
 dependencies = [
  "hex",
 ]
@@ -2357,8 +2353,7 @@ dependencies = [
 [[package]]
 name = "grovedb-version"
 version = "3.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cdc855662f05f41b10dd022226cb78e345a33f35c390e25338d21dedd45966ae"
+source = "git+https://github.com/willow-network/grovedb?rev=583d4b8c61be85d49d6215eec87307d74ba046e1#583d4b8c61be85d49d6215eec87307d74ba046e1"
 dependencies = [
  "thiserror 2.0.17",
  "versioned-feature-core",
@@ -2367,8 +2362,7 @@ dependencies = [
 [[package]]
 name = "grovedb-visualize"
 version = "3.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34fa6f41c110d1d141bf912175f187ef51ac5d2a8f163dfd229be007461a548f"
+source = "git+https://github.com/willow-network/grovedb?rev=583d4b8c61be85d49d6215eec87307d74ba046e1#583d4b8c61be85d49d6215eec87307d74ba046e1"
 dependencies = [
  "hex",
  "itertools 0.14.0",
